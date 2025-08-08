@@ -12,6 +12,8 @@ Use the hierarchy Cat > Cart > Lex (lex with products then equalizers)
 TODO: What about assigning value to a Mor for which
 the signature has been provided?
 Provide signature and definition in the same line.
+It would be nonsensical to change the behaviour of the function at
+a later point.
 
 dummy ambients are used for skipping type checking.
 
