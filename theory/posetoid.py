@@ -1,4 +1,4 @@
-from .cell import Obj, Mor, Eq, Limit
+from ..ambient import Obj, Mor, Eq
 from .quiver import BasicQuiver
 
 class Posetoid:
@@ -7,12 +7,12 @@ class Posetoid:
     Rel: Obj
     source: Mor
     target: Mor
-    Path: Limit # Limit can be anonymous
+    Path: Obj # Limit can be anonymous
     ref: Mor # May include triangle
     trans: Mor
 
-    def __init__(self, theory):
-        th = theory.lex(self)
+    def __init__(self, ambient):
+        th = ambient.lex(self)
         c = th.compose
         p = th.pair
         th.sub('Q', BasicQuiver)
@@ -53,8 +53,8 @@ class Setoid:
     target: Mor
     sym: Mor
 
-    def __init__(self, theory):
-        th = theory.lex(self)
+    def __init__(self, ambient):
+        th = ambient.lex(self)
         p = th.pair
         th.sub('P', Posetoid)
         P = self.P
@@ -78,8 +78,8 @@ class Congruence:
     eq: Mor
     unique: Mor
 
-    def __init__(self, theory):
-        th = theory.lex(self)
+    def __init__(self, ambient):
+        th = ambient.lex(self)
         c = th.compose
         p = th.pair
         th.sub('S', Setoid)

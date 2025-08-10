@@ -1,4 +1,4 @@
-from .cell import Obj as MObj, Mor as MMor, Eq as MEq, Limit
+from ..ambient import Obj as MObj, Mor as MMor, Eq as MEq, Limit
 from .quiver import Quiver
 from .posetoid import Posetoid, Congruence
 
@@ -12,7 +12,7 @@ class Category:
     eq: MMor
     source: MMor
     target: MMor
-    Composable: Limit
+    Composable: MObj # Limit
     identity: MMor
     compose: MMor
 
@@ -20,7 +20,7 @@ class Category:
     right_identity_law: MMor
     associativity: MMor
 
-    ComposableEq: Limit
+    ComposableEq: MObj
 
     compose_eq: MMor
 
