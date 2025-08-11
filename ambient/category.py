@@ -445,7 +445,7 @@ def variadic(m):
 
 class Composer:
     @classmethod
-    def compose(cls, f: Mor | Unsourced | Eq, g: Mor | Unsourced | Eq) -> Mor | Unsourced | Eq:
+    def compose(cls, f: Mor | Unsourced | Eq | Obj, g: Mor | Unsourced | Eq | Obj) -> Mor | Unsourced | Eq:
         # No further type checking is or should be needed here.
         # Being Composable is the only requirement available for
         # type checking at the lang level.
@@ -459,6 +459,11 @@ class Composer:
         # and execution. Backend methods (source, target,
         # compose, etc.) handle type checking during execution.
         # They lack static type checking.
+
+        f, g = (
+            Category.identity(m) if isinstance(m, Obj) else m
+            for m in (f, g)
+        )
 
         # Unsourced, Eq comp is allowed but not Eq, Unsourced. 
         if isinstance(g, Unsourced):
@@ -495,7 +500,13 @@ class Composer:
     
 class Transer:
     @classmethod
-    def trans(cls, f: Eq, g: Eq) -> Eq:
+    def trans(cls, f: Eq | Mor | Obj, g: Eq | Mor | Obj) -> Eq:
+        # Handle identity
+        f, g = (
+            Category.ref(Category.identity(m)) if isinstance(m, Obj) else
+            (Category.ref(m) if isinstance(m, Mor) else m)
+            for m in (f, g)
+        )
         return cls.t_trans((f, g))
     
     @staticmethod
@@ -531,6 +542,8 @@ class Category:
             setattr(theory, name, Obj(name))
 
     def mor(self, theory, name, source: Mor | Obj, target: Mor | Obj, value=None, proof=None):
+        # TODO: Handle Sub as source and target in order to create
+        # natural transformations.
         # Morphisms with value can't be overridden by kw.
         # sub corresponds to a functor, so saying f = g h
         # and then F(f) = k is backwards, because F(f) is already
@@ -563,7 +576,13 @@ class Category:
                 name, source, target,
             ))
 
-    def eq(theory, name, ssource: Mor | Unsourced, starget: Mor | Unsourced, proof=None):
+    def eq(theory, name, ssource: Mor | Unsourced | Obj, starget: Mor | Unsourced | Obj, proof=None):
+        # TODO: Support equality of natural transformations.
+        ssource, starget = (
+            Category.identity(m) if isinstance(m, Obj) else m
+            for m in (ssource, starget)
+        )
+        
         if isinstance(ssource, Unsourced):
             if isinstance(starget, Unsourced):
                 raise Error    
@@ -812,3 +831,43 @@ class CheckedCategory:
 # verify the equality, as applying the morphisms will check
 # the source (so one does not need to check that the components
 # are actually of type Mor).
+
+# What about inductive type quiver?
+# Allow it implicitly. Recursive function is defined as copair.
+# This is especially required for monads.
+
+# class N(wlex.Quiver):
+#     Zero = _()
+#     Succ = _('N')
+
+# def Monad(C):
+#     class D(wlex.Quiver): # or wlex.WLex?
+#         T = _(C)
+#         unit = _(_ >> T)
+#         mul = _(T.T >> T)
+#         left_unit = _(mul @ unit.T == T)
+#         right_unit = _(mul @ T.unit == T)
+#         assoc = _(mul @ mul.T == mul @ T.mul)
+#     return D
+
+# class C(wlex.Quiver):
+#     M = own(Monad('C')) # so that M.T.T or _.T.T can be written instead of M.T.M.T
+
+# spec Nat;
+# type Zero;
+# type Succ <- Nat;
+
+# spec C;
+# type T <- C;
+# fn unit: C -> T;
+# fn mul: T.T -> T;
+# eq left_unit: mul @ unit.T == T;
+# eq right_unit: mul @ T.unit == T;
+# eq assoc: mul @ mul.T == mul @ T.mul;
+
+# Monads and functors may be handled through special composition,
+# e.g. by extending a string and by applying mul implicitly.
+# The latter is an implicit type conversion. This is implicit
+# at the language level but not at the theory level.
+# f (x1, x2) when f is unary is an example of extending the string,
+# namely the diagonal functor.
