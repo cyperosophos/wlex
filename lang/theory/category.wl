@@ -17,7 +17,6 @@ type Composable := P.Path;
 fn identity := P.ref;
 fn compose := P.trans;
 
-# TODO: Use @> and <@ to disambiguate composition of pairings?
 fn left_identity_law := (compose @ (identity @ target, $), $) @ Mor -> eq;
 fn right_identity_law := (compose @ ($, identity @ source), $) @ Mor -> eq;
 fn associativity := (
@@ -33,4 +32,5 @@ type ComposableEq := (
     source @ S.source @ $d == target @ S.target @ $e,
 );
 
+# TODO: Use @> and <@ to disambiguate composition of pairings?
 fn compose_eq: compose @ (S.source, S.target) @ ComposableEq -> eq;

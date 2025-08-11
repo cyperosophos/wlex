@@ -1,0 +1,54 @@
+from category import Category;
+
+spec Cart;
+type C <- Category;
+type Obj := C.Obj;
+type Mor := C.Mor;
+type Eq := C.Eq;
+fn eq := C.eq;
+fn source := C.source;
+fn target := C.target;
+fn compose := C.compose;
+type terminal: Obj;
+type TerminalMor := (
+    Mor,
+    target == terminal,
+);
+fn terminal_mor: Obj -> source @ TerminalMor;
+fn terminal_mor_unique: Mor @ (terminal_mor @ source, $) @ TerminalMor -> eq;
+
+type Span := (
+    p, q: Mor,
+    source @ ($p == $q),
+);
+
+fn product: (x, y: Obj) -> target @ Span;
+fn pt := product @ target @ Span;
+type ProductMor := (
+    Mor, Span,
+    p_eq, q_eq: Eq,
+    source @ (Mor == Span),
+    target @ Mor == source @ pt,
+    (compose @ (($p, $q) @ pt, Mor), Span) == eq @ ($p_eq, $q_eq),
+);
+
+fn pairing: Span @ ($ -> ProductMor);
+fn pairing_unique: Mor @ (pairing, $) @ ProductMor -> eq;
+
+# Theorem: pairing preserves equality.
+type SpanEq := (
+    x: Span, y: Span, p_eq: Eq, q_eq: Eq,
+    source @ (x == y),
+    target @ (x == y),
+    ($p, $q) @ ($x, $y) == eq @ ($p_eq, $q_eq),
+);
+fn pairing_eq: Mor @ pairing @ SpanEq -> eq;
+fn pairing_eq = C.S.S.sym @ pairing_unique @ (
+    Mor, $y,
+    *C.S.S.P.trans @ (
+        ($p_eq, $q_eq) @ SpanEq,
+        ($p_eq, $q_eq) @ ProductMor,
+    ),
+) @ pairing @ $x;
+
+# TODO: Should one proof the naturality of the diagonal (for pullbacks)?
