@@ -32,12 +32,14 @@ type ComposableEq := (
     source @ S.source @ $d == target @ S.target @ $e,
 );
 
-fn compose_eq: compose <@ (S.source, S.target) <<@ ComposableEq -> eq;
+fn compose_eq: compose! @ !(S.source, S.target) @ ComposableEq -> eq;
 # (S.source, S.target) @ ComposableEq is ambiguous
 # it can mean ((s d, s e), (t d, t e)) or
 # [(s, t), (s, t)] (d, e) i.e. ((s d, t d), (s e, t e))
-# To obtain the first one, one writes <<@ instead of <@.
 # The first one is ([s, s], [t, t]) (d, e).
 # With compose, one may try to resolve the ambiguity based on the
 # type of the args, but this makes the actual meaning more implicit.
-# 
+# Notice that [_, _] is the diagonal functor (or List functor, i.e. map).
+# Transpose of m := ((a, b), (c, d))
+# (($0 $0, $1 $0), ($0 $1, $1, $1)) = (0, 1)! (0, 1) = $
+# (($0 $0, $0 $1), ($1 $0, $1, $1)) = (0!, 1!) (0, 1) = !(0, 1) # is this `= !$` ?
