@@ -24,8 +24,8 @@ class Category:
 
     compose_eq: MMor
 
-    def __init__(self, theory):
-        th = theory.lex(self)
+    def __init__(self, ambient):
+        th = ambient.lex(self)
         c = th.compose
         t = th.trans
         p = th.pair

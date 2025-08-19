@@ -104,7 +104,7 @@ class Mor:
 class NTMor(Mor):
     # There is no DefNTMor. For SubDefMor one produces DefMor and the
     # comparisons follow from the value.
-    def __init__(self, name, source, target, sub_mor):
+    def __init__(self, name, source, target, sub_mor: 'SubMor'):
         super().__init__(name, source, target)
         self.sub_mor = sub_mor
 
@@ -117,6 +117,7 @@ class NTMor(Mor):
                 # Verify signature
                 and Category.source(self) == Category.source(x)
             )
+        return False
 
 class DefMor(Mor):
     value: 'Mor'
@@ -507,18 +508,73 @@ class SubMor:
             )
 
         if isinstance(source, Sub):
-            # The result is SubMor
-            return SubMor(fname, source, target)
+            # The result is SubSubMor
+            return SubSubMor(fname, source, target, self)
 
         if isinstance(source, SubMor):
             # The result is SubEq
-            return SubEq()
+            return SubEq(
+                fname,
+                self.compose(
+                    SubSubMor(
+                        f'{self.name}.{source.target.name}',
+                        source.target,
+                        target.target,
+                        self,
+                    ),
+                    source,
+                ),
+                self.compose(
+                    target,
+                    SubSubMor(
+                        f'{self.name}.{source.source.name}',
+                        source.source,
+                        target.source,
+                        self,
+                    ),
+                ),
+            )
         
         # Eq is not allowed
         raise Error
 
-class SubDefMor:
-    pass
+    # Notice that set_eval affects a specific mor, without affecting the same
+    # after applying a functor. This is different to the way value of DefMor works.
+    # If set_val was called on f, F(f) won't be affected.
+    
+    # TODO: Does SubMor have set_eval? Does the square ever get checked?
+    # The square may not get checked, but the optimization must still apply.
+    # The eval of SubMor affects the components of the nat trans, that is
+    # The result NTMor will have eval.
+
+    @staticmethod
+    def compose(f: 'SubMor', g: 'SubMor'):
+        # SubCompMor
+        pass
+
+    def __eq__(self, x: 'SubMor'):
+        if super().__eq__(x):
+            return True
+        if isinstance(x, SubDefMor):
+            return self == x.value
+        return False
+
+class SubSubMor(SubMor):
+    def __init__(self, name, source: Sub, target: Sub, parent: SubMor):
+        super().__init__(name, source, target)
+        self.parent = parent
+
+    def __eq__(self, x: SubMor):
+        if super().__eq__(x):
+            return True
+        if isinstance(x, SubSubMor):
+            return (
+                self.parent == x.parent
+                and self.source == x.source
+            )
+
+class SubDefMor(SubMor):
+    value: SubMor
 
 #class SubHatMor:
 #    pass
@@ -527,7 +583,7 @@ class SubDefMor:
 #    pass
 
 class SubEq:
-    def __init__(self, name, ssource: SubMor, target: SubMor):
+    def __init__(self, name, ssource: SubMor, starget: SubMor):
         pass
 
 class AttrDict(dict):
@@ -1076,3 +1132,61 @@ class CheckedCategory:
 # at the language level but not at the theory level.
 # f (x1, x2) when f is unary is an example of extending the string,
 # namely the diagonal functor.
+
+# Remaining questions re functors
+# What's the use of natural transformations for inclusion functors.
+# Nat trans must be monoidal when functors are monoidal. It seems.
+# It seems the domain of an inclusion must be cartesian in order to
+# allow functions f: X x Y -> Z, etc.
+# Think of imports and interfaces.
+
+# spec Program;
+# type M <- Main with
+#   main = print "Hello World!";
+
+# face Main {
+#   fn main: IO[()];
+# }
+
+# type Program: Main {
+#   main = print "Hello World!";
+# }
+
+# type F: World -> World = (x: _, y: Y);
+
+# All functors must be defined (they can be treated as macros).
+# The builtin functors are the structure of World (including IO
+# and the builtin data types). The problem with these functors
+# (in contrast with the ones with limit domain) is that it's not
+# automatically clear what the action on morphisms would be.
+
+# Skip nat trans for inclusion functors!
+
+# Interface as type of argument.
+
+# face C {
+#   type X :> World;
+#   fn f: X -> String;
+# }
+
+# fn g: C$X -> String = C$f
+
+# type Y: C {
+#   X = String;
+#   f = String;
+# }
+
+# g[Y] # = C$f[Y]
+
+# Recall nat trans defs where X gets assigned a mor,
+# and f an eq, etc.
+
+# fn h: Y -> Z {
+#   X = p;
+#   f = e;
+# }
+
+# Canonical inclusion is a way to skip the `with` assignments.
+# All canonical inclusions (even indirect through non canonical)
+# coincide. The `with` assignments can only occur in the first
+# inclusion.
