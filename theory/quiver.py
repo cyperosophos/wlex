@@ -9,7 +9,7 @@ class BasicQuiver:
     target: Mor
 
     def __init__(self, ambient):
-        th: ACategory = ambient.category(self)
+        th: ACategory = ambient(self)
         th.obj('Node')
         th.obj('Edge')
         Node = self.Node
@@ -27,7 +27,7 @@ class Quiver:
 
     def __init__(self, ambient):
         # Lazy sub would be specially useful in the case of monads.
-        th: ACategory = ambient.category(self)
+        th: ACategory = ambient(self)
         c = th.compose
         th.sub('Q0', BasicQuiver) # Functor
         Q0 = self.Q0

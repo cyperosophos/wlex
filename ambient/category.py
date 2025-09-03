@@ -1,5 +1,6 @@
 from functools import wraps
 from dataclasses import dataclass
+import weakref
 
 from ..theory.category import Category as BCategory
 
@@ -387,204 +388,18 @@ class Ref(Eq):
         return True
     
     assume = Trans.assume
-
-class Sub:
-    def __init__(self, name, ambient, theory_cls, kw: dict):
-        self.name = name
-        full_kw = kw
-        kw = kw.copy()
-        sub_kw = self._extract_sub_kw(kw)
-        self.theory_data = (theory_cls, ambient, kw, sub_kw, full_kw)
-        self.theory = None
-        # Only cells with no value (atomic cells) can be overridden.
-        # These cells are created and set using obj, mor, eq, sub,
-        # hence these methods handle the process of overriding.
-
-    def __getattribute__(self, name):
-        theory = super().__getattribute__('theory')
-        if not theory:
-            theory_cls, ambient, kw, sub_kw, full_kw = super().__getattribute__('theory_cls')
-            self.theory = theory_cls(ambient.with_kw(kw, sub_kw))
-            theory = self.theory
-        return getattr(theory, name)
     
-    def get_kw(self, ambient, theory_cls):
-        _theory_cls, _ambient, kw, sub_kw, full_kw = super().__getattribute__('theory_cls')
-        if _ambient is not ambient:
-            raise Error
-        if _theory_cls is not theory_cls:
-            raise Error
-        return full_kw
-    
-    @staticmethod
-    def _extract_sub_kw(kw: dict):
-        sub_kw = dict()
-        key: str
-        for key in kw:
-            skey = key.split('.', 1)
-            if len(skey) > 1:
-                d = dict()
-                sub_kw[skey[0]] = d
-                d[skey[1]] = kw.pop(key)
-        return sub_kw
-    
-class SubMor:
-    def __init__(self, name, source: Sub, target: Sub):
-        # The (ambient and) theory_cls of source and target must coincide.
-        self.name = name
-        self.source = source
-        self.target = target
-
-    def __getattribute__(self, name):
-        # If name is the name of an obj, the result is a mor.
-        # If it is the name of a mor, the result is an eq.
-        # A functor to an overcategory is a natural transformation
-        # into the corresponding constant functor.
-        # This can be checked by regarding the overcategory as a comma object.
-        # The point is that source and target are permitted to be
-        # such natural transformations. We skip this feature for now.
-        # source and target can also be Sub.
-        # UnsourcedMor is not allowed.
-        # The domain category does not need to have any structure
-        # beyond just being a category. However, there may be such structure
-        # even if it is not respected by functors.
-        # What we do then is to only support the application of the
-        # functor on non atomic (anonymous) cells when the domain
-        # and codomain are the same. This we do through __getitem__.
-        # This is specially useful for functor strength.
-        # What happens is actually the following.
-        # F(h) can be proven to equal F(f) F(g) when h = f g.
-        # This is because in the codomain only F(f) and F(g) are defined.
-        # A similar would happen with U = X x Y, a product type, and the
-        # of the structure.
-        # This can be described in two ways:
-        # - The domain has the structure, and this structure is preserved by
-        #   the functor.
-        # - The domain has no structure, every product, etc. originally
-        #   (formally) defined in the domain is not actually in the domain
-        #   but is just a template for introducing more cells in the codomain.
-        # The problem here is that this would affect endofunctors. So for instance,
-        # IO(X x Y) would end up becoming IO(X) x IO(Y).
-        # One does not just need for IO(X x Y) to be a sort of atomic type
-        # but also for it to be equipped with strength, af if the category was Set.
-        # The way to handle this is therefore to define strong functors in ambient Cart.
-        # One then must defined the corresponding natural transformations as well?
-        # For now functors would be strict monoidal if the categories were cartesian,
-        # however natural transformations would have to the modified to handle products
-        # and also be strict monoidal, unless the obj itself indicates how to produce
-        # the value of the mor.
-        # The morsphisms produced here must be of a class that allows sensibly comparing
-        # them for equality, i.e. nat trans indexed on same object are the same.
-        source = getattr(self.source, name)
-        target = getattr(self.target, name)
-        fname = f'{self.name}.{name}'
-        if isinstance(source, Obj):
-            #if hasattr(source, ''):
-            #    # Object (e.g. product) indicates how to produce the value of the morsphism.
-            #    pass
-            return NTMor(fname, source, target, self) 
-        
-        if isinstance(source, Mor):
-            return Eq(
-                fname,
-                Category.t_compose((
-                    NTMor(
-                        f'{self.name}.{source.target.name}',
-                        source.target,
-                        target.target,
-                        self,
-                    ),
-                    source,
-                )),
-                Category.t_compose((
-                    target,
-                    NTMor(
-                        f'{self.name}.{source.source.name}',
-                        source.source,
-                        target.source,
-                        self,
-                    ),
-                )),
-            )
-
-        if isinstance(source, Sub):
-            # The result is SubSubMor
-            return SubSubMor(fname, source, target, self)
-
-        if isinstance(source, SubMor):
-            # The result is SubEq
-            return SubEq(
-                fname,
-                self.compose(
-                    SubSubMor(
-                        f'{self.name}.{source.target.name}',
-                        source.target,
-                        target.target,
-                        self,
-                    ),
-                    source,
-                ),
-                self.compose(
-                    target,
-                    SubSubMor(
-                        f'{self.name}.{source.source.name}',
-                        source.source,
-                        target.source,
-                        self,
-                    ),
-                ),
-            )
-        
-        # Eq is not allowed
-        raise Error
-
-    # Notice that set_eval affects a specific mor, without affecting the same
-    # after applying a functor. This is different to the way value of DefMor works.
-    # If set_val was called on f, F(f) won't be affected.
-    
-    # TODO: Does SubMor have set_eval? Does the square ever get checked?
-    # The square may not get checked, but the optimization must still apply.
-    # The eval of SubMor affects the components of the nat trans, that is
-    # The result NTMor will have eval.
-
-    @staticmethod
-    def compose(f: 'SubMor', g: 'SubMor'):
-        # SubCompMor
-        pass
-
-    def __eq__(self, x: 'SubMor'):
-        if super().__eq__(x):
-            return True
-        if isinstance(x, SubDefMor):
-            return self == x.value
-        return False
-
-class SubSubMor(SubMor):
-    def __init__(self, name, source: Sub, target: Sub, parent: SubMor):
-        super().__init__(name, source, target)
-        self.parent = parent
-
-    def __eq__(self, x: SubMor):
-        if super().__eq__(x):
-            return True
-        if isinstance(x, SubSubMor):
-            return (
-                self.parent == x.parent
-                and self.source == x.source
-            )
-
-class SubDefMor(SubMor):
-    value: SubMor
-
-#class SubHatMor:
-#    pass
-
-#class SubDefHatMor:
-#    pass
-
-class SubEq:
-    def __init__(self, name, ssource: SubMor, starget: SubMor):
-        pass
+@staticmethod
+def _extract_sub_kw(kw: dict):
+    sub_kw = dict()
+    key: str
+    for key in kw:
+        skey = key.split('.', 1)
+        if len(skey) > 1:
+            d = dict()
+            sub_kw[skey[0]] = d
+            d[skey[1]] = kw.pop(key)
+    return sub_kw
 
 class AttrDict(dict):
     def __init__(self, *args, **kwargs):
@@ -715,7 +530,7 @@ class Transer:
         raise NotImplementedError
 
 class Category:
-    def __init__(self, kw=None, sub_kw=None):
+    def __init__(self, theory, kw=None, sub_kw=None, theory_clss=None):
         # The point of this would be to allow type checking on the overriding
         # methods of CheckedCategory. This seems to not be needed.
         # see e.g. f.source, g.target. Here type checking would be
@@ -724,9 +539,11 @@ class Category:
         self.id = UnsourcedId()
         self.kw = kw or dict()
         self.sub_kw = sub_kw or dict()
+        self.theory_clss = theory_clss or ()
+        self.theory = weakref.proxy(theory)
 
     @classmethod
-    def with_kw(cls, kw, sub_kw):
+    def with_kw(cls, theory, theory_clss, kw, sub_kw):
         # This needs to handle kw used buy sub at lower levels.
         # e.g. S.P.Q in line 35 of theory/category.py.
         # TODO: An important goal is to be able to define monads,
@@ -734,23 +551,23 @@ class Category:
         # support self and self.T within the __init__ of the theory
         # as if they were functors.
         # Inheritance requires this to be a classmethod.
-        return cls(kw, sub_kw)
 
-    def obj(self, theory, name):
+        return cls(theory, kw, sub_kw, theory_clss)
+
+    def obj(self, name):
+        theory = self.theory
         if name in self.kw:
             setattr(theory, name, self.kw[name])
         else:
             setattr(theory, name, Obj(name))
 
     def mor(
-            self, theory, name,
-            source: Mor | Obj | Sub | SubMor,
-            target: Mor | Obj | Sub | SubMor,
-            value: Mor | Unsourced | SubMor | None = None,
+            self, name,
+            source: Mor | Obj,
+            target: Mor | Obj,
+            value: Mor | Unsourced | None = None,
             proof: Eq | None = None
         ):
-        # TODO: Handle Sub as source and target in order to create
-        # natural transformations.
         # Morphisms with value can't be overridden by kw.
         # sub corresponds to a functor, so saying f = g h
         # and then F(f) = k is backwards, because F(f) is already
@@ -761,9 +578,11 @@ class Category:
         # The overridden mor keeps its name (this is different from Obj)
         # it simply gets replaced by a DefMor or DefHatMor with the
         # overriding mor as value.
+        theory = self.theory
         if name in self.kw:
             if value or proof:
                 raise Error
+            # The purpose of setting the value indirectly is to check signature.
             value = self.kw[name]
         
         if isinstance(source, Obj) and isinstance(target, Obj):
@@ -777,34 +596,7 @@ class Category:
                 setattr(theory, name, Mor(
                     name, source, target,
                 ))
-        elif isinstance(source, Sub) or isinstance(target, Sub):
-            if isinstance(source, Sub) and isinstance(target, Sub):
-                if proof:
-                    raise Error
-                if value:
-                    setattr(theory, name, SubDefMor(
-                        name, source, target, value,
-                    ))
-                else:
-                    setattr(theory, name, SubMor(
-                        name, source, target,
-                    ))
-            # elif isinstance(source, SubMor) and isinstance(target, SubMor):
-            #     if value:
-            #         if not proof:
-            #             proof = value.hat
-            #         setattr(theory, name, SubDefHatMor(
-            #             name, source, target, value, proof,
-            #         ))
-            #     else:
-            #         setattr(theory,  name, SubHatMor(
-            #             name, source, target,
-            #         ))
-            else:
-                # Can't have SubMor with Sub since SubMor must have constant as domain.
-                raise Error
         elif value:
-            # TODO: Check what happens if SubMor and SubEq are used here!
             if not proof:
                 proof = value.hat
             setattr(theory, name, DefHatMor(
@@ -816,12 +608,12 @@ class Category:
             ))
 
     def eq(
-            self, theory, name,
+            self, name,
             ssource: Mor | Unsourced | Obj,
             starget: Mor | Unsourced | Obj,
             proof: 'Eq' = None,
         ):
-        # TODO: Support equality of natural transformations.
+        theory = self.theory
         if name in self.kw:
             if proof:
                 raise Error
@@ -848,14 +640,27 @@ class Category:
         # kw gets separated into kw and sub_kw.
         # sub_kw is a dict with kw values used for the sub's
         # within the sub.
+        # Only cells with no value (atomic cells) can be overridden.
+        # These cells are created and set using obj, mor, eq, sub,
+        # hence these methods handle the process of overriding.
+        theory = self.theory
         if name in self.kw:
             if kw:
                 # Can't override partially defined functor.
                 # Must instead override missing components.
                 raise Error
+            if self.sub_kw.get(name):
+                # Can't be overriden by sub_kw when overridden by kw.
+                raise Error
+            # This is wrong because kw must include all attributes.
+            #kw = _sub.get_kw(self, theory_cls)
             # theory_cls has to coincide.
-            _sub: Sub = self.kw[name]
-            kw = _sub.get_kw(self, theory_cls)
+            _sub = self.kw[name]
+            if isinstance(_sub, theory_cls):
+                setattr(theory, name, _sub)
+            else:
+                raise Error
+            return
 
         super_kw: dict = self.sub_kw[name]
         for key, value in super_kw.items():
@@ -863,12 +668,17 @@ class Category:
                 raise Error
             kw[key] = value
 
-        sub_kw = Sub._extract_sub_kw(kw)
-        if theory_cls is type(theory):
-            sub_cls = EndoSub
-        else:
-            sub_cls = Sub
-        setattr(theory, name, Sub(name, self, theory_cls, kw, sub_kw))
+        sub_kw = _extract_sub_kw(kw)
+        #setattr(theory, name, Sub(name, self, theory_cls, kw, sub_kw))
+        # Avoid circular class instantiation
+        theory_clss = (*self.theory_clss, type(theory))
+        for tc in theory_clss:
+            if theory_cls is tc:
+                raise Error
+        setattr(
+            theory, name,
+            theory_cls(lambda th: self.with_kw(th, kw, sub_kw, theory_clss)),
+        )
 
     @staticmethod
     def source(mor: Mor) -> Obj:
@@ -957,8 +767,8 @@ class CheckedCategory:
     backend: BCategory
     unchecked: Category
 
-    def __init__(self, backend: BCategory):
-        self.unchecked = Category()
+    def __init__(self, theory, backend: BCategory):
+        self.unchecked = Category(theory)
         self.id = self.unchecked.id
         self.backend = backend
         u = self.unchecked
@@ -1036,11 +846,12 @@ class CheckedCategory:
     def with_kw(self, kw, sub_kw):
         return self.unchecked.with_kw(kw, sub_kw)
     
-    def obj(self, theory, name):
-        self.unchecked.obj(theory, name)
+    def obj(self, name):
+        self.unchecked.obj(name)
     
-    def mor(self, theory, name, source: Mor | Obj, target: Mor | Obj, value=None, proof=None) -> Mor | Unsourced | Eq:
-        self.unchecked.mor(theory, name, source, target, value, proof)
+    def mor(self, name, source: Mor | Obj, target: Mor | Obj, value=None, proof=None) -> Mor | Unsourced | Eq:
+        self.unchecked.mor(name, source, target, value, proof)
+        theory = self.unchecked.theory
         _mor: Mor = getattr(theory, name)
         # Checking needs to occur after, since the actual mor might come
         # from kw.
@@ -1058,7 +869,8 @@ class CheckedCategory:
             BMor.check(target)
 
     def eq(self, theory, name, ssource: Mor | Unsourced, starget: Mor | Unsourced, proof=None):
-        self.unchecked.eq(theory, name, ssource, starget, proof)
+        self.unchecked.eq(name, ssource, starget, proof)
+        theory = self.unchecked.theory
         _eq: Eq = getattr(theory, name)
         BMor = self.backend.Mor
         BMor.check(_eq.ssource)
@@ -1068,8 +880,8 @@ class CheckedCategory:
         scond.verify(_eq)
         tcond.verify(_eq)
 
-    def sub(self, theory, name, theory_cls, **kw):
-        self.unchecked.sub(theory, name, theory_cls, **kw)
+    def sub(self, name, theory_cls, **kw):
+        self.unchecked.sub(name, theory_cls, **kw)
 
     class _Composer(Composer):
         @staticmethod
@@ -1186,7 +998,16 @@ class CheckedCategory:
 #   f = e;
 # }
 
-# Canonical inclusion is a way to skip the `with` assignments.
+# TODO: Canonical inclusion is a way to skip the `with` assignments.
 # All canonical inclusions (even indirect through non canonical)
 # coincide. The `with` assignments can only occur in the first
-# inclusion.
+# inclusion. Handle canonical inclusion at the syntax level?
+# Should inclusion of categories with ambient lex be canonical?
+
+# Notice that assignment on the whole inclusion is not supported,
+# except within the `with` block of an encompassing inclusion.
+
+# There are no endoinclusions, and endofunctors such as monads arise
+# from the structure of the category (even if axiomatically).
+# What sub should handle is not lazy attribute access but avoiding
+# self-reference by keeping a stack of classes.

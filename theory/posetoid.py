@@ -1,4 +1,4 @@
-from ..ambient import Obj, Mor, Eq
+from ..ambient import Obj, Mor
 from .quiver import BasicQuiver
 
 class Posetoid:
