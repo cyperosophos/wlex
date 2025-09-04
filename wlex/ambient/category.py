@@ -29,6 +29,7 @@ class Obj:
         self._check = wrapper
 
 class Mor:
+    hat: 'Eq'
     source: Obj
     target: Obj
 
@@ -101,35 +102,19 @@ class Mor:
         if isinstance(x, (DefMor, DefHatMor)):
             return self == x.value
         return False
-    
-class NTMor(Mor):
-    # There is no DefNTMor. For SubDefMor one produces DefMor and the
-    # comparisons follow from the value.
-    def __init__(self, name, source, target, sub_mor: 'SubMor'):
-        super().__init__(name, source, target)
-        self.sub_mor = sub_mor
-
-    def __eq__(self, x: Mor):
-        if super().__eq__(x):
-            return True
-        if isinstance(x, NTMor):
-            return (
-                self.sub_mor == x.sub_mor
-                # Verify signature
-                and Category.source(self) == Category.source(x)
-            )
-        return False
 
 class DefMor(Mor):
     value: 'Mor'
 
-    def __init__(self, name, source, target, value: 'Mor' | 'Unsourced'):
+    def __init__(self, name, source, target, value: 'Mor' | 'Unsourced' | 'Obj'):
         super().__init(name, source, target)
         self.set_value(value)
 
     def set_value(self, value, source):
         if isinstance(value, Unsourced):
             value = value.with_source(source)
+        elif isinstance(value, Obj):
+            value = Category.identity(value)
         self.check_signature(value)
         self.value = value
 
@@ -147,14 +132,14 @@ class DefMor(Mor):
         return self.value == x
 
 class HatMor(Mor):
-    hat: 'Eq'
     hat_source: 'Mor'
     hat_target: 'Mor'
     hat_proven: bool
 
     def __init__(
         self, name,
-        source: Mor | Obj, target: Mor | Obj,
+        source: Mor | Obj,
+        target: Mor | Obj,
     ):
         if isinstance(source, Mor):
             if not isinstance(target, Mor):
@@ -190,6 +175,47 @@ class HatMor(Mor):
         @wraps(method)
         def wrapper(x, check_source, check_target):
             # This will check the type of the source and target
+            # Here the equality is not just assumed, it is also checked.
+            # The same should happen with all assumed equalities, even if they
+            # are not hat equalities? Hat equality checking is similar to type checking
+            # when one sees it as indexed type checking. The way other equalities
+            # are checked is ad hoc. See eq method of CheckedCategory with respect to
+            # globular conditions. This justifies the call to assume.
+            # Recall also that no type checking goes on in ambient Category.
+            # Type checking is part of the evaluation of backend methods
+            # by converting them into pointed functions (the point is the error).
+            # For example, compose is dynamically checked, whereas the composed
+            # functions are being statically checked. Type checking within compose
+            # is part of the evaluation which produces a composed morphism.
+            # Category does some type checking based on at most Cart, but since this
+            # is just duck typing it can be regarded as a single type which includes
+            # the point (error). This is, the default backend is a monoid.
+            # CheckedCategory needs the full Lex logic in order to check
+            # that source and target coincide when composing.
+            # Decidable type checking implies pointed functions not just partial functions.
+            # A statically type checked compose would require having proof of source
+            # and target coinciding, THIS IS THE CASE with the theory Category
+            # which uses Lex as its ambient, and is used as the backend of CheckedCategory.
+            # The static checking of theory Category (compose) occurs when using CheckedLex.
+            # The dynamic checking of theory Category occurs when using it as backend.
+            # Dynamic checking is required for the atomic cells. Static checking only provides
+            # guaranties for the composed cells. Notice that set_eval can't be called
+            # morphisms with value, etc. Static type checking proves correctness
+            # upon the assumption of correct atomic cells.
+            # Eq can be true or false just like Mor gets wrapped in the Maybe monad.
+            # The composed morphisms of the backend have an eval method which skips checking
+            # that source and target coincide. The type checking of a composed morphism comes
+            # the type checking of the atomic morphisms, which has to be dynamic.
+            # By skipping, all intermediate type checking of the composition remains static on one side.
+            # The backend can have composed morphisms
+            # because as a theory it uses an ambient which is at least a Category.
+            # If the ambient is CheckedCategory, then this ambient uses theory Category
+            # as backend, which in turn uses Lex as ambient.
+            # backend.compose.eval will then check that (f, g) is actually Composable.
+            # This is because compose is atomic. One trusts that no static type checking
+            # is needed on the backend, so the composed morphisms in the backend are assumed
+            # to come from Composable. If this static type checking is needed then one uses
+            # CheckedLex.
             left_side = self.hat_source.eval(x, check_source=check_source)
             result = method(x)
             right_side = self.hat_target.eval(
@@ -208,11 +234,15 @@ class DefHatMor(HatMor):
     def __init__(
         self, name,
         source: Mor | Obj, target: Mor | Obj,
-        value: Mor | 'Unsourced',
-        proof: 'Eq',
+        value: Mor | 'Unsourced' | 'Obj',
+        proof: 'Eq' | Mor | Obj,
     ):
         super().__init__(name, source, target)
         self.set_value(value, source)
+        if isinstance(proof, Obj):
+            proof = Category.identity(proof)
+        if isinstance(proof, Mor):
+            proof = Category.ref(proof)
         if self.hat == proof:
             self.hat_proven = True
         else:
@@ -220,7 +250,7 @@ class DefHatMor(HatMor):
         # No need to store the proof after it's checked.
 
     set_value = DefMor.set_value
-    set_value = DefMor.eval
+    eval = DefMor.eval
     set_eval = DefMor.set_eval
     __eq__ = DefMor.__eq__
 
@@ -235,8 +265,8 @@ class Eq:
         self._proven = False
         self.ssource = ssource
         self.starget = starget
-        if proof:
-            self._proven = self == proof
+        if proof and self == proof:
+            self._proven = proof._proven
 
     @property
     def proven(self):
@@ -257,6 +287,8 @@ class Eq:
         raise Error
     
     def __eq__(self, proof: 'Eq'):
+        if super().__eq__(proof):
+            return True
         # self.proven can't be set here as that would modify the state.
         if Category.ssource(self) == Category.ssource(proof):
             if Category.starget(self) == Category.starget(proof):
@@ -530,7 +562,7 @@ class Transer:
         raise NotImplementedError
 
 class Category:
-    def __init__(self, theory, kw=None, sub_kw=None, theory_clss=None):
+    def __init__(self, theory, name='', kw=None, sub_kw=None, theory_clss=None):
         # The point of this would be to allow type checking on the overriding
         # methods of CheckedCategory. This seems to not be needed.
         # see e.g. f.source, g.target. Here type checking would be
@@ -539,11 +571,11 @@ class Category:
         self.id = UnsourcedId()
         self.kw = kw or dict()
         self.sub_kw = sub_kw or dict()
+        self.name = name
         self.theory_clss = theory_clss or ()
         self.theory = weakref.proxy(theory)
 
-    @classmethod
-    def with_kw(cls, theory, theory_clss, kw, sub_kw):
+    def with_kw(self, theory, name, theory_clss, kw, sub_kw):
         # This needs to handle kw used buy sub at lower levels.
         # e.g. S.P.Q in line 35 of theory/category.py.
         # TODO: An important goal is to be able to define monads,
@@ -552,21 +584,21 @@ class Category:
         # as if they were functors.
         # Inheritance requires this to be a classmethod.
 
-        return cls(theory, kw, sub_kw, theory_clss)
+        return Category(theory, name, theory_clss, kw, sub_kw)
 
     def obj(self, name):
         theory = self.theory
         if name in self.kw:
             setattr(theory, name, self.kw[name])
         else:
-            setattr(theory, name, Obj(name))
+            setattr(theory, name, Obj(self.cell_name(name)))
 
     def mor(
             self, name,
             source: Mor | Obj,
             target: Mor | Obj,
-            value: Mor | Unsourced | None = None,
-            proof: Eq | None = None
+            value: Mor | Unsourced | Obj | None = None,
+            proof: Eq | Mor | Obj | None = None
         ):
         # Morphisms with value can't be overridden by kw.
         # sub corresponds to a functor, so saying f = g h
@@ -584,34 +616,38 @@ class Category:
                 raise Error
             # The purpose of setting the value indirectly is to check signature.
             value = self.kw[name]
-        
+
         if isinstance(source, Obj) and isinstance(target, Obj):
             if proof:
                 raise Error
             if value:
                 setattr(theory, name, DefMor(
-                    name, source, target, value,
+                    self.cell_name(name),
+                    source, target, value,
                 ))
             else:
                 setattr(theory, name, Mor(
-                    name, source, target,
+                    self.cell_name(name),
+                    source, target,
                 ))
         elif value:
             if not proof:
                 proof = value.hat
             setattr(theory, name, DefHatMor(
-                name, source, target, value, proof,
+                self.cell_name(name),
+                source, target, value, proof,
             ))
         else:
             setattr(theory, name, HatMor(
-                name, source, target,
+                self.cell_name(name),
+                source, target,
             ))
 
     def eq(
             self, name,
             ssource: Mor | Unsourced | Obj,
             starget: Mor | Unsourced | Obj,
-            proof: 'Eq' = None,
+            proof: 'Eq' | Mor | Obj = None,
         ):
         theory = self.theory
         if name in self.kw:
@@ -630,10 +666,15 @@ class Category:
             ssource = ssource.with_source(starget.source)
         elif isinstance(starget, Unsourced):
             starget = starget.with_source(ssource.source)
-        
-        setattr(theory, name, Eq(name, ssource, starget, proof))
 
-    def sub(self, theory, name, theory_cls, **kw):
+        if isinstance(proof, Obj):
+            proof = Category.identity(proof)
+        if isinstance(proof, Mor):
+            proof = Category.ref(proof)
+        
+        setattr(theory, name, Eq(self.cell_name(name), ssource, starget, proof))
+
+    def sub(self, name, theory_cls, **kw):
         # If both self.sub_kw and kw override cells then an error
         # occurs, because what should have happened is that the overriding
         # cell got overridden. This applies to sub_kw as well.
@@ -675,10 +716,16 @@ class Category:
         for tc in theory_clss:
             if theory_cls is tc:
                 raise Error
+        sub_name = self.cell_name(name)
         setattr(
             theory, name,
-            theory_cls(lambda th: self.with_kw(th, kw, sub_kw, theory_clss)),
+            theory_cls(lambda th: self.with_kw(th, sub_name, kw, sub_kw, theory_clss)),
         )
+
+    def cell_name(self, name):
+        if not self.name:
+            return name
+        return f'{self.name}.{name}'
 
     @staticmethod
     def source(mor: Mor) -> Obj:
@@ -767,10 +814,14 @@ class CheckedCategory:
     backend: BCategory
     unchecked: Category
 
-    def __init__(self, theory, backend: BCategory):
-        self.unchecked = Category(theory)
+    def __init__(self, theory, backend: BCategory, name='', kw=None, sub_kw=None, theory_clss=None):
+        # Notice that type checking only needs to be done the first
+        # time theory_cls is instantiated when there is no sub overriding.
+        self.unchecked = Category(theory, name, kw, sub_kw, theory_clss)
         self.id = self.unchecked.id
         self.backend = backend
+
+    def set_semantics(self, backend: BCategory):
         u = self.unchecked
         # The backend provides only structure, no semantics.
         # backend Category is based on ambient Lex.
@@ -800,6 +851,13 @@ class CheckedCategory:
         #backend.S.unique.source.set_check(u.check_eq_unique_source)
         backend.S.unique.set_eval(u.eq_unique)
         backend.compose_eq.set_eval(u.compose_eq)
+
+        # TODO: Should there be a way to check that the whole backend
+        # has semantics, i.e. set_check, set_eval and assume has been
+        # called on all atomic cells.
+
+    def with_kw(self, theory, name, kw, sub_kw, theory_clss):
+        return CheckedCategory(theory, self.backend, name, kw, sub_kw, theory_clss)
 
     def source(self, x):
         return self.backend.source.eval(x)

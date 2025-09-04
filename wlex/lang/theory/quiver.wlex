@@ -12,6 +12,6 @@ spec Quiver {
         Node = Q0.Edge;
     };
 
-    fn source_globular_cond: Q0.source @ (Q1.source == Q1.target);
-    fn target_globular_cond: Q0.target @ (Q1.source == Q1.target);
+    eq source_globular_cond: Q0.source @ (Q1.source == Q1.target);
+    eq target_globular_cond: Q0.target @ (Q1.source == Q1.target);
 }

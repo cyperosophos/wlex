@@ -26,10 +26,9 @@ class Quiver:
     target_globular_cond: Eq
 
     def __init__(self, ambient):
-        # Lazy sub would be specially useful in the case of monads.
         th: ACategory = ambient(self)
         c = th.compose
-        th.sub('Q0', BasicQuiver) # Functor
+        th.sub('Q0', BasicQuiver)
         Q0 = self.Q0
         th.sub('Q1', BasicQuiver, Node=Q0.Edge)
         Q1 = self.Q1
