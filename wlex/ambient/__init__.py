@@ -1,1 +1,1 @@
-from .category import Obj, Mor, Eq
+from .cells import Obj, Mor, Eq

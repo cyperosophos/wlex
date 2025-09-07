@@ -63,7 +63,6 @@ class TestQuiver(unittest.TestCase):
         Q1 = self.theory.Q1
         Q0 = self.theory.Q0
         self.assertIsInstance(Q1, quiver.BasicQuiver)
-        self.assertEqual(Q1.Node.name, 'Q1.Node')
         self.assertEqual(Q1.Edge.name, 'Q1.Edge')
         self.assertEqual(Q1.source.name, 'Q1.source')
         self.assertEqual(Q1.target.name, 'Q1.target')

@@ -1,5 +1,4 @@
 from ..ambient import Obj, Mor, Eq
-from ..ambient.category import Category as ACategory
 
 class BasicQuiver:
     Node: Obj
@@ -9,7 +8,9 @@ class BasicQuiver:
     target: Mor
 
     def __init__(self, ambient):
-        th: ACategory = ambient(self)
+        from ..ambient.category import Category
+
+        th: Category = ambient(self)
         th.obj('Node')
         th.obj('Edge')
         Node = self.Node
@@ -26,7 +27,9 @@ class Quiver:
     target_globular_cond: Eq
 
     def __init__(self, ambient):
-        th: ACategory = ambient(self)
+        from ..ambient.category import Category
+
+        th: Category = ambient(self)
         c = th.compose
         th.sub('Q0', BasicQuiver)
         Q0 = self.Q0

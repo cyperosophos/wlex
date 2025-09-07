@@ -1,4 +1,4 @@
-from ..ambient import Obj as MObj, Mor as MMor, Eq as MEq, Limit
+from ..ambient import Obj as MObj, Mor as MMor
 from .quiver import Quiver
 from .posetoid import Posetoid, Congruence
 

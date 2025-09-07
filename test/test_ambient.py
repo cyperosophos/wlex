@@ -33,7 +33,7 @@ class SampleSubTheory:
         th.mor('l', X, Z)
         k = self.k
         l = self.l
-        th.mor('p', k, l)
+        th.eq('p', k, l)
 
         th.sub('SS', SampleSubSubTheory, Y=Y)
 
