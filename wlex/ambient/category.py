@@ -46,6 +46,12 @@ class Comp(Mor):
         if isinstance(x, (Comp, Id)):
             if self.flat() == x.flat():
                 return True
+            
+    def __str__(self):
+        return f'{self.f} @ {self.g}'
+            
+    def __repr__(self):
+        return f'`comp {self!s}`'
     
 class Id(Mor):
     def __init__(self, obj: Obj):
@@ -141,12 +147,12 @@ def _extract_sub_kw(kw: dict):
 class AttrDict(dict):
     def __init__(self, *args, **kwargs):
         super(AttrDict, self).__init__(**kwargs)
-        self.__dict__ = self
+        self.__dict__ = self # TODO: Does this ever get used?
         for i, arg in enumerate(args):
             self[i] = arg
 
-    @classmethod
-    def to_tuple(cls, d: Union['AttrDict', tuple, dict], tuple_cls) -> tuple:
+    @staticmethod
+    def to_tuple(d: Union['AttrDict', tuple, dict], tuple_cls) -> tuple:
         if isinstance(d, tuple):
             return d
         if not isinstance(d, AttrDict):
@@ -198,7 +204,11 @@ def variadic(m):
 
 class Composer:
     @classmethod
-    def compose(cls, f: Mor | Unsourced | Eq | Obj, g: Mor | Unsourced | Eq | Obj) -> Mor | Unsourced | Eq:
+    def compose(
+        cls,
+        f: Mor | Unsourced | Eq | Obj,
+        g: Mor | Unsourced | Eq | Obj,
+    ) -> Mor | Unsourced | Eq:
         # No further type checking is or should be needed here.
         # Being Composable is the only requirement available for
         # type checking at the lang level.

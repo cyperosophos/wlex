@@ -4,10 +4,10 @@ from typing import Optional
 class Error(Exception):
     pass
 
-def _filter_name(name):
+def filter_name(name):
     return name or '<anon>'
 
-_an = _filter_name
+_an = filter_name
 
 class Obj:
     def __init__(self, name):
@@ -30,6 +30,9 @@ class Obj:
 
         self._check = wrapper
 
+    def __str__(self):
+        return f'{_an(self.name)}'
+    
     def __repr__(self):
         return f'`type {_an(self.name)}`'
 
@@ -51,6 +54,8 @@ class Mor:
         self.source = source
         self.target = target
 
+    __str__ = Obj.__str__
+    
     def __repr__(self):
         return f'`fn {_an(self.name)}: {_an(self.source.name)} -> {_an(self.target.name)}`'
 
@@ -309,6 +314,8 @@ class Eq:
                 return True
             return False
         return False
+    
+    __str__ = Obj.__str__
     
     def __repr__(self):
         return f'`eq {_an(self.name)}: {_an(self.ssource.name)} == {_an(self.starget.name)}`'
