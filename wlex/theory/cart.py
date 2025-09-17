@@ -41,7 +41,8 @@ class Cart:
         self.source = C.source
         self.target = C.target
         self.compose = C.compose
-        th.obj('terminal')
+        Obj = self.Obj
+        th.el('terminal', Obj)
         Mor = self.Mor
         target = self.target
         terminal = self.terminal

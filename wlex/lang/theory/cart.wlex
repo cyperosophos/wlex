@@ -9,7 +9,7 @@ fn eq := C.eq;
 fn source := C.source;
 fn target := C.target;
 fn compose := C.compose;
-type terminal: Obj;
+fn terminal: Obj;
 type TerminalMor := (
     Mor,
     target == terminal,

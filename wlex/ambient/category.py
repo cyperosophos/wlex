@@ -5,6 +5,7 @@ import weakref
 
 from .cells import Obj, Mor, DefMor, HatMor, DefHatMor, Eq, Unsourced
 from ..theory.category import Category as BCategory
+from . import Checked
     
 class Error(Exception):
     pass
@@ -129,6 +130,9 @@ class Ref(Eq):
         return True
     
     assume = Trans.assume
+
+    # __str__
+    # __repr__
     
 @staticmethod
 def _extract_sub_kw(kw: dict):
@@ -195,6 +199,7 @@ class AssociativitySource:
     h: Mor
 
 def variadic(m):
+    # This doesn't handle nullary.
     wraps(m)
     def wrapper(head, *tail):
         if not tail:
@@ -291,7 +296,7 @@ class Category:
         self.theory = weakref.proxy(theory)
 
     def with_kw(self, theory, name, theory_clss, kw, sub_kw):
-        # This needs to handle kw used buy sub at lower levels.
+        # This needs to handle kw used by sub at lower levels.
         # e.g. S.P.Q in line 35 of theory/category.py.
         # TODO: An important goal is to be able to define monads,
         # hence natural transformations. This requires making mor
@@ -299,7 +304,7 @@ class Category:
         # as if they were functors.
         # Inheritance requires this to be a classmethod.
 
-        return Category(theory, name, theory_clss, kw, sub_kw)
+        return type(self)(theory, name, theory_clss, kw, sub_kw)
 
     def obj(self, name):
         theory = self.theory
@@ -529,16 +534,18 @@ class Category:
     compose = staticmethod(variadic(_Composer.compose))
     trans = staticmethod(variadic(_Transer.trans))
 
-class CheckedCategory:
+class CheckedCategory(Checked):
+    unchecked_cls = Category
     backend: BCategory
     unchecked: Category
 
-    def __init__(self, theory, backend: BCategory, name='', kw=None, sub_kw=None, theory_clss=None):
+    def __init__(self, *args, **kwargs):
         # Notice that type checking only needs to be done the first
         # time theory_cls is instantiated when there is no sub overriding.
-        self.unchecked = Category(theory, name, kw, sub_kw, theory_clss)
+        super().__init__(*args, **kwargs)
         self.id = self.unchecked.id
-        self.backend = backend
+        self._init_composer()
+        self._init_transer()
 
     def set_semantics(self, backend: BCategory):
         u = self.unchecked
@@ -660,22 +667,25 @@ class CheckedCategory:
     def sub(self, name, theory_cls, **kw):
         self.unchecked.sub(name, theory_cls, **kw)
 
-    class _Composer(Composer):
-        @staticmethod
-        def t_compose(c):
-            return Category.t_compose(c)
-        
-        @staticmethod
-        def compose_eq(c):
-            return Category.compose_eq(c)
-        
-    class _Transer(Transer):
-        @staticmethod
-        def t_trans(p):
-            return Category.t_trans(p)
-        
-    compose = staticmethod(variadic(_Composer.compose))
-    trans = staticmethod(variadic(_Transer.trans))
+    def _init_composer(self):
+        class _Composer(Composer):
+            @staticmethod
+            def t_compose(c):
+                return self.t_compose(c)
+            
+            @staticmethod
+            def compose_eq(c):
+                return self.compose_eq(c)
+            
+        self.compose = variadic(_Composer.compose)
+
+    def _init_transer(self):   
+        class _Transer(Transer):
+            @staticmethod
+            def t_trans(p):
+                return self.t_trans(p)
+            
+        self.trans = variadic(_Transer.trans)
     
 # When checking e.g. Composable, it is often enough to just
 # verify the equality, as applying the morphisms will check
