@@ -30,6 +30,10 @@ class Obj:
 
         self._check = wrapper
 
+    def identity(self):
+        from ..ambient.category import Id
+        return Id(self)
+
     def __str__(self):
         return f'{_an(self.name)}'
     
@@ -51,7 +55,7 @@ class Mor:
             source: Obj, target: Obj,
         ):
         self.name = name
-        self.source = source
+        self.source = source # check type??
         self.target = target
 
     __str__ = Obj.__str__
@@ -70,33 +74,56 @@ class Mor:
         return self._eval(x, check_source, check_target)
 
     def set_eval(self, method):
-        from ..ambient.category import Category
-
         if hasattr(self, '_eval'):
             raise Error
+        # We don't use Category.source, because no type checking
+        # is required here. A priori, self is a Mor and self.source
+        # is an object (as checked in CheckedCategory.mor).
+        # We assume this is called as an instance method.
+        # CheckedCategory.mor (and CheckedCategory.eq, etc.) do
+        # a sort of ad hoc type checking to ensure that some equalities
+        # (e.g. glob cond) can be assumed and that certain morphisms
+        # (like source, target) are semi-prechecked, i.e. they need only
+        # be checked with check_source=True and check_target=False.
+        # However we accept having redundant type checking, as we can't
+        # assume algorithm of Category.source, Category.target.
+        # Methods such as set_eval which don't come from the theory
+        # should not include any backend type checking.
+        # Backend type checking should occur only with methods
+        # that are called when defining a theory (e.g. compose).
+        # set_eval is not used when defining a theory but when
+        # setting the semantics of the backend.
+        # What about check_signature?
+        # We may check that method here is of the right type, but that
+        # is just to fail early with a TypeError.
+        # Backend type checking in set_eval seems pointless.
+        source = self.source
+        target = self.target
 
         @wraps(method)
         def wrapper(x, check_source, check_target):
             if check_source:
-                Category.source(self).check(x)
+                source.check(x)
             result = method(x)
             if check_target:
-                Category.target(self).check(result)
+                target.check(result)
             return result
             
         self._eval = wrapper
     
     def check_signature(self, value: 'Mor'):
-        from ..ambient.category import Category
-
         # With assignment and projections the source and target
         # may be undetermined. In any case, setting the source
         # should determine the target. This consists of setting
         # the source of the assignment or projection, so that
         # setting the source propagates, or is rather induced
         # from the outside.
-        if Category.source(self) == Category.source(value):
-            if Category.target(self) == Category.target(value):
+
+        if not isinstance(value, Mor):
+            raise Error
+
+        if self.source == value.source:
+            if self.target == value.target:
                 return
             raise Error(f'Targets of {self} and {value} differ')
         raise Error(f'Sources of {self} and {value} differ')
@@ -111,7 +138,7 @@ class Mor:
         # morphisms. The return values should be True and False.
         # __eq__ should only return True in the obvious
         # cases. Other equalities must be constructed, even if
-        # programmatically. Always check_signature befor
+        # programmatically. Always check_signature before
         # calling __eq__. __eq__ is extensional equality.
     def __eq__(self, x: 'Mor'):
         # This should be enough to make morphisms with different
@@ -133,12 +160,19 @@ class DefMor(Mor):
         self.set_value(value, source)
 
     def set_value(self, value, source):
-        from ..ambient.category import Category
+        # Making sure the signature of value is correct is not part of the theory.
+        # From the perspective of the theory there is only one morphism.
+        # The two morphisms that are syntactically distinguished (Mor and DefMor)
+        # are extensionally equal.
+        # check_signature is not backend type checked, but it does check
+        # that value is a Mor etc. as required in order for the value assignment
+        # to make sense.
+        # Interpreting Obj value as morphism is also part of the syntax not of the theory.
 
         if isinstance(value, Unsourced):
             value = value.with_source(source)
         elif isinstance(value, Obj):
-            value = Category.identity(value)
+            value = value.identity()
         self.check_signature(value)
         self.value = value
 
@@ -165,6 +199,9 @@ class HatMor(Mor):
         source: Mor | Obj,
         target: Mor | Obj,
     ):
+        # TODO: Check type of source, target here instead of in CheckedCategory.mor?
+        # One way to avoid redundant type checking is move all type checking (and possibly
+        # identity() calls) to Category.mor.
         source, target, self.hat_source, self.hat_target = \
             self.unfold_source_target(source, target)
         super().__init__(name, source, target)
@@ -172,20 +209,25 @@ class HatMor(Mor):
 
     @staticmethod
     def unfold_source_target(source, target):
-        from ..ambient.category import Category
+        # This is syntax not theory.
 
         if isinstance(source, Mor):
             if isinstance(target, Mor):
                 hat_target = target
-                target = Category.source(hat_target)
+                target = hat_target.source
+            elif isinstance(target, Obj):
+                hat_target = target.identity()
             else:
-                hat_target = Category.identity(target)
+                raise Error
             hat_source = source
-            source = Category.source(hat_source)
+            source = hat_source.source
         elif isinstance(target, Mor):
             hat_target = target
-            target = Category.source(hat_target)
-            hat_source = Category.identity(source)
+            target = hat_target.source
+            if isinstance(source, Obj):
+                hat_source = source.identity()
+            else:
+                raise Error
 
         return source, target, hat_source, hat_target
 

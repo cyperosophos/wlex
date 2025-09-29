@@ -29,6 +29,7 @@ type ProductMor := (
     p_eq, q_eq: Eq,
     source @ (Mor == Span),
     target @ Mor == source @ pt,
+    # TODO: This needs some special notation like @>.
     (compose @ (($p, $q) @ pt, Mor), Span) == eq @ ($p_eq, $q_eq),
 );
 

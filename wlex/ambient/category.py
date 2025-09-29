@@ -44,9 +44,13 @@ class Comp(Mor):
         # True or False
         if super().__eq__(x):
             return True
-        if isinstance(x, (Comp, Id)):
-            if self.flat() == x.flat():
-                return True
+        return self._eq(x)
+    
+    def _eq(self, x: Mor):
+        return (
+            isinstance(x, (Comp, Id))
+            and self.flat() == x.flat()
+        )
             
     def __str__(self):
         return f'{self.f} @ {self.g}'
@@ -58,28 +62,39 @@ class Id(Mor):
     def __init__(self, obj: Obj):
         super().__init__(obj.name, obj, obj)
         # Recall that eval is only called by the checked ambient.
-        self.set_eval(lambda *args, **kwargs: (args, kwargs))
+        #self.set_eval(lambda *args, **kwargs: (args, kwargs))
 
     def flat(self):
         return ()
     
     def __eq__(self, x: Mor):
+        if super().__eq__(x):
+            return True
         return (
-            Comp.__eq__(self, x)
+            Comp._eq(self, x)
             and Category.source(self) == Category.source(x)
         )
+    
+    def eval(self, x, check_source=True, check_target=True):
+        if check_source or check_target:
+            Category.source(self).check(x)
+        return x
+    
+    def set_eval(self, method):
+        raise Error
     
 class UnsourcedComp(Unsourced):
     # Eval is not supported until converting to Comp.
     # Conversion to Comp must occur even in the absence of
     # type checking.
 
-    def __init__(self, f, g: Unsourced):
+    def __init__(self, f, g: Unsourced, comp):
         self.f = f
         self.g = g
+        self.comp = comp
 
     def with_source(self, source):
-        return Comp(
+        return self.comp(
             self.f,
             self.g.with_source(source),
         )
@@ -87,6 +102,7 @@ class UnsourcedComp(Unsourced):
 class UnsourcedId(Unsourced):
     # TODO: Recall that pairing can be made out of unsourced components.
     def with_source(self, source):
+        # TODO: Use Category.id?
         return Id(source)
     
 class Trans(Eq):
@@ -200,7 +216,7 @@ class AssociativitySource:
 
 def variadic(m):
     # This doesn't handle nullary.
-    wraps(m)
+    @wraps(m)
     def wrapper(head, *tail):
         if not tail:
             return head
@@ -216,7 +232,14 @@ class Composer:
     ) -> Mor | Unsourced | Eq:
         # No further type checking is or should be needed here.
         # Being Composable is the only requirement available for
-        # type checking at the lang level.
+        # type checking at the lang level. Being Composable means
+        # having f, g of type Mor with the equality of source and target
+        # (as checked by the Lex backend).
+        # This should work like syntax sugar with respect to e.g.
+        # composing a Mor and an Obj, etc. Hence calls like
+        # ref, ssource, target identity, etc. should all support
+        # backend type checking. The would support backend type checking
+        # if t_compose, t_compose_eq where manually used.
         # The question arrises here about the separation between
         # type checking and evaluation (compilation time vs
         # execution time). Composing f and g does not evaluate
@@ -242,9 +265,10 @@ class Composer:
         if isinstance(f, Unsourced):
             if isinstance(g, Eq):
                 # No checking needed with ref
-                f = Category.ref(f.with_source(g.ssource.target))
+                s = Category.target(Category.ssource(g))
+                f = Category.ref(f.with_source(s))
                 return cls.compose_eq((f, g))
-            f = f.with_source(g.target)
+            f = f.with_source(Category.target(g))
             return cls.t_compose((f, g))
 
         if isinstance(f, Eq):
@@ -633,7 +657,13 @@ class CheckedCategory(Checked):
     def obj(self, name):
         self.unchecked.obj(name)
     
-    def mor(self, name, source: Mor | Obj, target: Mor | Obj, value=None, proof=None) -> Mor | Unsourced | Eq:
+    def mor(
+            self, name,
+            source: Mor | Obj,
+            target: Mor | Obj, 
+            value=None,
+            proof=None,
+        )-> Mor | Unsourced | Eq:
         self.unchecked.mor(name, source, target, value, proof)
         theory = self.unchecked.theory
         _mor: Mor = getattr(theory, name)
@@ -676,7 +706,7 @@ class CheckedCategory(Checked):
             @staticmethod
             def compose_eq(c):
                 return self.compose_eq(c)
-            
+  
         self.compose = variadic(_Composer.compose)
 
     def _init_transer(self):   
