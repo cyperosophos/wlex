@@ -4,12 +4,26 @@ from typing import Optional
 class Error(Exception):
     pass
 
-def filter_name(name):
-    return name or '<anon>'
-
-_an = filter_name
-
 class Obj:
+    __slots__ = ()
+
+    def check(self, x):
+        raise NotImplementedError
+
+    def set_check(self, method):
+        raise Error
+
+    def identity(self):
+        from ..ambient.category import Id
+        return Id(self)
+    
+    def terminal_mor(self):
+        from ..ambient.cart import TerminalMor
+        return TerminalMor(self)
+
+class PrimObj(Obj):
+    __slots__ = '_check',
+
     def __init__(self, name):
         # An object can't be assigned a value like a morphism can.
         # This is because all objects have the same signature,
@@ -29,39 +43,39 @@ class Obj:
             raise Error
 
         self._check = wrapper
-
-    def identity(self):
-        from ..ambient.category import Id
-        return Id(self)
-
-    def __str__(self):
-        return f'{_an(self.name)}'
     
+    def __str__(self):
+        return self.name
+
     def __repr__(self):
-        return f'`type {_an(self.name)}`'
+        return f'`type {self!s}`'
 
 class Unsourced:
-    # There must be a separate class for unsourced projections, etc.
-    def with_source(self, source):
-        raise NotImplementedError
+    __slots__ = ()
 
+    # There must be a separate class for unsourced projections, etc.
+    def with_source(self, source: Obj) -> 'Mor':
+        raise NotImplementedError
+    
 class Mor:
+    __slots__ = 'source', 'target'
+
     hat: 'Eq'
     source: Obj
     target: Obj
 
-    def __init__(
-            self, name,
-            source: Obj, target: Obj,
-        ):
-        self.name = name
-        self.source = source # check type??
-        self.target = target
+    def eval(self, x, check_source=True, check_target=True):
+        raise NotImplementedError
 
-    __str__ = Obj.__str__
+    def set_eval(self, method):
+        raise Error
     
-    def __repr__(self):
-        return f'`fn {_an(self.name)}: {_an(self.source.name)} -> {_an(self.target.name)}`'
+    def __init__(self, source: Obj, target: Obj,):
+        # Type checking from syntax not backend.
+        # Most type checking should be done at the public method
+        # in order to avoid redundant type checking.
+        self.source = source
+        self.target = target
 
     @property
     def hat(self):
@@ -69,6 +83,75 @@ class Mor:
         # triangle involving the terminal object.
         # It is better in fact to just raise an Error.
         raise Error
+
+    def ref(self):
+        from ..ambient.category import Ref
+        return Ref(self)
+    
+    def comp(self, g):
+        from ..ambient.category import Comp
+        return Comp(self, g)
+    
+    def terminal_mor_unique(self):
+        # Just like with comp, we don't check the equalizer.
+        from ..ambient.cart import TerminalMorUnique
+        return TerminalMorUnique(self)
+    
+    #def __eq__(self, x: 'Mor'):
+        # Plugging equalities through transitivity without too much
+        # bureaucracy requires treating some morphisms as if they
+        # were equal. It also requires applying the symmetry as needed.
+        # Category Mor handles assoc, left and right id, definition.
+        # The first three may be handled by CompMor.__eq__.
+        # One can't actually prove a negative for equality of
+        # morphisms. The return values should be True and False.
+        # __eq__ should only return True in the obvious
+        # cases. Other equalities must be constructed, even if
+        # programmatically. Always check_signature before
+        # calling __eq__. __eq__ is extensional equality.
+    def __eq__(self, x: 'Mor'):
+        # This should be enough to make morphisms with different
+        # signatures not equal. This (non) equality makes sense
+        # since it is definitional/extensional.
+        # There are a few cases where one should verify the signature,
+        # e.g. identity.
+        if x is self:
+            return True
+        if isinstance(x, (DefMor, DefHatMor)):
+            return self == x.value
+        elif not isinstance(x, Mor):
+            raise TypeError
+        return False
+    
+    def check_signature(self, value: 'Mor'):
+        # With assignment and projections the source and target
+        # may be undetermined. In any case, setting the source
+        # should determine the target. This consists of setting
+        # the source of the assignment or projection, so that
+        # setting the source propagates, or is rather induced
+        # from the outside.
+
+        if not isinstance(value, Mor):
+            # TypeError because this is not backend type checking
+            raise TypeError
+
+        if self.source == value.source:
+            if self.target == value.target:
+                return
+            raise Error(f'Targets of {self} and {value} differ')
+        raise Error(f'Sources of {self} and {value} differ')
+
+class PrimMor(Mor):
+    __slots__ = 'name', '_eval'
+
+    def __init__(self, name, source: Obj, target: Obj,):
+        self.name = name
+        super().__init__(source, target)
+
+    __str__ = PrimObj.__str__
+
+    def __repr__(self):
+        return f'`fn {self!s}: {self.source} -> {self.target}`'
 
     def eval(self, x, check_source=True, check_target=True):
         return self._eval(x, check_source, check_target)
@@ -110,53 +193,19 @@ class Mor:
             return result
             
         self._eval = wrapper
-    
-    def check_signature(self, value: 'Mor'):
-        # With assignment and projections the source and target
-        # may be undetermined. In any case, setting the source
-        # should determine the target. This consists of setting
-        # the source of the assignment or projection, so that
-        # setting the source propagates, or is rather induced
-        # from the outside.
-
-        if not isinstance(value, Mor):
-            raise Error
-
-        if self.source == value.source:
-            if self.target == value.target:
-                return
-            raise Error(f'Targets of {self} and {value} differ')
-        raise Error(f'Sources of {self} and {value} differ')
-        
-    #def __eq__(self, x: 'Mor'):
-        # Plugging equalities through transitivity without too much
-        # bureaucracy requires treating some morphisms as if they
-        # were equal. It also requires applying the symmetry as needed.
-        # Category Mor handles assoc, left and right id, definition.
-        # The first three may be handled by CompMor.__eq__.
-        # One can't actually prove a negative for equality of
-        # morphisms. The return values should be True and False.
-        # __eq__ should only return True in the obvious
-        # cases. Other equalities must be constructed, even if
-        # programmatically. Always check_signature before
-        # calling __eq__. __eq__ is extensional equality.
-    def __eq__(self, x: 'Mor'):
-        # This should be enough to make morphisms with different
-        # signatures not equal. This (non) equality makes sense
-        # since it is definitional/extensional.
-        # There are a few cases where one should verify the signature,
-        # e.g. identity.
-        if x is self:
-            return True
-        if isinstance(x, (DefMor, DefHatMor)):
-            return self == x.value
-        return False
 
 class DefMor(Mor):
+    __slots__ = 'name', 'value'
     value: Mor
 
+    __str__ = PrimObj.__str__
+
+    def __repr__(self):
+        return f'`fn {self!s}: {self.source} -> {self.target} = {self.value}`'
+
     def __init__(self, name, source, target, value: Mor | Unsourced | Obj):
-        super().__init__(name, source, target)
+        self.name = name
+        super().__init__(source, target)
         self.set_value(value, source)
 
     def set_value(self, value, source):
@@ -179,9 +228,6 @@ class DefMor(Mor):
     def eval(self, x, check_source=True, check_target=True):
         return self.value.eval(x, check_source, check_target)
     
-    def set_eval(self, method):
-        raise Error
-    
     def __eq__(self, x: Mor):
         if super().__eq__(x):
             return True
@@ -190,18 +236,24 @@ class DefMor(Mor):
         return self.value == x
 
 class HatMor(Mor):
+    __slots__ = 'name', 'hat_source', 'hat_target', 'hat_proven'
     hat_source: 'Mor'
     hat_target: 'Mor'
     hat_proven: bool
+
+    __str__ = PrimObj.__str__
+
+    def __repr__(self):
+        return f'`fn {self!s}: {self.hat_source} -> {self.hat_target}`'
 
     def __init__(
         self, name,
         source: Mor | Obj,
         target: Mor | Obj,
     ):
-        # TODO: Check type of source, target here instead of in CheckedCategory.mor?
+        self.name = name
         # One way to avoid redundant type checking is move all type checking (and possibly
-        # identity() calls) to Category.mor.
+        # identity() calls) to Category.mor. However, this makes the code more complicated.
         source, target, self.hat_source, self.hat_target = \
             self.unfold_source_target(source, target)
         super().__init__(name, source, target)
@@ -210,6 +262,7 @@ class HatMor(Mor):
     @staticmethod
     def unfold_source_target(source, target):
         # This is syntax not theory.
+        # Some type checking of Category.mor is deferred to this method.
 
         if isinstance(source, Mor):
             if isinstance(target, Mor):
@@ -218,7 +271,7 @@ class HatMor(Mor):
             elif isinstance(target, Obj):
                 hat_target = target.identity()
             else:
-                raise Error
+                raise TypeError
             hat_source = source
             source = hat_source.source
         elif isinstance(target, Mor):
@@ -227,18 +280,18 @@ class HatMor(Mor):
             if isinstance(source, Obj):
                 hat_source = source.identity()
             else:
-                raise Error
+                raise TypeError
+        else:
+            raise TypeError
 
         return source, target, hat_source, hat_target
 
     @property
     def hat(self):
-        from ..ambient.category import Category
-
         h = Eq(
             f'^{self.name}',
             self.hat_source,
-            Category.t_compose((self.hat_target, self)),
+            self.hat_target.comp(self),
         )
         if self.hat_proven:
             h.assume()
@@ -307,13 +360,13 @@ class HatMor(Mor):
         self.hat_proven = True
 
 class Eq:
+    __slots__ = 'ssource', 'starget', '_proven'
     ssource: Mor
     starget: Mor
     proven: bool
 
-    def __init__(self, name, ssource: Mor, starget: Mor, proof: Optional['Eq'] = None):
+    def __init__(self, ssource: Mor, starget: Mor, proof: Optional['Eq'] = None):
         # No checking of globular conditions here
-        self.name = name
         self._proven = False
         self.ssource = ssource
         self.starget = starget
@@ -323,6 +376,50 @@ class Eq:
     @property
     def proven(self):
         return self._proven
+    
+    def assume(self):
+        raise Error
+    
+    def verify(self, x, check_source=True, check_target=True):
+        left_side = self.ssource.eval(x, check_source, check_target)
+        right_side = self.starget.eval(x, check_source, check_target)
+        if left_side == right_side:
+            return
+        raise Error
+    
+    def __eq__(self, proof: 'Eq'):
+        if proof is self:
+            return True
+        if not isinstance(proof, Eq):
+            raise TypeError
+        # self.proven can't be set here as that would modify the state.
+        # No need for backend type checking here.
+        if self.ssource == proof.ssource:
+            if self.starget == proof.starget:
+                return True
+            return False
+        elif self.ssource == proof.starget:
+            # Symmetry
+            if self.starget == proof.ssource:
+                return True
+            return False
+        return False
+    
+    def trans(self, g):
+        from ..ambient.category import Trans
+        return Trans(self, g)
+    
+    def comp_eq(self, e):
+        from ..ambient.category import CompEq
+        return CompEq(self, e)
+    
+class PrimEq(Eq):
+    __slots__ = 'name',
+
+    def __init__(self, name, ssource: Mor, starget: Mor, proof: Optional['Eq'] = None):
+        # No checking of globular conditions here
+        self.name = name
+        super().__init__(ssource, starget, proof)
 
     def assume(self):
         # self.proven is the conjunction of the proven values of
@@ -331,41 +428,19 @@ class Eq:
             raise Error
         self._proven = True
 
-    def verify(self, x, check_source=True, check_target=True):
-        from ..ambient.category import Category
+    __str__ = PrimObj.__str__
 
-        left_side = Category.ssource(self).eval(x, check_source, check_target)
-        right_side = Category.starget(self).eval(x, check_source, check_target)
-        if left_side == right_side:
-            return
-        raise Error
-    
-    def __eq__(self, proof: 'Eq'):
-        from ..ambient.category import Category
-
-        if proof is self:
-            return True
-        # self.proven can't be set here as that would modify the state.
-        if Category.ssource(self) == Category.ssource(proof):
-            if Category.starget(self) == Category.starget(proof):
-                return True
-            return False
-        elif Category.ssource(self) == Category.starget(proof):
-            # Symmetry
-            if Category.starget(self) == Category.ssource(proof):
-                return True
-            return False
-        return False
-    
-    __str__ = Obj.__str__
-    
     def __repr__(self):
-        return f'`eq {_an(self.name)}: {_an(self.ssource.name)} == {_an(self.starget.name)}`'
+        return f'`eq {self!s}: {self.ssource} == {self.starget.name} = {self._proven}`'
 
 class DefHatMor(DefMor):
+    __slots__ = 'hat_source', 'hat_target', 'hat_proven'
     hat_source: 'Mor'
     hat_target: 'Mor'
-    hat_proven: bool    
+    hat_proven: bool
+
+    def __repr__(self):
+        return f'`fn {self!s}: {self.hat_source} -> {self.hat_target} = {self.value}`' 
 
     def __init__(
         self, name,
@@ -379,9 +454,9 @@ class DefHatMor(DefMor):
             HatMor.unfold_source_target(source, target)
         super().__init__(name, source, target, value)
         if isinstance(proof, Obj):
-            proof = Category.identity(proof)
+            proof = proof.identity()
         if isinstance(proof, Mor):
-            proof = Category.ref(proof)
+            proof = proof.ref()
         self.hat_proven = False
         if self.hat == proof:
             self.hat_proven = proof.proven

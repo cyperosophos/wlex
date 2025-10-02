@@ -1,44 +1,42 @@
-from dataclasses import dataclass
+from typing import NamedTuple
 from itertools import chain
 from collections.abc import Sequence, Mapping
 
 from ..theory.cart import Cart as BCart
-from . import Obj, Mor, Eq, Checked
-from .cells import filter_name as _an
+from . import Obj, Mor, Eq
 from .category import Category, variadic, Unsourced, AttrDict, CheckedCategory
 
 class Error(Exception):
     pass
 
-# TODO: Consider using __slots__
-
 class TerminalObj(Obj):
-    def __init__(self):
-        super().__init__(None)
+    __slots__ = ()
+    T: 'TerminalObj'
 
     def __eq__(self, v):
-        return isinstance(v, TerminalObj)
+        return self is v or isinstance(v, TerminalObj)
 
     def check(self, x):
         if x != ():
             raise Error
     
-    def set_check(self, method):
-        raise Error
-    
     def __str__(self):
-        return f'()'
+        # The : helps distinguish product and pairing, as well as
+        # terminal object and terminal morphism.
+        return '(:)'
     
     def __repr__(self):
         return f'`terminal_obj {self!s}`'
     
+TerminalObj.T = TerminalObj()
 
 class TerminalMor(Mor):
+    __slots__ = ()
     # eval returns ()
     def __init__(self, t: Obj):
         source = t
-        target = Cart.terminal
-        super().__init__(None, source, target)
+        target = TerminalObj.T
+        super().__init__(source, target)
     
     def eval(self, x, check_source=True, check_target=True):
         if check_source:
@@ -46,26 +44,44 @@ class TerminalMor(Mor):
         # No need to check target
         return ()
     
-    def set_eval(self, method):
-        raise Error
-    
     def __eq__(self, x: Mor):
         # __eq__ equality is extensional. The full uniqueness
         # (i.e. two morphisms with terminal object as target being equal)
         # is proved through terminal_mor_unique.
+        if super().__eq__(x):
+            return True
         return (
-            Cart.source(self) == Cart.source(x)
-            and Cart.target(x) == Cart.terminal
+            self.source == x.source
+            and TerminalObj.T == x.target
         )
     
-    # __str__
-    # __repr__
+    def __str__(self):
+        # It's ok to not write ()[T], because the contexts where this
+        # will show up will often make the type clear.
+        return f'()'
+
+    def __repr__(self):
+        return f'`terminal_mor {self!s}[{self.source}]`'
+    
+class UnsourcedTerminalMor(Unsourced):
+    __slots__ = ()
+
+    def with_source(self, source: Obj):
+        return source.terminal_mor()
+    
+    def __str__(self):
+        return '()'
+    
+    def __repr__(self):
+        return '`unsourced_terminal_mor`'
 
 class TerminalMorUnique(Eq):
+    __slots__ = ()
+
     def __init__(self, mor: Mor):
         ssource = Cart.terminal_mor(Cart.source(mor))
         starget = mor
-        super().__init__(mor.name, ssource, starget)
+        super().__init__(ssource, starget)
 
     @property
     def proven(self):
@@ -74,49 +90,80 @@ class TerminalMorUnique(Eq):
     def assume(self):
         raise Error
     
-    # __str__
-    # __repr__
+    def __str__(self):
+        # One simply uses [] instead of something like {} regardless
+        # of naturality, functoriality, etc., since these properties
+        # are not part of the type checking system, i.e. they don't
+        # belong to the theory, except as properties of specific
+        # functors and nat trans. These properties occur a posteriori.
+        # This is like a macro. The same applies to interface functors, etc.
+        # The idea is that constructs of the theory have no special syntax.
+        # So f @ g could be written as comp[f, g], etc. All the backend type checking
+        # is supported. One may in fact define macros.
+        # TODO: Should interface functors use a different syntax?
+        return f'terminal_mor_unique[{self.starget.source}]'
+    
+    def __repr__(self):
+        return f'`terminal_mor_unique {self!s}`'
+
+# Recall that Product is used when building theory, i.e.
+# the return type of ambient.product.
+# ambient.t_product takes Product and returns TProduct.
+# TProduct instance must pass the backend type checking
+# for Span, which is an instance of Product with equalizer.
+# Hence, TProduct instance doesn't provide a check method
+# (for objects to be considered to have the TProduct instance
+# as type) it simply passes Product type checking.
+# More specfically (X, Y) is of type Product(x=Obj, y=Obj),
+# TProduct(X, Y) is of type Product(p=Mor, q=Mor) with equalizer
+# (as supported by Lex, namely Span).
+# $p and $q used in theory are not TProductProj but just the
+# regular Proj for Product (no use for eval).
+# Also no clear use for __eq__.
+# At most, one uses t_product within product, because the former
+# is type checked by backend.
+
+class TProductProj(Mor):
+    proj_name: str
+
+    def __init__(self, prod):
+        source = prod
+        target = getattr(prod, self.proj_name)
+        super().__init__(source, target)
+
+    def __str__(self):
+        return f'${self.proj_name}'
+
+    def __repr__(self):
+        return f'`t_product_proj {self!s}: {self.source} -> {self.target}`'
+    
+    def __eq__(self, x: Mor):
+        if super().__eq__(x):
+            return True
+        return (
+            isinstance(x, type(self))
+            and self.source == x.source
+        )
+    
+    def eval(self, v, check_source=True, check_target=True):
+        if check_source:
+            pass
+        return getattr(v, self.proj_name)
+    
+    def set_eval(self, method):
+        raise Error
+    
+class TProductXProj(TProductProj):
+    proj_name = 'x'
+
+class TProductYProj(TProductProj):
+    proj_name = 'y'
 
 class TProduct(Obj, Mapping):
     x: Obj
     y: Obj
 
     _keys = ('p', 'q')
-
-    class _Proj(Mor):
-        proj_name: str
-
-        def __init__(self, prod):
-            source = prod
-            target = getattr(prod, self.proj_name)
-            super().__init__(None, source, target)
-
-        def __repr__(self):
-            return f'`t_product_proj {_an(self.name)}: {_an(self.source.name)} -> {_an(self.target.name)}`'
-        
-        def __eq__(self, x: Mor):
-            if super().__eq__(x):
-                return True
-            if isinstance(x, type(self)):
-                return (
-                    self.source == x.source
-                    and self.target == x.target
-                )
-            return False
-        
-        def eval(self, v, check_source=True, check_target=True):
-            if check_source:
-                pass
-            return getattr(v, self.proj_name)
-        
-        def set_eval(self, method):
-            raise Error
-        
-    class _XProj(_Proj):
-        proj_name = 'x'
-
-    class _YProj(_Proj):
-        proj_name = 'y'
 
     # This is the actual common source of the Span returned
     # by t_product. True product. The public method product
@@ -144,11 +191,12 @@ class TProduct(Obj, Mapping):
     def p(self):
         # The projection here is called p, but that doesn't mean
         # the attr in the semantics is called p.
-        return self._XProj(self)
+        # This is required for __eq__ and eval.
+        return TProductXProj(self)
     
     @property
     def q(self):
-        return self._YProj(self)
+        return TProductYProj(self)
     
     def __iter__(self):
         return iter(self._keys)
@@ -542,18 +590,15 @@ class TProductMor(Mor, Mapping):
 class ProductMor(Mor):
     pass
 
-@dataclass
-class ObjObj:
+class ObjObj(NamedTuple):
     x: Obj
     y: Obj
 
-@dataclass
-class Span:
+class Span(NamedTuple):
     p: Mor
     q: Mor
 
-@dataclass
-class SpanEq:
+class SpanEq(NamedTuple):
     p_eq: Eq
     q_eq: Eq
 
@@ -672,7 +717,7 @@ def _filter_arg(arg):
 
 class Cart(Category):
     # This is static like all other theory methods
-    terminal = TerminalObj()
+    terminal = TerminalObj.T
 
     def el(
             self, name,
@@ -690,21 +735,21 @@ class Cart(Category):
     def proj():
         pass
 
-    @staticmethod
-    def t_product(p: ObjObj) -> TProduct:
+    def t_product(self, p: ObjObj) -> Span:
         # According to the type checking done by backend
         # The source of t_product must by of type Product
         # with params x, y, e.g. dict(x=x, y=y), (x, y).
         # The target must be of type Span, which is a subset
         # of Product (as supported by ambient Lex) with params
-        # p, q. Is this what __iter__ is for??
+        # p, q.
         # What about AttrDict? Should it be supported by Product type checking??
         # AttrDict is already a dict, so it is supported.
         # The whole type checking is done in the backend.
         # There's no way around it, since one doesn't know that
         # the function always returns TProduct.
         x, y = AttrDict.to_tuple(p, ObjObj)
-        return TProduct(x, y)
+        source = Obj()
+        return Span(Mor(source, x), Mor(source, y))
 
     class _Producer(Producer):
         @staticmethod

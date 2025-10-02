@@ -1,9 +1,8 @@
 from functools import wraps
-from dataclasses import dataclass, astuple
-from typing import Union
+from typing import Union, NamedTuple
 import weakref
 
-from .cells import Obj, Mor, DefMor, HatMor, DefHatMor, Eq, Unsourced
+from .cells import Obj, Mor, DefMor, HatMor, DefHatMor, Eq, Unsourced, PrimObj, PrimMor, PrimEq
 from ..theory.category import Category as BCategory
 from . import Checked
     
@@ -11,10 +10,11 @@ class Error(Exception):
     pass
 
 class Comp(Mor):
+    __slots__ = 'f', 'g'
     def __init__(self, f: Mor, g: Mor):
-        source = Category.source(g)
-        target = Category.target(f)
-        super().__init__(None, source, target)
+        source = g.source
+        target = f.target
+        super().__init__(source, target)
         self.f = f
         self.g = g
 
@@ -25,9 +25,6 @@ class Comp(Mor):
             check_source=False,
             check_target=check_target,
         )
-    
-    def set_eval(self, method):
-        raise Error
     
     def flat(self):
         if isinstance(self.f, (Comp, Id)):
@@ -53,14 +50,15 @@ class Comp(Mor):
         )
             
     def __str__(self):
-        return f'{self.f} @ {self.g}'
+        return f'({self.f} @ {self.g})'
             
     def __repr__(self):
         return f'`comp {self!s}`'
     
 class Id(Mor):
+    __slots__ = ()
     def __init__(self, obj: Obj):
-        super().__init__(obj.name, obj, obj)
+        super().__init__(obj, obj)
         # Recall that eval is only called by the checked ambient.
         #self.set_eval(lambda *args, **kwargs: (args, kwargs))
 
@@ -72,18 +70,24 @@ class Id(Mor):
             return True
         return (
             Comp._eq(self, x)
-            and Category.source(self) == Category.source(x)
+            and self.source == x.source
         )
     
     def eval(self, x, check_source=True, check_target=True):
+        # TODO: Is it possible to have eval without type checking?
+        # e.g. in the most concrete theory, which implements IO, etc.
         if check_source or check_target:
-            Category.source(self).check(x)
+            self.source.check(x)
         return x
     
-    def set_eval(self, method):
-        raise Error
+    def __str__(self):
+        return f'{self.source}'
+    
+    def __repr__(self):
+        return f'`id {self!s}`'
     
 class UnsourcedComp(Unsourced):
+    __slots__ = 'f', 'g', '_comp'
     # Eval is not supported until converting to Comp.
     # Conversion to Comp must occur even in the absence of
     # type checking.
@@ -91,25 +95,42 @@ class UnsourcedComp(Unsourced):
     def __init__(self, f, g: Unsourced, comp):
         self.f = f
         self.g = g
-        self.comp = comp
+        self._comp = comp
 
-    def with_source(self, source):
-        return self.comp(
+    def with_source(self, source: Obj):
+        # source should always be checked to ba Mor
+        # The full type checking for comp is done here.
+        # To avoid failing so late, one may trying requiring f to be Mor and
+        # precomposing it with g.target.identity. However, the target of g is
+        # not actually determined until a source is set.
+        return self._comp(
             self.f,
             self.g.with_source(source),
         )
+    
+    __str__ = Comp.__str__
+
+    def __repr__(self):
+        return f'`unsourced_comp {self!s}`'
 
 class UnsourcedId(Unsourced):
+    __slots__ = ()
     # TODO: Recall that pairing can be made out of unsourced components.
-    def with_source(self, source):
-        # TODO: Use Category.id?
-        return Id(source)
+    def with_source(self, source: Obj):
+        return source.identity()
+    
+    def __str__(self):
+        return 'id'
+    
+    def __repr__(self):
+        return '`unsourced_id`'
     
 class Trans(Eq):
+    __slots__ = 'f', 'g'
     def __init__(self, f: Eq, g: Eq):
-        ssource = Category.ssource(g)
-        starget = Category.starget(f)
-        super().__init__(None, ssource, starget)
+        ssource = g.ssource
+        starget = f.starget
+        super().__init__(ssource, starget)
         self.f = f
         self.g = g
     
@@ -117,17 +138,18 @@ class Trans(Eq):
     def proven(self):
         return self.f.proven and self.g.proven
     
-    def assume(self):
-        raise Error
+    def __str__(self):
+        return f'({self.f} & {self.g})'
+            
+    def __repr__(self):
+        return f'`trans {self!s}`'
     
 class CompEq(Eq):
+    __slots__ = 'd', 'e'
     def __init__(self, d: Eq, e: Eq):
-        self.ssource  = Category.t_compose(
-            (Category.ssource(d), Category.ssource(e))
-        )
-        self.starget = Category.t_compose(
-            (Category.starget(d), Category.starget(e))
-        )
+        ssource  = d.ssource.comp(e.ssource)
+        starget = d.starget.comp(e.starget)
+        super().__init__(ssource, starget)
         self.d = d
         self.e = e
 
@@ -135,20 +157,26 @@ class CompEq(Eq):
     def proven(self):
         return self.d.proven and self.e.proven
     
-    assume = Trans.assume
+    def __str__(self):
+        return f'{self.d} & {self.e}'
+            
+    def __repr__(self):
+        return f'`comp_eq {self!s}`'
 
 class Ref(Eq):
     def __init__(self, mor: Mor):
-        super().__init__(mor.name, mor, mor)
+        super().__init__(mor, mor)
     
     @property
     def proven(self):
         return True
-    
-    assume = Trans.assume
 
-    # __str__
-    # __repr__
+    def __str__(self):
+        return f'{self.ssource}'
+    
+    def __repr__(self):
+        # This appears to be ref(m) not ref[m].
+        return f'`ref {self!s}`'
     
 @staticmethod
 def _extract_sub_kw(kw: dict):
@@ -164,52 +192,23 @@ def _extract_sub_kw(kw: dict):
             d[skey[1]] = kw.pop(key)
     return sub_kw
 
-class AttrDict(dict):
-    def __init__(self, *args, **kwargs):
-        super(AttrDict, self).__init__(**kwargs)
-        self.__dict__ = self # TODO: Does this ever get used?
-        for i, arg in enumerate(args):
-            self[i] = arg
-
-    @staticmethod
-    def to_tuple(d: Union['AttrDict', tuple, dict], tuple_cls) -> tuple:
-        if isinstance(d, tuple):
-            return d
-        if not isinstance(d, AttrDict):
-            return astuple(tuple_cls(**d))
-        i = 0
-        args = []
-        kwargs = d.copy()
-        try:
-            while True:
-                args.append(kwargs.pop(i))
-                i += 1
-        except KeyError:
-            pass
-        return astuple(tuple_cls(*args, **kwargs))
-
-@dataclass
-class Path:
+class Path(NamedTuple):
     f: Eq
     g: Eq
 
-@dataclass
-class Composable:
+class Composable(NamedTuple):
     f: Mor
     g: Mor
 
-@dataclass
-class ComposableEq:
+class ComposableEq(NamedTuple):
     d: Eq
     e: Eq
 
-@dataclass
-class UniqueSource:
+class UniqueSource(NamedTuple):
     d: Eq
     e: Eq
 
-@dataclass
-class AssociativitySource:
+class AssociativitySource(NamedTuple):
     f: Mor
     g: Mor
     h: Mor
@@ -217,93 +216,90 @@ class AssociativitySource:
 def variadic(m):
     # This doesn't handle nullary.
     @wraps(m)
-    def wrapper(head, *tail):
+    def wrapper(self, head, *tail):
         if not tail:
             return head
-        return m(head, wrapper(*tail))
+        return m(self, head, wrapper(*tail))
     return wrapper
 
-class Composer:
-    @classmethod
-    def compose(
-        cls,
-        f: Mor | Unsourced | Eq | Obj,
-        g: Mor | Unsourced | Eq | Obj,
-    ) -> Mor | Unsourced | Eq:
-        # No further type checking is or should be needed here.
-        # Being Composable is the only requirement available for
-        # type checking at the lang level. Being Composable means
-        # having f, g of type Mor with the equality of source and target
-        # (as checked by the Lex backend).
-        # This should work like syntax sugar with respect to e.g.
-        # composing a Mor and an Obj, etc. Hence calls like
-        # ref, ssource, target identity, etc. should all support
-        # backend type checking. The would support backend type checking
-        # if t_compose, t_compose_eq where manually used.
-        # The question arrises here about the separation between
-        # type checking and evaluation (compilation time vs
-        # execution time). Composing f and g does not evaluate
-        # either funciton, but requires making sure (f, g) is
-        # Composable. In this sense one is doing type checking
-        # on f, but also on the metafunction `compose`,
-        # so that at the meta level one combines type checking
-        # and execution. Backend methods (source, target,
-        # compose, etc.) handle type checking during execution.
-        # They lack static type checking.
+def _compose(
+    amb: 'Category',
+    f: Mor | Unsourced | Eq | Obj,
+    g: Mor | Unsourced | Eq | Obj,
+) -> Mor | Unsourced | Eq:
+    # No further type checking is or should be needed here.
+    # Being Composable is the only requirement available for
+    # type checking at the lang level. Being Composable means
+    # having f, g of type Mor with the equality of source and target
+    # (as checked by the Lex backend).
+    # This should work like syntax sugar with respect to e.g.
+    # composing a Mor and an Obj, etc. Hence calls like
+    # ref, ssource, target identity, etc. should all support
+    # backend type checking. The would support backend type checking
+    # if t_compose, t_compose_eq where manually used.
+    # The question arrises here about the separation between
+    # type checking and evaluation (compilation time vs
+    # execution time). Composing f and g does not evaluate
+    # either funciton, but requires making sure (f, g) is
+    # Composable. In this sense one is doing type checking
+    # on f, but also on the metafunction `compose`,
+    # so that at the meta level one combines type checking
+    # and execution. Backend methods (source, target,
+    # compose, etc.) handle type checking during execution.
+    # They lack static type checking.
 
-        f, g = (
-            Category.identity(m) if isinstance(m, Obj) else m
-            for m in (f, g)
-        )
+    f, g = (
+        m.identity() if isinstance(m, Obj) else m
+        for m in (f, g)
+    )
 
-        # Unsourced, Eq comp is allowed but not Eq, Unsourced. 
-        if isinstance(g, Unsourced):
-            if isinstance(f, Eq):
-                raise Error
-            return UnsourcedComp(f, g)
-
-        if isinstance(f, Unsourced):
-            if isinstance(g, Eq):
-                # No checking needed with ref
-                s = Category.target(Category.ssource(g))
-                f = Category.ref(f.with_source(s))
-                return cls.compose_eq((f, g))
-            f = f.with_source(Category.target(g))
-            return cls.t_compose((f, g))
-
+    # Unsourced, Eq comp is allowed but not Eq, Unsourced. 
+    if isinstance(g, Unsourced):
         if isinstance(f, Eq):
-            if isinstance(g, Mor):
-                g = Category.ref(g)
-            return cls.compose_eq((f, g))
+            # For consistency, there is no UnsourcedCompEq.
+            # We'd have to compose with the ref of Unsourced,
+            # which is an equality of Unsourced and therefore
+            # not allowed.
+            raise Error
         
+        # amb.t_compose backend type checking would ensure that
+        # f is Mor. We check that here for consistency with the
+        # next block and to fail earlier.
+        if not isinstance(f, Mor):
+            raise TypeError
+        return UnsourcedComp(f, g, amb.t_compose)
+
+    if isinstance(f, Unsourced):
         if isinstance(g, Eq):
-            f = Category.ref(f)
-            return cls.compose_eq((f, g))
-        
-        return cls.t_compose((f, g))
+            # No checking needed with ref
+            s = g.ssource.target
+            f = f.with_source(s).ref()
+            return amb.compose_eq((f, g))
+        if not isinstance(g, Mor):
+            raise TypeError
+        f = f.with_source(g.target)
+        return amb.t_compose((f, g))
+
+    if isinstance(f, Eq):
+        if isinstance(g, Mor):
+            g = g.ref()
+        # This will type check g to be Eq.
+        return amb.compose_eq((f, g))
     
-    @staticmethod
-    def t_compose(c: Composable) -> Mor:
-        raise NotImplementedError
+    if isinstance(g, Eq):
+        f = f.ref()
+        return amb.compose_eq((f, g))
     
-    @staticmethod
-    def compose_eq(c: ComposableEq) -> Eq:
-        raise NotImplementedError
-    
-class Transer:
-    @classmethod
-    def trans(cls, f: Eq | Mor | Obj, g: Eq | Mor | Obj) -> Eq:
-        # Handle identity
-        f, g = (
-            Category.ref(Category.identity(m)) if isinstance(m, Obj) else
-            (Category.ref(m) if isinstance(m, Mor) else m)
-            for m in (f, g)
-        )
-        return cls.t_trans((f, g))
-    
-    @staticmethod
-    def t_trans(p: Path) -> Eq:
-        raise NotImplementedError
+    return amb.t_compose((f, g))
+
+def _trans(amb, f: Eq | Mor | Obj, g: Eq | Mor | Obj) -> Eq:
+    # Handle identity
+    f, g = (
+        m.identity().ref() if isinstance(m, Obj) else
+        (m.ref() if isinstance(m, Mor) else m)
+        for m in (f, g)
+    )
+    return amb.t_trans((f, g))
 
 class Category:
     def __init__(self, theory, name='', kw=None, sub_kw=None, theory_clss=None):
@@ -335,7 +331,7 @@ class Category:
         if name in self.kw:
             setattr(theory, name, self.kw[name])
         else:
-            setattr(theory, name, Obj(self.cell_name(name)))
+            setattr(theory, name, PrimObj(self.cell_name(name)))
 
     def mor(
             self, name,
@@ -372,7 +368,7 @@ class Category:
                     source, target, value,
                 ))
             else:
-                setattr(theory, name, Mor(
+                setattr(theory, name, PrimMor(
                     self.cell_name(name),
                     source, target,
                 ))
@@ -385,6 +381,7 @@ class Category:
                 source, target, value, proof,
             ))
         else:
+            # HatMor.unfold_source_target handles the remaining type checking.
             setattr(theory, name, HatMor(
                 self.cell_name(name),
                 source, target,
@@ -394,7 +391,7 @@ class Category:
             self, name,
             ssource: Mor | Unsourced | Obj,
             starget: Mor | Unsourced | Obj,
-            proof: Eq | Mor | Obj = None,
+            proof: Eq | Mor | Obj | None = None,
         ):
         theory = self.theory
         if name in self.kw:
@@ -403,23 +400,30 @@ class Category:
             proof = self.kw[name]
 
         ssource, starget = (
-            Category.identity(m) if isinstance(m, Obj) else m
+            m.identity() if isinstance(m, Obj) else m
             for m in (ssource, starget)
         )
         
         if isinstance(ssource, Unsourced):
             if isinstance(starget, Unsourced):
-                raise Error    
+                raise Error
+            if not isinstance(starget, Mor):
+                raise TypeError
             ssource = ssource.with_source(starget.source)
         elif isinstance(starget, Unsourced):
+            if not isinstance(ssource, Mor):
+                raise TypeError
             starget = starget.with_source(ssource.source)
+        elif not (isinstance(ssource, Mor) and isinstance(starget, Mor)):
+            raise TypeError
 
         if isinstance(proof, Obj):
-            proof = Category.identity(proof)
+            proof = proof.identity()
         if isinstance(proof, Mor):
-            proof = Category.ref(proof)
+            proof = proof.ref()
         
-        setattr(theory, name, Eq(self.cell_name(name), ssource, starget, proof))
+        # Eq.__eq__ in Eq.__init__ checks that proof is of type Eq or None.
+        setattr(theory, name, PrimEq(self.cell_name(name), ssource, starget, proof))
 
     def sub(self, name, theory_cls, **kw):
         # If both self.sub_kw and kw override cells then an error
@@ -486,12 +490,12 @@ class Category:
     @staticmethod
     def t_compose(c: Composable) -> Mor:
         # Theoretical compose
-        f, g = AttrDict.to_tuple(c, Composable)
-        return Comp(f, g)
+        f, g = c
+        return f.comp(g)
     
     @staticmethod
     def identity(obj: Obj) -> Mor:
-        return Id(obj)
+        return obj.identity()
     
     @staticmethod
     def ssource(eq: Eq) -> Mor:
@@ -515,16 +519,16 @@ class Category:
     
     @staticmethod
     def ref(mor: Mor) -> Eq:
-        return Ref(mor)
+        return mor.ref()
     
     @staticmethod
     def t_trans(p: Path) -> Eq:
-        f, g = AttrDict.to_tuple(p, Path)
-        return Trans(f, g)
+        f, g = p
+        return f.trans(g)
 
     @staticmethod
     def eq_unique(s: UniqueSource) -> Eq:
-        d, e = AttrDict.to_tuple(s, UniqueSource)
+        d, e = s
         return d
     
     @staticmethod
@@ -534,29 +538,16 @@ class Category:
     @staticmethod
     def associativity(s: AssociativitySource) -> Eq:
         f, g, h = s
-        return Category.ref(Category.t_compose(Category.t_compose(f, g), h))
-
-    @staticmethod
-    def compose_eq(c: ComposableEq):
-        d, e = c
-        return CompEq(d, e)
+        # Type checking s and return value is enough.
+        return f.comp(g).comp(h).ref()
     
-    class _Composer(Composer):
-        @staticmethod
-        def t_compose(c):
-            return Category.t_compose(c)
+    @staticmethod
+    def compose_eq(c: ComposableEq) -> Eq:
+        d, e = c
+        return d.comp_eq(e)
         
-        @staticmethod
-        def compose_eq(c):
-            return Category.compose_eq(c)
-        
-    class _Transer(Transer):
-        @staticmethod
-        def t_trans(p):
-            return Category.t_trans(p)
-        
-    compose = staticmethod(variadic(_Composer.compose))
-    trans = staticmethod(variadic(_Transer.trans))
+    compose = variadic(_compose)
+    trans = variadic(_trans)
 
 class CheckedCategory(Checked):
     unchecked_cls = Category
@@ -568,8 +559,6 @@ class CheckedCategory(Checked):
         # time theory_cls is instantiated when there is no sub overriding.
         super().__init__(*args, **kwargs)
         self.id = self.unchecked.id
-        self._init_composer()
-        self._init_transer()
 
     def set_semantics(self, backend: BCategory):
         u = self.unchecked
@@ -660,10 +649,10 @@ class CheckedCategory(Checked):
     def mor(
             self, name,
             source: Mor | Obj,
-            target: Mor | Obj, 
-            value=None,
-            proof=None,
-        )-> Mor | Unsourced | Eq:
+            target: Mor | Obj,
+            value: Mor | Unsourced | Obj | None = None,
+            proof: Eq | Mor | Obj | None = None
+        ):
         self.unchecked.mor(name, source, target, value, proof)
         theory = self.unchecked.theory
         _mor: Mor = getattr(theory, name)
@@ -673,20 +662,23 @@ class CheckedCategory(Checked):
         BMor = self.backend.Mor
         source = _mor.source
         target = _mor.target
-        if isinstance(source, Obj):
-            BObj.check(source)
-        else:
-            BMor.check(source)
-        if isinstance(target, Obj):
-            BObj.check(target)
-        else:
-            BMor.check(target)
+        # Redundant but consistent. This checks the signatures of source and target.
+        BMor.check(_mor)
+        BObj.check(source)
+        BObj.check(target)            
 
-    def eq(self, theory, name, ssource: Mor | Unsourced, starget: Mor | Unsourced, proof=None):
+    def eq(
+            self, name,
+            ssource: Mor | Unsourced | Obj,
+            starget: Mor | Unsourced | Obj,
+            proof: Eq | Mor | Obj | None = None,
+        ):
         self.unchecked.eq(name, ssource, starget, proof)
         theory = self.unchecked.theory
         _eq: Eq = getattr(theory, name)
         BMor = self.backend.Mor
+        BEq = self.backend.Eq
+        BEq.check(_eq)
         BMor.check(_eq.ssource)
         BMor.check(_eq.starget)
         scond = self.backend.Q.source_globular_cond
@@ -697,25 +689,8 @@ class CheckedCategory(Checked):
     def sub(self, name, theory_cls, **kw):
         self.unchecked.sub(name, theory_cls, **kw)
 
-    def _init_composer(self):
-        class _Composer(Composer):
-            @staticmethod
-            def t_compose(c):
-                return self.t_compose(c)
-            
-            @staticmethod
-            def compose_eq(c):
-                return self.compose_eq(c)
-  
-        self.compose = variadic(_Composer.compose)
-
-    def _init_transer(self):   
-        class _Transer(Transer):
-            @staticmethod
-            def t_trans(p):
-                return self.t_trans(p)
-            
-        self.trans = variadic(_Transer.trans)
+    compose = variadic(_compose)
+    trans = variadic(_trans)
     
 # When checking e.g. Composable, it is often enough to just
 # verify the equality, as applying the morphisms will check
