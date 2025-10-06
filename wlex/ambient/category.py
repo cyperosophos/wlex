@@ -134,9 +134,8 @@ class Trans(Eq):
         self.f = f
         self.g = g
     
-    @property
     def proven(self):
-        return self.f.proven and self.g.proven
+        return self.f.proven() and self.g.proven()
     
     def __str__(self):
         return f'({self.f} & {self.g})'
@@ -153,9 +152,8 @@ class CompEq(Eq):
         self.d = d
         self.e = e
 
-    @property
     def proven(self):
-        return self.d.proven and self.e.proven
+        return self.d.proven() and self.e.proven()
     
     def __str__(self):
         return f'{self.d} & {self.e}'
@@ -167,7 +165,6 @@ class Ref(Eq):
     def __init__(self, mor: Mor):
         super().__init__(mor, mor)
     
-    @property
     def proven(self):
         return True
 
@@ -222,86 +219,9 @@ def variadic(m):
         return m(self, head, wrapper(*tail))
     return wrapper
 
-def _compose(
-    amb: 'Category',
-    f: Mor | Unsourced | Eq | Obj,
-    g: Mor | Unsourced | Eq | Obj,
-) -> Mor | Unsourced | Eq:
-    # No further type checking is or should be needed here.
-    # Being Composable is the only requirement available for
-    # type checking at the lang level. Being Composable means
-    # having f, g of type Mor with the equality of source and target
-    # (as checked by the Lex backend).
-    # This should work like syntax sugar with respect to e.g.
-    # composing a Mor and an Obj, etc. Hence calls like
-    # ref, ssource, target identity, etc. should all support
-    # backend type checking. The would support backend type checking
-    # if t_compose, t_compose_eq where manually used.
-    # The question arrises here about the separation between
-    # type checking and evaluation (compilation time vs
-    # execution time). Composing f and g does not evaluate
-    # either funciton, but requires making sure (f, g) is
-    # Composable. In this sense one is doing type checking
-    # on f, but also on the metafunction `compose`,
-    # so that at the meta level one combines type checking
-    # and execution. Backend methods (source, target,
-    # compose, etc.) handle type checking during execution.
-    # They lack static type checking.
-
-    f, g = (
-        m.identity() if isinstance(m, Obj) else m
-        for m in (f, g)
-    )
-
-    # Unsourced, Eq comp is allowed but not Eq, Unsourced. 
-    if isinstance(g, Unsourced):
-        if isinstance(f, Eq):
-            # For consistency, there is no UnsourcedCompEq.
-            # We'd have to compose with the ref of Unsourced,
-            # which is an equality of Unsourced and therefore
-            # not allowed.
-            raise Error
-        
-        # amb.t_compose backend type checking would ensure that
-        # f is Mor. We check that here for consistency with the
-        # next block and to fail earlier.
-        if not isinstance(f, Mor):
-            raise TypeError
-        return UnsourcedComp(f, g, amb.t_compose)
-
-    if isinstance(f, Unsourced):
-        if isinstance(g, Eq):
-            # No checking needed with ref
-            s = g.ssource.target
-            f = f.with_source(s).ref()
-            return amb.compose_eq((f, g))
-        if not isinstance(g, Mor):
-            raise TypeError
-        f = f.with_source(g.target)
-        return amb.t_compose((f, g))
-
-    if isinstance(f, Eq):
-        if isinstance(g, Mor):
-            g = g.ref()
-        # This will type check g to be Eq.
-        return amb.compose_eq((f, g))
-    
-    if isinstance(g, Eq):
-        f = f.ref()
-        return amb.compose_eq((f, g))
-    
-    return amb.t_compose((f, g))
-
-def _trans(amb, f: Eq | Mor | Obj, g: Eq | Mor | Obj) -> Eq:
-    # Handle identity
-    f, g = (
-        m.identity().ref() if isinstance(m, Obj) else
-        (m.ref() if isinstance(m, Mor) else m)
-        for m in (f, g)
-    )
-    return amb.t_trans((f, g))
-
 class Category:
+    weakened = False
+
     def __init__(self, theory, name='', kw=None, sub_kw=None, theory_clss=None):
         # The point of this would be to allow type checking on the overriding
         # methods of CheckedCategory. This seems to not be needed.
@@ -366,6 +286,7 @@ class Category:
                 setattr(theory, name, DefMor(
                     self.cell_name(name),
                     source, target, value,
+                    weakened=self.weakened,
                 ))
             else:
                 setattr(theory, name, PrimMor(
@@ -379,6 +300,7 @@ class Category:
             setattr(theory, name, DefHatMor(
                 self.cell_name(name),
                 source, target, value, proof,
+                weakened=self.weakened,
             ))
         else:
             # HatMor.unfold_source_target handles the remaining type checking.
@@ -423,7 +345,7 @@ class Category:
             proof = proof.ref()
         
         # Eq.__eq__ in Eq.__init__ checks that proof is of type Eq or None.
-        setattr(theory, name, PrimEq(self.cell_name(name), ssource, starget, proof))
+        setattr(theory, name, PrimEq(self.cell_name(name), ssource, starget, proof, weakened=self.weakened))
 
     def sub(self, name, theory_cls, **kw):
         # If both self.sub_kw and kw override cells then an error
@@ -492,7 +414,7 @@ class Category:
         # Theoretical compose
         f, g = c
         return f.comp(g)
-    
+        
     @staticmethod
     def identity(obj: Obj) -> Mor:
         return obj.identity()
@@ -546,6 +468,95 @@ class Category:
         d, e = c
         return d.comp_eq(e)
         
+    def _compose(
+        self,
+        f: Mor | Unsourced | Eq | Obj,
+        g: Mor | Unsourced | Eq | Obj,
+    ) -> Mor | Unsourced | Eq:
+        # No further type checking is or should be needed here.
+        # Being Composable is the only requirement available for
+        # type checking at the lang level. Being Composable means
+        # having f, g of type Mor with the equality of source and target
+        # (as checked by the Lex backend).
+        # This should work like syntax sugar with respect to e.g.
+        # composing a Mor and an Obj, etc. Hence calls like
+        # ref, ssource, target identity, etc. should all support
+        # backend type checking. The would support backend type checking
+        # if t_compose, t_compose_eq where manually used.
+        # The question arrises here about the separation between
+        # type checking and evaluation (compilation time vs
+        # execution time). Composing f and g does not evaluate
+        # either funciton, but requires making sure (f, g) is
+        # Composable. In this sense one is doing type checking
+        # on f, but also on the metafunction `compose`,
+        # so that at the meta level one combines type checking
+        # and execution. Backend methods (source, target,
+        # compose, etc.) handle type checking during execution.
+        # They lack static type checking.
+
+        def comp(u: Mor, v: Mor):
+            if self.weakened:
+                u = u.weakened(v.target)
+            return self.t_compose((u, v))
+        
+        def comp_eq(u: Eq, v: Eq):
+            if self.weakened:
+                u = u.weakened(v.starget)
+            # This will type check g to be Eq.
+            return self.compose_eq((u, v))
+
+        f, g = (
+            m.identity() if isinstance(m, Obj) else m
+            for m in (f, g)
+        )
+
+        # Unsourced, Eq comp is allowed but not Eq, Unsourced. 
+        if isinstance(g, Unsourced):
+            if isinstance(f, Eq):
+                # For consistency, there is no UnsourcedCompEq.
+                # We'd have to compose with the ref of Unsourced,
+                # which is an equality of Unsourced and therefore
+                # not allowed.
+                raise Error
+            
+            # amb.t_compose backend type checking would ensure that
+            # f is Mor. We check that here for consistency with the
+            # next block and to fail earlier.
+            if not isinstance(f, Mor):
+                raise TypeError
+            return UnsourcedComp(f, g, comp)
+
+        if isinstance(f, Unsourced):
+            if isinstance(g, Eq):
+                # No checking needed with ref
+                s = g.ssource.target
+                f = f.with_source(s).ref()
+                return self.compose_eq((f, g))
+            if not isinstance(g, Mor):
+                raise TypeError
+            f = f.with_source(g.target)
+            return self.t_compose((f, g))
+
+        if isinstance(f, Eq):
+            if isinstance(g, Mor):
+                g = g.ref()
+            return comp_eq(f, g)
+        
+        if isinstance(g, Eq):
+            f = f.ref()
+            return comp_eq(f, g)
+        
+        return comp(f, g)
+
+    def _trans(self, f: Eq | Mor | Obj, g: Eq | Mor | Obj) -> Eq:
+        # Handle identity
+        f, g = (
+            m.identity().ref() if isinstance(m, Obj) else
+            (m.ref() if isinstance(m, Mor) else m)
+            for m in (f, g)
+        )
+        return self.t_trans((f, g))
+        
     compose = variadic(_compose)
     trans = variadic(_trans)
 
@@ -559,6 +570,7 @@ class CheckedCategory(Checked):
         # time theory_cls is instantiated when there is no sub overriding.
         super().__init__(*args, **kwargs)
         self.id = self.unchecked.id
+        self.weakened = self.unchecked.weakened
 
     def set_semantics(self, backend: BCategory):
         u = self.unchecked
@@ -607,6 +619,8 @@ class CheckedCategory(Checked):
     def t_compose(self, x):
         return self.backend.compose.eval(x)
     
+    converting_compose = t_compose
+    
     def identity(self, x):
         return self.backend.identity.eval(x)
     
@@ -639,6 +653,8 @@ class CheckedCategory(Checked):
     
     def compose_eq(self, x):
         return self.backend.compose_eq.eval(x)
+    
+    converting_compose_eq = compose_eq
     
     def with_kw(self, kw, sub_kw):
         return self.unchecked.with_kw(kw, sub_kw)
@@ -689,8 +705,8 @@ class CheckedCategory(Checked):
     def sub(self, name, theory_cls, **kw):
         self.unchecked.sub(name, theory_cls, **kw)
 
-    compose = variadic(_compose)
-    trans = variadic(_trans)
+    compose = variadic(Category._compose)
+    trans = variadic(Category._trans)
     
 # When checking e.g. Composable, it is often enough to just
 # verify the equality, as applying the morphisms will check

@@ -20,6 +20,12 @@ class Obj:
     def terminal_mor(self):
         from ..ambient.cart import TerminalMor
         return TerminalMor(self)
+    
+    def product(self, y):
+        from ..ambient.cart import Span
+        x = self
+        source = Obj()
+        return Span(Mor(source, x), Mor(source, y))
 
 class PrimObj(Obj):
     __slots__ = '_check',
@@ -70,7 +76,7 @@ class Mor:
     def set_eval(self, method):
         raise Error
     
-    def __init__(self, source: Obj, target: Obj,):
+    def __init__(self, source: Obj, target: Obj):
         # Type checking from syntax not backend.
         # Most type checking should be done at the public method
         # in order to avoid redundant type checking.
@@ -90,12 +96,57 @@ class Mor:
     
     def comp(self, g):
         from ..ambient.category import Comp
-        return Comp(self, g)
+        f = self
+        return Comp(f, g)
     
     def terminal_mor_unique(self):
         # Just like with comp, we don't check the equalizer.
         from ..ambient.cart import TerminalMorUnique
         return TerminalMorUnique(self)
+    
+    def pairing(self, q: 'Mor'):
+        # TODO: Should signature type hints only be used when there is
+        # no type checking in the body?
+        from ..ambient.cart import ProductMor
+        p = self
+        source = p.source
+        target = p.target.product(q.target).p.source
+        s = p, q
+        _Mor = Mor(source, target)
+        # TODO: Notice how one needs type conversion from ProductMor
+        # to Span. For Mor this is supported as a projection.
+        # The way to go is to compose with Span (or Mor), i.e. the identity,
+        # or any morphism with an appropriate source. This means that
+        # Category.compose has to be overridden in Cart, so that this sort of
+        # type conversion is inserted where the types don't match.
+        # Actually a more appropriate approach is to adjust the type
+        # checking of products so that they follow duck typing.
+        # This is possible with products within products, like
+        # Span within ProductMor. Recall that backend type checking
+        # does not compare types, it uses the check method of the type
+        # which in the simplest cases calls `isinstance`.
+        # A simpler way to deal with this is to use inheritance, even if
+        # it is used in an ad hoc manner. This works for backend type checking
+        # and for the methods of the unchecked ambient.
+        # The remaining type checking to be fixed is the one of t_compose.
+        # Here t_compose has to be precomposed with a morphism
+        # DuckComposable -> Composable. This simply requires (internally)
+        # precomposing f (in the parameters f, g of t_compose) with a type
+        # conversion, so that in effect one changes the source of f.
+        # Cf. weakening rule in cartesian multicategory.
+        # There is some reduntant type checking involved here.
+        # We have to check that the types are compatible when they are not equal.
+        # Something analogous occurs with coprojections.
+        # Some mixins of types through products may be difficult to
+        # replicate using inheritance, etc.
+        # TODO: Remember to handle param projections and assigments,
+        # which allow having local variables. Check other notes!
+        return ProductMor(
+            _Mor, *s, *(
+                Eq(m)
+                for m in s
+            ),
+        )
     
     #def __eq__(self, x: 'Mor'):
         # Plugging equalities through transitivity without too much
@@ -110,15 +161,21 @@ class Mor:
         # programmatically. Always check_signature before
         # calling __eq__. __eq__ is extensional equality.
     def __eq__(self, x: 'Mor'):
+        # TODO: Unit tests must check that __eq__ is an equiv rel.
         # This should be enough to make morphisms with different
         # signatures not equal. This (non) equality makes sense
         # since it is definitional/extensional.
         # There are a few cases where one should verify the signature,
         # e.g. identity.
+        from .category import Comp
         if x is self:
             return True
-        if isinstance(x, (DefMor, DefHatMor)):
+        if isinstance(x, DefMor):
             return self == x.value
+        elif not isinstance(self, Comp) and isinstance(x, Comp):
+            # Defer to Comp.__eq__.
+            # This is especially useful in the case of p_eq, q_eq of pairing.
+            return x.__eq__(self)
         elif not isinstance(x, Mor):
             raise TypeError
         return False
@@ -138,8 +195,14 @@ class Mor:
         if self.source == value.source:
             if self.target == value.target:
                 return
-            raise Error(f'Targets of {self} and {value} differ')
-        raise Error(f'Sources of {self} and {value} differ')
+            raise Error(f'Targets of {self!r} and {value!r} differ')
+        raise Error(f'Sources of {self!r} and {value!r} differ')
+
+    def weakened(self, source: 'Obj') -> 'Mor':
+        # TODO: The weakening flag must only be in the ambient and then
+        # be passed as an argument to methods of other classes.
+        from .cart import weakened_mor
+        return weakened_mor(self, source)
 
 class PrimMor(Mor):
     __slots__ = 'name', '_eval'
@@ -203,12 +266,14 @@ class DefMor(Mor):
     def __repr__(self):
         return f'`fn {self!s}: {self.source} -> {self.target} = {self.value}`'
 
-    def __init__(self, name, source, target, value: Mor | Unsourced | Obj):
+    def __init__(self, name, source, target, value: Mor | Unsourced | Obj, weakened=False):
         self.name = name
         super().__init__(source, target)
-        self.set_value(value, source)
+        if weakened:
+            value = value.weakened(source)
+        self._set_value(value, source)
 
-    def set_value(self, value, source):
+    def _set_value(self, value, source):
         # Making sure the signature of value is correct is not part of the theory.
         # From the perspective of the theory there is only one morphism.
         # The two morphisms that are syntactically distinguished (Mor and DefMor)
@@ -363,19 +428,49 @@ class Eq:
     __slots__ = 'ssource', 'starget', '_proven'
     ssource: Mor
     starget: Mor
-    proven: bool
+    _antecedent = None
+    _proven = False
 
-    def __init__(self, ssource: Mor, starget: Mor, proof: Optional['Eq'] = None):
+    def __init__(self, ssource: Mor, starget: Mor, proof: Optional['Eq'] = None, weakened=False):
         # No checking of globular conditions here
-        self._proven = False
         self.ssource = ssource
         self.starget = starget
-        if proof and self == proof:
-            self._proven = proof.proven
+        # Notice that __eq__ is not affected by weakening.
+        if proof:
+            # Notice that with weaking some errors get raised earlier,
+            # there more as syntax errors than as type checking errors.
+            if not isinstance(proof, Eq):
+                raise TypeError
+            if weakened:
+                if self._eq(
+                    proof.ssource.weakened(ssource),
+                    proof.starget.weakened(ssource),
+                ):
+                    self._antecedent = proof
+                else:
+                    raise Error
+            elif self == proof:
+                self._antecedent = proof
+            else:
+                # Invalid proof
+                raise Error
 
-    @property
-    def proven(self):
-        return self._proven
+    def proven(self) -> bool:
+        # This can change. For example f can be assumed after instantiation
+        # Trans. Hence a property not an attribute.
+        if self._proven:
+            return True
+        ant = self._antecedent
+        if ant:
+            return ant.proven()
+        return False
+    
+    def antecedent(self) -> Optional['Eq']:
+        if self._proven:
+            return self
+        ant = self._antecedent
+        if ant:
+            return ant.antecedent()
     
     def assume(self):
         raise Error
@@ -394,16 +489,27 @@ class Eq:
             raise TypeError
         # self.proven can't be set here as that would modify the state.
         # No need for backend type checking here.
-        if self.ssource == proof.ssource:
-            if self.starget == proof.starget:
+        return self._eq(proof.ssource, proof.starget)
+
+    def _eq(self, ssource, starget):
+        if self.ssource == ssource:
+            if self.starget == starget:
                 return True
             return False
-        elif self.ssource == proof.starget:
+        elif self.ssource == starget:
             # Symmetry
-            if self.starget == proof.ssource:
+            if self.starget == ssource:
                 return True
             return False
         return False
+    
+    def weakened(self, source: 'Obj') -> 'Eq':
+        return Eq(
+            self.ssource.weakened(source),
+            self.starget.weakened(source),
+            self,
+            weakened=True,
+        )
     
     def trans(self, g):
         from ..ambient.category import Trans
@@ -424,6 +530,8 @@ class PrimEq(Eq):
     def assume(self):
         # self.proven is the conjunction of the proven values of
         # all trans operands.
+        if self._antecedent:
+            raise Error
         if self._proven:
             raise Error
         self._proven = True
@@ -431,7 +539,7 @@ class PrimEq(Eq):
     __str__ = PrimObj.__str__
 
     def __repr__(self):
-        return f'`eq {self!s}: {self.ssource} == {self.starget.name} = {self._proven}`'
+        return f'`eq {self!s}: {self.ssource} == {self.starget} = {self._proven}`'
 
 class DefHatMor(DefMor):
     __slots__ = 'hat_source', 'hat_target', 'hat_proven'
@@ -447,25 +555,20 @@ class DefHatMor(DefMor):
         source: Mor | Obj, target: Mor | Obj,
         value: Mor | Unsourced | Obj,
         proof: Eq | Mor | Obj,
+        weakened=False,
     ):
-        from ..ambient.category import Category
-
         source, target, self.hat_source, self.hat_target = \
             HatMor.unfold_source_target(source, target)
-        super().__init__(name, source, target, value)
+        super().__init__(name, source, target, value, weakened)
         if isinstance(proof, Obj):
             proof = proof.identity()
         if isinstance(proof, Mor):
             proof = proof.ref()
         self.hat_proven = False
         if self.hat == proof:
-            self.hat_proven = proof.proven
+            self.hat_proven = proof.proven()
         else:
             raise Error
         # No need to store the proof after it's checked.
 
     hat = HatMor.hat
-    #set_value = DefMor.set_value
-    #eval = DefMor.eval
-    #set_eval = DefMor.set_eval
-    #__eq__ = DefMor.__eq__

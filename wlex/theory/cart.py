@@ -76,6 +76,7 @@ class Cart:
             c(p(c(target, p_), c(target, q)), Span),
         )
         product = self.product
+        # TODO: Span is not needed below and elsewhere.
         self.pt = c(product, p(c(target, p_), c(target, q)), Span)
         pt = self.pt
         Eq = self.Eq
