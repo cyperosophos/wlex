@@ -26,9 +26,12 @@ class Obj:
         x = self
         source = Obj()
         return Span(Mor(source, x), Mor(source, y))
+    
+    def check_eq(self, x, y):
+        raise NotImplementedError
 
 class PrimObj(Obj):
-    __slots__ = '_check',
+    __slots__ = '_check', '_check_eq'
 
     def __init__(self, name):
         # An object can't be assigned a value like a morphism can.
@@ -37,6 +40,16 @@ class PrimObj(Obj):
         # The Limit class provides a check method, analogous to
         # the way the Comp class provides an eval method.
         self.name = name
+
+        def _check(x):
+            raise Error
+        
+        def _check_eq(x, y):
+            raise Error
+        
+        self._check = _check
+        self._check_eq = _check_eq
+        # TODO: Do something similar in PrimMor and PrimEq.
 
     def check(self, x):
         self._check(x)
@@ -49,6 +62,16 @@ class PrimObj(Obj):
             raise Error
 
         self._check = wrapper
+
+    def check_eq(self, x, y):
+        return self._check_eq(x, y)
+    
+    def set_check_eq(self, method):
+        @wraps(method)
+        def wrapper(x, y):
+            if method(x, y):
+                return
+            raise Error
     
     def __str__(self):
         return self.name
@@ -109,10 +132,6 @@ class Mor:
         # no type checking in the body?
         from ..ambient.cart import ProductMor
         p = self
-        source = p.source
-        target = p.target.product(q.target).p.source
-        s = p, q
-        _Mor = Mor(source, target)
         # TODO: Notice how one needs type conversion from ProductMor
         # to Span. For Mor this is supported as a projection.
         # The way to go is to compose with Span (or Mor), i.e. the identity,
@@ -141,12 +160,7 @@ class Mor:
         # replicate using inheritance, etc.
         # TODO: Remember to handle param projections and assigments,
         # which allow having local variables. Check other notes!
-        return ProductMor(
-            _Mor, *s, *(
-                Eq(m)
-                for m in s
-            ),
-        )
+        return ProductMor(p, q)
     
     #def __eq__(self, x: 'Mor'):
         # Plugging equalities through transitivity without too much
@@ -365,6 +379,8 @@ class HatMor(Mor):
     def set_eval(self, method):
         if hasattr(self, '_eval'):
             raise Error
+        
+        peak = self.hat_source.target
 
         @wraps(method)
         def wrapper(x, check_source, check_target):
@@ -417,9 +433,12 @@ class HatMor(Mor):
                 check_source=check_target,
                 check_target=False,
             )
-            if left_side == right_side:
-                return result
-            raise Error
+            # This requires full_eq, because the type is not fixed.
+            peak.check_eq(left_side, right_side)
+            return result
+            # if peak.check_eq(left_side, right_side):
+            #     return result
+            # raise Error
             
         self._eval = wrapper
         self.hat_proven = True
