@@ -1,16 +1,22 @@
 from functools import wraps
-from typing import Union, NamedTuple
+from typing import NamedTuple, Any
+from collections.abc import Callable
 import weakref
 
-from .cells import Obj, Mor, DefMor, HatMor, DefHatMor, Eq, Unsourced, PrimObj, PrimMor, PrimEq
+from .cells import (
+    Obj, Mor, DefMor, HatMor, DefHatMor, Eq,
+    Unsourced, PrimObj, PrimMor, PrimEq, ThesisEq,
+)
 from ..theory.category import Category as BCategory
-from . import Checked
     
 class Error(Exception):
     pass
 
 class Comp(Mor):
     __slots__ = 'f', 'g'
+    f: Mor
+    g: Mor
+
     def __init__(self, f: Mor, g: Mor):
         source = g.source
         target = f.target
@@ -18,7 +24,13 @@ class Comp(Mor):
         self.f = f
         self.g = g
 
-    def eval(self, x, check_source=True, check_target=True):
+    # TODO: Use always the most specific return type.
+    def eval(
+            self,
+            x: object,
+            check_source: bool = True,
+            check_target: bool = True,
+        ):
         # self is not Composable, so self.f is not a projection.
         return self.f.eval(
             self.g.eval(x, check_source=check_source),
@@ -26,7 +38,7 @@ class Comp(Mor):
             check_target=check_target,
         )
     
-    def flat(self):
+    def flat(self) -> tuple[Mor, ...]:
         if isinstance(self.f, (Comp, Id)):
             if isinstance(self.g, (Comp, Id)):
                 return (*self.f.flat(), *self.g.flat())
@@ -36,27 +48,23 @@ class Comp(Mor):
         else:
             return (self.f, self.g)
     
-    def __eq__(self, x: Mor):
+    def eql(self, x: Mor):
         # True should take less time.
         # True or False
-        if super().__eq__(x):
+        # Calling super().__eq__ would cause infinite loop.
+        if self.eql_definitional(x):
             return True
-        return self._eq(x)
-    
-    def _eq(self, x: Mor):
-        return (
-            isinstance(x, (Comp, Id))
-            and self.flat() == x.flat()
-        )
+        return _monoidal_eq(self, x)
             
     def __str__(self):
         return f'({self.f} @ {self.g})'
             
     def __repr__(self):
         return f'`comp {self!s}`'
-    
+
 class Id(Mor):
     __slots__ = ()
+
     def __init__(self, obj: Obj):
         super().__init__(obj, obj)
         # Recall that eval is only called by the checked ambient.
@@ -65,15 +73,19 @@ class Id(Mor):
     def flat(self):
         return ()
     
-    def __eq__(self, x: Mor):
-        if super().__eq__(x):
+    def eql(self, x: Mor):
+        if self.eql_definitional(x):
             return True
         return (
-            Comp._eq(self, x)
+            _monoidal_eq(self, x)
             and self.source == x.source
         )
     
-    def eval(self, x, check_source=True, check_target=True):
+    def eval(
+            self, x: object, 
+            check_source: bool = True,
+            check_target: bool = True
+        ):
         # TODO: Is it possible to have eval without type checking?
         # e.g. in the most concrete theory, which implements IO, etc.
         if check_source or check_target:
@@ -85,14 +97,27 @@ class Id(Mor):
     
     def __repr__(self):
         return f'`id {self!s}`'
-    
+
+def _monoidal_eq(x: Comp | Id, y: Mor):
+    return (
+        isinstance(y, (Comp, Id))
+        and all(vx.eql(vy) for vx, vy in zip(x.flat(), y.flat()))
+    )
+
 class UnsourcedComp(Unsourced):
     __slots__ = 'f', 'g', '_comp'
     # Eval is not supported until converting to Comp.
     # Conversion to Comp must occur even in the absence of
     # type checking.
+    f: Mor
+    g: Unsourced
+    _comp: Callable[[Mor, Mor], Comp]
 
-    def __init__(self, f, g: Unsourced, comp):
+    def __init__(
+            self, f: Mor,
+            g: Unsourced,
+            comp: Callable[[Mor, Mor], Comp],
+        ):
         self.f = f
         self.g = g
         self._comp = comp
@@ -127,6 +152,9 @@ class UnsourcedId(Unsourced):
     
 class Trans(Eq):
     __slots__ = 'f', 'g'
+    f: Eq
+    g: Eq
+
     def __init__(self, f: Eq, g: Eq):
         ssource = g.ssource
         starget = f.starget
@@ -134,8 +162,9 @@ class Trans(Eq):
         self.f = f
         self.g = g
     
+    @property
     def proven(self):
-        return self.f.proven() and self.g.proven()
+        return self.f.proven and self.g.proven
     
     def __str__(self):
         return f'({self.f} & {self.g})'
@@ -145,15 +174,19 @@ class Trans(Eq):
     
 class CompEq(Eq):
     __slots__ = 'd', 'e'
+    d: Eq
+    e: Eq
+
     def __init__(self, d: Eq, e: Eq):
-        ssource  = d.ssource.comp(e.ssource)
-        starget = d.starget.comp(e.starget)
+        ssource  = d.ssource.compose(e.ssource)
+        starget = d.starget.compose(e.starget)
         super().__init__(ssource, starget)
         self.d = d
         self.e = e
 
+    @property
     def proven(self):
-        return self.d.proven() and self.e.proven()
+        return self.d.proven and self.e.proven
     
     def __str__(self):
         return f'{self.d} & {self.e}'
@@ -162,9 +195,12 @@ class CompEq(Eq):
         return f'`comp_eq {self!s}`'
 
 class Ref(Eq):
+    __slots__ = ()
+
     def __init__(self, mor: Mor):
         super().__init__(mor, mor)
     
+    @property
     def proven(self):
         return True
 
@@ -175,54 +211,75 @@ class Ref(Eq):
         # This appears to be ref(m) not ref[m].
         return f'`ref {self!s}`'
     
-@staticmethod
-def _extract_sub_kw(kw: dict):
+def _extract_subkw(kw: dict[str, object]):
     # Changes kw in place
-    sub_kw = dict()
+    subkw: dict[str, dict[str, object]] = dict()
     key: str
     # Needs to get all the keys before calling pop
     for key in list(kw):
         skey = key.split('.', 1)
         if len(skey) > 1:
-            d = dict()
-            sub_kw[skey[0]] = d
+            d: dict[str, object] = dict()
+            subkw[skey[0]] = d
             d[skey[1]] = kw.pop(key)
-    return sub_kw
+    return subkw
 
-class Path(NamedTuple):
-    f: Eq
-    g: Eq
+# class Path(NamedTuple):
+#     f: Eq
+#     g: Eq
 
-class Composable(NamedTuple):
-    f: Mor
-    g: Mor
+# class Composable(NamedTuple):
+#     f: Mor
+#     g: Mor
+Path = tuple[Eq, Eq]
+Composable = tuple[Mor, Mor]
+ComposableEq = tuple[Eq, Eq]
+UniqueSource = tuple[Eq, Eq]
+AssociativitySource = tuple[Mor, Mor, Mor]
 
-class ComposableEq(NamedTuple):
-    d: Eq
-    e: Eq
+# class ComposableEq(NamedTuple):
+#     d: Eq
+#     e: Eq
 
-class UniqueSource(NamedTuple):
-    d: Eq
-    e: Eq
+# class UniqueSource(NamedTuple):
+#     d: Eq
+#     e: Eq
 
-class AssociativitySource(NamedTuple):
-    f: Mor
-    g: Mor
-    h: Mor
+# class AssociativitySource(NamedTuple):
+#     f: Mor
+#     g: Mor
+#     h: Mor
 
-def variadic(m):
+def variadic(m: Callable[[Any, Any, Any], Any]):
     # This doesn't handle nullary.
     @wraps(m)
-    def wrapper(self, head, *tail):
+    def wrapper(self: Any, head: Any, *tail: Any):
         if not tail:
             return head
         return m(self, head, wrapper(*tail))
     return wrapper
 
-class Category:
-    weakened = False
+#def unchecked_eval
+# Python static type checking handles all type checking up until Cart.
+# Actual checking is needed starting with backend Lex (as used by
+# Composable in Category.t_compose). This means that one should preserve
+# static type checking for the backend type checking, and make the latter
+# only handle checking beyond Cart (Lex, etc.).
+# One has to follow an all or nothing approach. It is too complicated
+# to use the backend only for certain type checking while keeping the
+# static type checking. One has a class PartiallyCheckedCategory,
+# where checked means dynamically checked.
+# Category, CheckedCategory, DynamicCategory.
+# If Cart type checking end up being handled ad hoc, then so does the
+# # remaining type checking. 
 
-    def __init__(self, theory, name='', kw=None, sub_kw=None, theory_clss=None):
+class Category:
+    def __init__(
+            self, theory: object, name: str = '',
+            kw: dict[str, object] | None = None,
+            subkw: dict[str, dict[str, object]] | None = None,
+            theory_clss: tuple[type, ...] | None = None,
+        ):
         # The point of this would be to allow type checking on the overriding
         # methods of CheckedCategory. This seems to not be needed.
         # see e.g. f.source, g.target. Here type checking would be
@@ -230,12 +287,18 @@ class Category:
         #self.hat_mor_cls = HatMor.cls_with_id_comp(self.identity, self.t_compose)
         self.id = UnsourcedId()
         self.kw = kw or dict()
-        self.sub_kw = sub_kw or dict()
+        self.subkw = subkw or dict()
         self.name = name
         self.theory_clss = theory_clss or ()
-        self.theory = weakref.proxy(theory)
+        self.theory: object = weakref.proxy(theory)
 
-    def with_kw(self, theory, name, theory_clss, kw, sub_kw):
+    @classmethod
+    def with_kw(
+            cls, theory: object, name: str,
+            kw: dict[str, object],
+            subkw: dict[str, dict[str, object]],
+            theory_clss: tuple[type, ...],
+        ):
         # This needs to handle kw used by sub at lower levels.
         # e.g. S.P.Q in line 35 of theory/category.py.
         # TODO: An important goal is to be able to define monads,
@@ -244,9 +307,9 @@ class Category:
         # as if they were functors.
         # Inheritance requires this to be a classmethod.
 
-        return type(self)(theory, name, theory_clss, kw, sub_kw)
+        return cls(theory, name, kw, subkw, theory_clss)
 
-    def obj(self, name):
+    def obj(self, name: str):
         theory = self.theory
         if name in self.kw:
             setattr(theory, name, self.kw[name])
@@ -254,7 +317,7 @@ class Category:
             setattr(theory, name, PrimObj(self.cell_name(name)))
 
     def mor(
-            self, name,
+            self, name: str,
             source: Mor | Obj,
             target: Mor | Obj,
             value: Mor | Unsourced | Obj | None = None,
@@ -276,7 +339,11 @@ class Category:
             if value or proof:
                 raise Error
             # The purpose of setting the value indirectly is to check signature.
-            value = self.kw[name]
+            _value = self.kw[name]
+            if isinstance(_value, Mor | Unsourced | Obj):
+                value = _value
+            else:
+                raise TypeError
 
         #print(value, self.kw)
         if isinstance(source, Obj) and isinstance(target, Obj):
@@ -286,7 +353,6 @@ class Category:
                 setattr(theory, name, DefMor(
                     self.cell_name(name),
                     source, target, value,
-                    weakened=self.weakened,
                 ))
             else:
                 setattr(theory, name, PrimMor(
@@ -296,12 +362,13 @@ class Category:
         elif value:
             #print(value)
             if not proof:
-                proof = value.hat
-            setattr(theory, name, DefHatMor(
-                self.cell_name(name),
-                source, target, value, proof,
-                weakened=self.weakened,
-            ))
+                if isinstance(value, Mor):
+                    proof = value.hat
+            if proof:
+                setattr(theory, name, DefHatMor(
+                    self.cell_name(name),
+                    source, target, value, proof,
+                ))
         else:
             # HatMor.unfold_source_target handles the remaining type checking.
             setattr(theory, name, HatMor(
@@ -310,7 +377,7 @@ class Category:
             ))
 
     def eq(
-            self, name,
+            self, name: str,
             ssource: Mor | Unsourced | Obj,
             starget: Mor | Unsourced | Obj,
             proof: Eq | Mor | Obj | None = None,
@@ -319,7 +386,11 @@ class Category:
         if name in self.kw:
             if proof:
                 raise Error
-            proof = self.kw[name]
+            _proof = self.kw[name]
+            if isinstance(_proof, Eq | Mor | Obj):
+                proof = _proof
+            else:
+                raise TypeError
 
         ssource, starget = (
             m.identity() if isinstance(m, Obj) else m
@@ -329,15 +400,15 @@ class Category:
         if isinstance(ssource, Unsourced):
             if isinstance(starget, Unsourced):
                 raise Error
-            if not isinstance(starget, Mor):
-                raise TypeError
+            #if not isinstance(starget, Mor):
+            #    raise TypeError
             ssource = ssource.with_source(starget.source)
         elif isinstance(starget, Unsourced):
-            if not isinstance(ssource, Mor):
-                raise TypeError
+            #if not isinstance(ssource, Mor):
+            #    raise TypeError
             starget = starget.with_source(ssource.source)
-        elif not (isinstance(ssource, Mor) and isinstance(starget, Mor)):
-            raise TypeError
+        #elif not (isinstance(ssource, Mor) and isinstance(starget, Mor)):
+        #    raise TypeError
 
         if isinstance(proof, Obj):
             proof = proof.identity()
@@ -345,14 +416,30 @@ class Category:
             proof = proof.ref()
         
         # Eq.__eq__ in Eq.__init__ checks that proof is of type Eq or None.
-        setattr(theory, name, PrimEq(self.cell_name(name), ssource, starget, proof, weakened=self.weakened))
+        if proof:
+            setattr(
+                theory, name,
+                ThesisEq(
+                    self.cell_name(name),
+                    ssource, starget,
+                    proof
+                )
+            )
+        else:
+            setattr(
+                theory, name,
+                PrimEq(
+                    self.cell_name(name),
+                    ssource, starget,
+                ),
+            )
 
-    def sub(self, name, theory_cls, **kw):
-        # If both self.sub_kw and kw override cells then an error
+    def sub(self, name: str, theory_cls: type, **kw: object):
+        # If both self.subkw and kw override cells then an error
         # occurs, because what should have happened is that the overriding
-        # cell got overridden. This applies to sub_kw as well.
-        # kw gets separated into kw and sub_kw.
-        # sub_kw is a dict with kw values used for the sub's
+        # cell got overridden. This applies to subkw as well.
+        # kw gets separated into kw and subkw.
+        # subkw is a dict with kw values used for the sub's
         # within the sub.
         # Only cells with no value (atomic cells) can be overridden.
         # These cells are created and set using obj, mor, eq, sub,
@@ -363,8 +450,8 @@ class Category:
                 # Can't override partially defined functor.
                 # Must instead override missing components.
                 raise Error
-            if self.sub_kw.get(name):
-                # Can't be overriden by sub_kw when overridden by kw.
+            if self.subkw.get(name):
+                # Can't be overriden by subkw when overridden by kw.
                 raise Error
             # This is wrong because kw must include all attributes.
             #kw = _sub.get_kw(self, theory_cls)
@@ -376,27 +463,30 @@ class Category:
                 raise Error
             return
 
-        if name in self.sub_kw:
-            super_kw: dict = self.sub_kw[name]
-            for key, value in super_kw.items():
+        if name in self.subkw:
+            superkw: dict[str, object] = self.subkw[name]
+            for key, value in superkw.items():
                 if key in kw:
                     raise Error
                 kw[key] = value
 
-        sub_kw = _extract_sub_kw(kw)
-        #setattr(theory, name, Sub(name, self, theory_cls, kw, sub_kw))
+        subkw = _extract_subkw(kw)
+        #setattr(theory, name, Sub(name, self, theory_cls, kw, subkw))
         # Avoid circular class instantiation
-        theory_clss = (*self.theory_clss, type(theory))
+        theory_clss: tuple[type, ...] = (*self.theory_clss, type(theory))
         for tc in theory_clss:
             if theory_cls is tc:
                 raise Error
-        sub_name = self.cell_name(name)
+        subname = self.cell_name(name)
         setattr(
             theory, name,
-            theory_cls(lambda th: self.with_kw(th, sub_name, kw, sub_kw, theory_clss)),
+            # TODO: Why not use Category instead of self.with_kw?
+            # TODO: Check if this should be simplified further since
+            # subs can be created without lazy instantiation. 
+            theory_cls(lambda th: self.with_kw(th, subname, kw, subkw, theory_clss)),
         )
 
-    def cell_name(self, name):
+    def cell_name(self, name: str):
         if not self.name:
             return name
         return f'{self.name}.{name}'
@@ -413,7 +503,7 @@ class Category:
     def t_compose(c: Composable) -> Mor:
         # Theoretical compose
         f, g = c
-        return f.comp(g)
+        return f.compose(g)
         
     @staticmethod
     def identity(obj: Obj) -> Mor:
@@ -428,18 +518,6 @@ class Category:
         return eq.starget
     
     @staticmethod
-    def check_obj(x: Obj) -> bool:
-        return isinstance(x, Obj)
-    
-    @staticmethod
-    def check_mor(x: Mor) -> bool:
-        return isinstance(x, Mor)
-    
-    @staticmethod
-    def check_eq(x: Eq) -> bool:
-        return isinstance(x, Eq)
-    
-    @staticmethod
     def ref(mor: Mor) -> Eq:
         return mor.ref()
     
@@ -450,7 +528,7 @@ class Category:
 
     @staticmethod
     def eq_unique(s: UniqueSource) -> Eq:
-        d, e = s
+        d, _ = s
         return d
     
     @staticmethod
@@ -461,12 +539,12 @@ class Category:
     def associativity(s: AssociativitySource) -> Eq:
         f, g, h = s
         # Type checking s and return value is enough.
-        return f.comp(g).comp(h).ref()
+        return f.compose(g).compose(h).ref()
     
     @staticmethod
     def compose_eq(c: ComposableEq) -> Eq:
         d, e = c
-        return d.comp_eq(e)
+        return d.compose_eq(e)
         
     def _compose(
         self,
@@ -495,13 +573,11 @@ class Category:
         # They lack static type checking.
 
         def comp(u: Mor, v: Mor):
-            if self.weakened:
-                u = u.weakened(v.target)
+            u = u.weaken(v.target)
             return self.t_compose((u, v))
         
         def comp_eq(u: Eq, v: Eq):
-            if self.weakened:
-                u = u.weakened(v.starget)
+            u = u.weaken(v.ssource.target)
             # This will type check g to be Eq.
             return self.compose_eq((u, v))
 
@@ -560,15 +636,58 @@ class Category:
     compose = variadic(_compose)
     trans = variadic(_trans)
 
-class CheckedCategory(Checked):
+def require(p: bool):
+    if not p:
+        raise Error
+
+class CCategory(Category):
+    @staticmethod
+    def t_compose(c: Composable) -> Mor:
+        Obj().check(c)
+        require(CCategory.check_composable(c))
+        return Category.t_compose(c)
+    
+    @staticmethod
+    def check_composable(c: Composable) -> bool:
+        f, g = c
+        # No check_eq here since at this levelthe type of source is Obj
+        # not some instance of Obj (like when using backend).
+        # One may though end up using a method instead of __eq__.
+        return f.source == g.target
+
+class CheckedCategory:
+    # TODO: Type annotate as Callable?
     unchecked_cls = Category
     backend: BCategory
     unchecked: Category
 
-    def __init__(self, *args, **kwargs):
+    @staticmethod
+    def check_obj(x: object) -> bool:
+        return isinstance(x, Obj)
+    
+    @staticmethod
+    def check_mor(x: object) -> bool:
+        return isinstance(x, Mor)
+    
+    @staticmethod
+    def check_eq(x: object) -> bool:
+        return isinstance(x, Eq)
+
+    def __init__(
+            self, theory: object,
+            backend: BCategory, 
+            kw: dict[str, object] | None = None,
+            subkw: dict[str, dict[str, object]] | None = None,
+            theory_clss: tuple[type, ...] | None = None,
+        ):
         # Notice that type checking only needs to be done the first
         # time theory_cls is instantiated when there is no sub overriding.
-        super().__init__(*args, **kwargs)
+        self.unchecked = self.unchecked_cls(
+            theory,
+            kw=kw, subkw=subkw,
+            theory_clss=theory_clss,
+        )
+        self.backend = backend
         self.id = self.unchecked.id
         self.weakened = self.unchecked.weakened
 
@@ -580,6 +699,10 @@ class CheckedCategory(Checked):
         # is already implemented, e.g. Composable, eq, etc.
         # It makes sense then to disallow set_check, set_eval and
         # assume from the non atomic cells.
+        #Obj().set_check(u.check_obj)
+        Mor(Obj(), Obj()).set_eval(
+            u.source # type: ignore
+        )
         backend.Obj.set_check(u.check_obj)
         backend.Mor.set_check(u.check_mor)
         backend.Eq.set_check(u.check_eq)
@@ -607,8 +730,8 @@ class CheckedCategory(Checked):
         # has semantics, i.e. set_check, set_eval and assume has been
         # called on all atomic cells.
 
-    def with_kw(self, theory, name, kw, sub_kw, theory_clss):
-        return CheckedCategory(theory, self.backend, name, kw, sub_kw, theory_clss)
+    def with_kw(self, theory, name, kw, subkw, theory_clss):
+        return CheckedCategory(theory, self.backend, name, kw, subkw, theory_clss)
 
     def source(self, x):
         return self.backend.source.eval(x)
@@ -618,9 +741,7 @@ class CheckedCategory(Checked):
     
     def t_compose(self, x):
         return self.backend.compose.eval(x)
-    
-    converting_compose = t_compose
-    
+        
     def identity(self, x):
         return self.backend.identity.eval(x)
     
@@ -653,11 +774,9 @@ class CheckedCategory(Checked):
     
     def compose_eq(self, x):
         return self.backend.compose_eq.eval(x)
-    
-    converting_compose_eq = compose_eq
-    
-    def with_kw(self, kw, sub_kw):
-        return self.unchecked.with_kw(kw, sub_kw)
+        
+    #def with_kw(self, kw, subkw):
+    #    return self.unchecked.with_kw(kw, subkw)
     
     def obj(self, name):
         self.unchecked.obj(name)
@@ -703,6 +822,7 @@ class CheckedCategory(Checked):
         tcond.verify(_eq)
 
     def sub(self, name, theory_cls, **kw):
+        # TODO: Does this work?!!
         self.unchecked.sub(name, theory_cls, **kw)
 
     compose = variadic(Category._compose)

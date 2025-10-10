@@ -3,33 +3,13 @@ from itertools import chain
 from collections.abc import Sequence, Mapping, Sized #, Iterator
 
 from ..theory.cart import Cart as BCart
-from . import Obj, Mor, Eq
+from .cells import Obj, Mor, Eq
 from .category import Category, Unsourced, CheckedCategory, Composable, Comp as BaseComp
 
 class Error(Exception):
     pass
 
-# class TerminalObj(Obj):
-#     __slots__ = ()
-#     implicit_weakening = True
-#     T: 'TerminalObj'
-
-#     def __eq__(self, v):
-#         return self is v or isinstance(v, TerminalObj)
-
-#     def check(self, x):
-#         if not (self.implicit_weakening or x == ()):
-#             raise Error
-    
-#     def __str__(self):
-#         # The : helps distinguish product and pairing, as well as
-#         # terminal object and terminal morphism.
-#         return '()'
-    
-#     def __repr__(self):
-#         return f'`terminal_obj {self!s}`'
-    
-# TerminalObj.T = TerminalObj()
+# The `:` helps distinguish product and pairing, as well as
 
 class TerminalMor(Mor):
     # TODO: Should this be Pairing the way TerminalObj is Product?
@@ -215,8 +195,8 @@ class Product(Obj, Mapping):
         return name, self._flat[name][1]
     
     def _add_names_from_type(self, typ: 'Product'):
-        for subname, typ in typ._flat.items():
-            self._add_name(subname, typ)
+        for subname, (pos, t) in typ._flat.items():
+            self._add_name(subname, t)
 
     def __init__(
             self,
@@ -270,6 +250,7 @@ class Product(Obj, Mapping):
     def __eq__(self, v):
         return self is v or (
             isinstance(v, Product)
+            and self.weakened == v.weakened
             and self.params == v.params
         )
             # all(
@@ -391,7 +372,7 @@ class Product(Obj, Mapping):
         for name, typ in self.params:
             if name:
                 if isinstance(name, str):
-                    typ.check_eq(
+                    typ.check_eql(
                         _x_get(x, name),
                         _y_get(y, name),
                     )
@@ -408,12 +389,12 @@ class Product(Obj, Mapping):
                     _gfs, _gfs,
                 )
             else:
-                typ.check_eq(
+                typ.check_eql(
                     _x_get(x, typ),
                     _y_get(y, typ),
                 )
         
-    def check_eq(self, x, y):
+    def check_eql(self, x, y):
         # This assumes that the type of x, y has already been checked.
         #if isinstance(x, Mapping):
         #    x = x.items()
@@ -605,45 +586,6 @@ class TProductMor(Mor, Mapping):
 
     # __str__
     # __repr__
-
-# class AttrSequence(Sequence):
-#     attrs = __slots__ = ()
-
-#     def __init__(self, *args, **kwargs):
-#         from bisect import insort, bisect_left
-#         keys = []
-
-#         def no_repeat(k):
-#             i = bisect_left(keys, k)
-#             if i != len(keys) and keys[i] == k:
-#                 # If there are repeated slots, a TypeError will always be raised.
-#                 raise TypeError
-#             insort(keys, k)
-#             return k
-
-#         attrs = self.attrs
-#         all_args = chain(
-#             ((no_repeat(attrs[i]), v) for i, v in enumerate(args)),
-#             ((no_repeat(k), v) for k, v in kwargs.items()),
-#         )
-
-#         for name, arg in all_args:
-#             try:
-#                 setattr(self, name, arg)
-#             except AttributeError:
-#                 raise TypeError
-
-#         if len(keys) < len(attrs):
-#             raise TypeError
-
-#     def __getitem__(self, idx):
-#         try:
-#             return getattr(self, self.attrs[idx])
-#         except AttributeError:
-#             raise IndexError
-        
-#     def __len__(self):
-#         return len(self.__slots__)
     
     #def __iter__(self): # -> Iterator[Mor, Mor]:
     #    return iter(getattr(self, name) for name in self.__slots__)
@@ -693,7 +635,7 @@ class ProductMorEq(Eq):
         n = self.proj_name
         mor = pm
         prod_p: Mor = getattr(pm.pt, n)
-        ssource = prod_p.comp(mor)
+        ssource = prod_p.compose(mor)
         starget = getattr(pm, n)
         super().__init__(ssource, starget)
 
@@ -734,13 +676,13 @@ class ProductMor(Mor, WithAttrs):
     def p_eq(self):
         # There must be no need to use self[0] here.
         mor = self
-        return Eq(self.pt.p.comp(mor), self.p)
+        return Eq(self.pt.p.compose(mor), self.p)
         #return ProductMorPEq(self)
     
     @property
     def q_eq(self):
         mor = self
-        return Eq(self.pt.q.comp(mor), self.q)
+        return Eq(self.pt.q.compose(mor), self.q)
         #return ProductMorQEq(self)
 
     # No eval. Pairing, not this, is used by backend type checking.
@@ -849,15 +791,17 @@ def _filter_arg(arg):
 # No need to implement everything again, and the weakening morphism
 # is the only extra data.
 
-def weakened_mor(f: Mor, source):
+def weaken_mor(f: Mor, source: Obj) -> Mor:
+    if not (isinstance(source, Product) and source.weakened):
+        return f
     s = f.source
     if s == source:
         return f
-    if isinstance(source, Product):
-        if not source.weakened:
-            raise ValueError
-    else:
-        raise TypeError
+    #if isinstance(source, Product):
+    #if not source.weakened:
+    #    raise ValueError
+    #else:
+    #    raise TypeError
     if isinstance(s, Product):
         g = source.proj(*s)
     else:
@@ -872,7 +816,20 @@ def weakened_mor(f: Mor, source):
     # else:
     #     raise ValueError
     
-    return f.comp(g)
+    return f.compose(g)
+
+def weaken_eq(d: Eq, source: Obj) -> Eq:
+    if not (isinstance(source, Product) and source.weakened):
+        return d
+    s = d.ssource.source
+    if s == source:
+        return d
+    if isinstance(s, Product):
+        e = source.proj(*s).ref()
+    else:
+        e = source.proj(s).ref()
+    return d.compose_eq(e)
+
 
 # class WeakenedMor(Mor):
 #     __slots__ = 'orig',
