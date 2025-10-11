@@ -3,7 +3,7 @@ from ..cells import Obj, Mor, Eq
 Path = tuple[Eq, Eq]
 Composable = tuple[Mor, Mor]
 ComposableEq = tuple[Eq, Eq]
-UniqueSource = tuple[Eq, Eq]
+EqUniqueSource = tuple[Eq, Eq]
 AssociativitySource = tuple[Mor, Mor, Mor]
 
 # We use explicit return types here in order to mimic category.lex
@@ -36,7 +36,7 @@ def trans(p: Path) -> Eq:
     f, g = p
     return f.trans(g)
 
-def eq_unique(s: UniqueSource) -> Eq:
+def eq_unique(s: EqUniqueSource) -> Eq:
     d, _ = s
     return d
 

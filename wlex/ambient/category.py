@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import NamedTuple, Any
+from typing import Any
 from collections.abc import Callable
 import weakref
 
@@ -470,6 +470,7 @@ class Category:
                     raise Error
                 kw[key] = value
 
+        # TODO: Place this in __init__?
         subkw = _extract_subkw(kw)
         #setattr(theory, name, Sub(name, self, theory_cls, kw, subkw))
         # Avoid circular class instantiation
@@ -482,7 +483,7 @@ class Category:
             theory, name,
             # TODO: Why not use Category instead of self.with_kw?
             # TODO: Check if this should be simplified further since
-            # subs can be created without lazy instantiation. 
+            # subs can be created without lazy instantiation. Probably not. 
             theory_cls(lambda th: self.with_kw(th, subname, kw, subkw, theory_clss)),
         )
 
@@ -635,25 +636,6 @@ class Category:
         
     compose = variadic(_compose)
     trans = variadic(_trans)
-
-def require(p: bool):
-    if not p:
-        raise Error
-
-class CCategory(Category):
-    @staticmethod
-    def t_compose(c: Composable) -> Mor:
-        Obj().check(c)
-        require(CCategory.check_composable(c))
-        return Category.t_compose(c)
-    
-    @staticmethod
-    def check_composable(c: Composable) -> bool:
-        f, g = c
-        # No check_eq here since at this levelthe type of source is Obj
-        # not some instance of Obj (like when using backend).
-        # One may though end up using a method instead of __eq__.
-        return f.source == g.target
 
 class CheckedCategory:
     # TODO: Type annotate as Callable?
