@@ -731,3 +731,7 @@ def _unfold_source_target(source: Mor | Obj, target: Mor | Obj):
     # There is no point in weakening. source and target are guarantied
     # to be the sources of hat_source and hat_target.
     return source, target, hat_source, hat_target
+
+MorLike = Mor | Unsourced | Obj
+EqLike = Eq | Mor | Obj
+CellLike = Obj | MorLike | EqLike

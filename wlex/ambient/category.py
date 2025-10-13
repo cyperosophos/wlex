@@ -1,11 +1,13 @@
 from functools import wraps
 from typing import Any
 from collections.abc import Callable
+from collections import defaultdict
 import weakref
 
 from .cells import (
     Obj, Mor, DefMor, HatMor, DefHatMor, Eq,
     Unsourced, PrimObj, PrimMor, PrimEq, ThesisEq,
+    MorLike, EqLike, CellLike,
 )
 from ..theory.category import Category as BCategory
     
@@ -224,6 +226,33 @@ def _extract_subkw(kw: dict[str, object]):
             d[skey[1]] = kw.pop(key)
     return subkw
 
+#CellMapping = dict[str, Union[CellLike, 'CellMapping']]
+Theory = dict[str, 'CellsLike']
+CellsLike = CellLike | Theory
+
+#Nat = tuple[()] | tuple['Nat']
+#zero: Nat = ()
+#def succ(n: Nat) -> Nat: return (n,)
+
+
+# def _split_mapped(
+#         mapped: dict[str, CellLike | CellMapping],
+#     ) -> tuple[
+#         dict[str, CellLike],
+#         dict[str, CellMapping],
+#     ]:
+#     # One must still distinguish a missing cell from a cell of the wrong
+#     # type in obj, mor, etc.
+#     # TODO: Check the type of cell in obj.
+#     mapped_cell: dict[str, CellLike] = dict()
+#     mapped_sub: dict[str, CellMapping] = dict()
+#     # TODO: Having mapped_sub names not in the codomain should raise a TypeError.
+
+#     for name, value in mapped.items():
+#         if isinstance(value, CellLike):
+#             ass
+
+
 # class Path(NamedTuple):
 #     f: Eq
 #     g: Eq
@@ -271,57 +300,87 @@ def variadic(m: Callable[[Any, Any, Any], Any]):
 # where checked means dynamically checked.
 # Category, CheckedCategory, DynamicCategory.
 # If Cart type checking end up being handled ad hoc, then so does the
-# # remaining type checking. 
+# # remaining type checking.
+
+def _isinstance_Theory(value: object):
+    if isinstance(value, dict):
+        for k, v in value.items(): # type: ignore
+            assert(isinstance(v, object))
+            if isinstance(k, str) and _isinstance_CellsLike(v):
+                continue
+            return False
+        return True
+    return False
+
+def _isinstance_CellsLike(value: object):
+    return isinstance(value, CellLike) or _isinstance_Theory(value)
 
 class Category:
+    #id = UnsourcedId()
+    theory: Theory
+    _base: Theory
+    name: str
+
     def __init__(
-            self, theory: object, name: str = '',
-            kw: dict[str, object] | None = None,
-            subkw: dict[str, dict[str, object]] | None = None,
-            theory_clss: tuple[type, ...] | None = None,
+            self, name: str = '',
+            base: Theory | None = None,
+            #submapped: dict[str, dict[str, object]] | None = None,
+            #_theory_clss: tuple[type, ...] | None = None,
         ):
         # The point of this would be to allow type checking on the overriding
         # methods of CheckedCategory. This seems to not be needed.
         # see e.g. f.source, g.target. Here type checking would be
         # superfluous as one has already checked that (f, g) is Composable.
         #self.hat_mor_cls = HatMor.cls_with_id_comp(self.identity, self.t_compose)
-        self.id = UnsourcedId()
-        self.kw = kw or dict()
-        self.subkw = subkw or dict()
-        self.name = name
-        self.theory_clss = theory_clss or ()
-        self.theory: object = weakref.proxy(theory)
+        super().__setattr__('_base', base or dict())
+        super().__setattr__('name', name)
+        super().__setattr__('theory', dict())
 
-    @classmethod
-    def with_kw(
-            cls, theory: object, name: str,
-            kw: dict[str, object],
-            subkw: dict[str, dict[str, object]],
-            theory_clss: tuple[type, ...],
-        ):
-        # This needs to handle kw used by sub at lower levels.
-        # e.g. S.P.Q in line 35 of theory/category.py.
-        # TODO: An important goal is to be able to define monads,
-        # hence natural transformations. This requires making mor
-        # support self and self.T within the __init__ of the theory
-        # as if they were functors.
-        # Inheritance requires this to be a classmethod.
+    def __getattr__(self, name: str):
+        # Shorcut for accessing theory
+        return self.theory[name]
+    
+    def __setattr__(self, name: str, value: object):
+        if _isinstance_CellsLike(value):
+            assert(isinstance(value, CellLike | dict))
+            self.theory[name] = value
+        raise TypeError
+        
 
-        return cls(theory, name, kw, subkw, theory_clss)
+    # @classmethod
+    # def with_kw(
+    #         cls, theory: object, name: str,
+    #         kw: dict[str, object],
+    #         subkw: dict[str, dict[str, object]],
+    #         theory_clss: tuple[type, ...],
+    #     ):
+    #     # This needs to handle kw used by sub at lower levels.
+    #     # e.g. S.P.Q in line 35 of theory/category.py.
+    #     # TODO: An important goal is to be able to define monads,
+    #     # hence natural transformations. This requires making mor
+    #     # support self and self.T within the __init__ of the theory
+    #     # as if they were functors.
+    #     # Inheritance requires this to be a classmethod.
+
+    #     return cls(theory, name, kw, subkw, theory_clss)
 
     def obj(self, name: str):
         theory = self.theory
-        if name in self.kw:
-            setattr(theory, name, self.kw[name])
+        if name in self._base:
+            value = self._base[name]
+            if isinstance(value, Obj):
+                theory[name] = value
+            else:
+                raise TypeError
         else:
-            setattr(theory, name, PrimObj(self.cell_name(name)))
+            theory[name] = PrimObj(self.cell_name(name))
 
     def mor(
             self, name: str,
             source: Mor | Obj,
             target: Mor | Obj,
-            value: Mor | Unsourced | Obj | None = None,
-            proof: Eq | Mor | Obj | None = None
+            value: MorLike | None = None,
+            proof: EqLike | None = None
         ):
         # Morphisms with value can't be overridden by kw.
         # sub corresponds to a functor, so saying f = g h
@@ -335,12 +394,12 @@ class Category:
         # overriding mor as value.
         theory = self.theory
         #print(self, source, target, value, proof)
-        if name in self.kw:
+        if name in self._base:
             if value or proof:
-                raise Error
+                raise ValueError
             # The purpose of setting the value indirectly is to check signature.
-            _value = self.kw[name]
-            if isinstance(_value, Mor | Unsourced | Obj):
+            _value = self._base[name]
+            if isinstance(_value, MorLike):
                 value = _value
             else:
                 raise TypeError
@@ -348,46 +407,49 @@ class Category:
         #print(value, self.kw)
         if isinstance(source, Obj) and isinstance(target, Obj):
             if proof:
-                raise Error
+                raise ValueError
             if value:
-                setattr(theory, name, DefMor(
+                theory[name] = DefMor(
                     self.cell_name(name),
                     source, target, value,
-                ))
+                )
             else:
-                setattr(theory, name, PrimMor(
+                theory[name] = PrimMor(
                     self.cell_name(name),
                     source, target,
-                ))
+                )
         elif value:
             #print(value)
             if not proof:
                 if isinstance(value, Mor):
                     proof = value.hat
             if proof:
-                setattr(theory, name, DefHatMor(
+                theory[name] = DefHatMor(
                     self.cell_name(name),
                     source, target, value, proof,
-                ))
+                )
         else:
+            if proof:
+                raise ValueError
+
             # HatMor.unfold_source_target handles the remaining type checking.
-            setattr(theory, name, HatMor(
+            theory[name] = HatMor(
                 self.cell_name(name),
                 source, target,
-            ))
+            )
 
     def eq(
             self, name: str,
-            ssource: Mor | Unsourced | Obj,
-            starget: Mor | Unsourced | Obj,
-            proof: Eq | Mor | Obj | None = None,
+            ssource: MorLike,
+            starget: MorLike,
+            proof: EqLike | None = None,
         ):
         theory = self.theory
-        if name in self.kw:
+        if name in self._base:
             if proof:
-                raise Error
-            _proof = self.kw[name]
-            if isinstance(_proof, Eq | Mor | Obj):
+                raise ValueError
+            _proof = self._base[name]
+            if isinstance(_proof, EqLike):
                 proof = _proof
             else:
                 raise TypeError
@@ -417,24 +479,29 @@ class Category:
         
         # Eq.__eq__ in Eq.__init__ checks that proof is of type Eq or None.
         if proof:
-            setattr(
-                theory, name,
-                ThesisEq(
-                    self.cell_name(name),
-                    ssource, starget,
-                    proof
-                )
+            theory[name] = ThesisEq(
+                self.cell_name(name),
+                ssource, starget,
+                proof
             )
         else:
-            setattr(
-                theory, name,
-                PrimEq(
-                    self.cell_name(name),
-                    ssource, starget,
-                ),
+            theory[name] = PrimEq(
+                self.cell_name(name),
+                ssource, starget,
             )
 
-    def sub(self, name: str, theory_cls: type, **kw: object):
+    def final(self):
+        theory = self.theory
+        for name in self._base:
+            if name not in theory:
+                raise ValueError
+        return theory
+
+    def sub(
+            self, name: str,
+            mk_theory: Callable[['Category'], Theory],
+            **base: CellsLike,
+        ):
         # If both self.subkw and kw override cells then an error
         # occurs, because what should have happened is that the overriding
         # cell got overridden. This applies to subkw as well.
@@ -444,48 +511,37 @@ class Category:
         # Only cells with no value (atomic cells) can be overridden.
         # These cells are created and set using obj, mor, eq, sub,
         # hence these methods handle the process of overriding.
+        # Is it possible to have values in base that don't override anything? No.
         theory = self.theory
-        if name in self.kw:
-            if kw:
-                # Can't override partially defined functor.
-                # Must instead override missing components.
-                raise Error
-            if self.subkw.get(name):
-                # Can't be overriden by subkw when overridden by kw.
-                raise Error
-            # This is wrong because kw must include all attributes.
-            #kw = _sub.get_kw(self, theory_cls)
-            # theory_cls has to coincide.
-            _sub = self.kw[name]
-            if isinstance(_sub, theory_cls):
-                setattr(theory, name, _sub)
+        if name in self._base:
+            _base = self._base[name]
+            if _isinstance_Theory(_base):
+                assert(isinstance(_base, dict))
+                # Only override missing components.
+                # This will handle overriding the whole theory with
+                # a theory instance, since theory instances are dict.
+                for _name, value in _base.items():
+                    if _name in base:
+                        raise ValueError
+                    base[_name] = value
             else:
-                raise Error
-            return
+                raise TypeError
+        
+        theory[name] = mk_theory(Category(self.cell_name(name), base))
 
-        if name in self.subkw:
-            superkw: dict[str, object] = self.subkw[name]
-            for key, value in superkw.items():
-                if key in kw:
-                    raise Error
-                kw[key] = value
-
-        # TODO: Place this in __init__?
-        subkw = _extract_subkw(kw)
-        #setattr(theory, name, Sub(name, self, theory_cls, kw, subkw))
         # Avoid circular class instantiation
-        theory_clss: tuple[type, ...] = (*self.theory_clss, type(theory))
-        for tc in theory_clss:
-            if theory_cls is tc:
-                raise Error
-        subname = self.cell_name(name)
-        setattr(
-            theory, name,
-            # TODO: Why not use Category instead of self.with_kw?
-            # TODO: Check if this should be simplified further since
-            # subs can be created without lazy instantiation. Probably not. 
-            theory_cls(lambda th: self.with_kw(th, subname, kw, subkw, theory_clss)),
-        )
+        # theory_clss: tuple[type, ...] = (*self._theory_clss, type(theory))
+        # for tc in theory_clss:
+        #     if mk_theory is tc:
+        #         raise Error
+        # subname = self.cell_name(name)
+        # setattr(
+        #     theory, name,
+        #     # TODO: Why not use Category instead of self.with_kw?
+        #     # TODO: Check if this should be simplified further since
+        #     # subs can be created without lazy instantiation. Probably not. 
+        #     theory_cls(lambda th: self.with_kw(th, subname, kw, subkw, theory_clss)),
+        # )
 
     def cell_name(self, name: str):
         if not self.name:
