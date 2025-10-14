@@ -6,7 +6,7 @@ import weakref
 
 from .cells import (
     Obj, Mor, DefMor, HatMor, DefHatMor, Eq,
-    Unsourced, PrimObj, PrimMor, PrimEq, ThesisEq,
+    Unsourced, PrimObj, PrimMor, PrimEq, ThesisEq, ProvenEq,
     MorLike, EqLike, CellLike,
 )
 from ..theory.category import Category as BCategory
@@ -196,15 +196,11 @@ class CompEq(Eq):
     def __repr__(self):
         return f'`comp_eq {self!s}`'
 
-class Ref(Eq):
+class Ref(ProvenEq):
     __slots__ = ()
 
     def __init__(self, mor: Mor):
         super().__init__(mor, mor)
-    
-    @property
-    def proven(self):
-        return True
 
     def __str__(self):
         return f'{self.ssource}'
@@ -302,18 +298,18 @@ def variadic(m: Callable[[Any, Any, Any], Any]):
 # If Cart type checking end up being handled ad hoc, then so does the
 # # remaining type checking.
 
-def _isinstance_Theory(value: object):
-    if isinstance(value, dict):
-        for k, v in value.items(): # type: ignore
-            assert(isinstance(v, object))
-            if isinstance(k, str) and _isinstance_CellsLike(v):
-                continue
-            return False
-        return True
-    return False
+# def _isinstance_Theory(value: object):
+#     if isinstance(value, dict):
+#         for k, v in value.items(): # type: ignore
+#             assert(isinstance(v, object))
+#             if isinstance(k, str) and _isinstance_CellsLike(v):
+#                 continue
+#             return False
+#         return True
+#     return False
 
-def _isinstance_CellsLike(value: object):
-    return isinstance(value, CellLike) or _isinstance_Theory(value)
+# def _isinstance_CellsLike(value: object):
+#     return isinstance(value, CellLike) or _isinstance_Theory(value)
 
 class Category:
     #id = UnsourcedId()
@@ -336,15 +332,15 @@ class Category:
         super().__setattr__('name', name)
         super().__setattr__('theory', dict())
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> CellsLike:
         # Shorcut for accessing theory
         return self.theory[name]
     
-    def __setattr__(self, name: str, value: object):
-        if _isinstance_CellsLike(value):
-            assert(isinstance(value, CellLike | dict))
-            self.theory[name] = value
-        raise TypeError
+    def __setattr__(self, name: str, value: CellsLike):
+        #if _isinstance_CellsLike(value):
+        #    assert(isinstance(value, CellLike | dict))
+        self.theory[name] = value
+        #raise TypeError
         
 
     # @classmethod
@@ -515,8 +511,7 @@ class Category:
         theory = self.theory
         if name in self._base:
             _base = self._base[name]
-            if _isinstance_Theory(_base):
-                assert(isinstance(_base, dict))
+            if isinstance(_base, dict):
                 # Only override missing components.
                 # This will handle overriding the whole theory with
                 # a theory instance, since theory instances are dict.

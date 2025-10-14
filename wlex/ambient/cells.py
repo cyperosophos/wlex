@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Optional
+from typing import Optional, Union
 from collections.abc import Callable
 
 class Error(Exception):
@@ -24,15 +24,39 @@ class Obj:
         from ..ambient.category import Id
         return Id(self)
     
-    def terminal_mor(self):
+    def proj(self, *args: Union[str, 'Obj']) -> 'Mor':
         from ..ambient.cart import TerminalMor
-        return TerminalMor(self)
+        if len(args) == 0:
+            return TerminalMor(self)
+        elif len(args) > 1 or args[0] != self:
+            raise ValueError
+        return self.identity()
+    
+    @staticmethod
+    def terminal():
+        from ..ambient.cart import Product
+        return Product(())
+    
+    def terminal_mor(self):
+        # The result of this has to pass backend.TerminalMor.check.
+        #return Mor(self, Product(()))
+        # TODO: Use this instead for purity
+        return self.proj()
+        # See cart.weaken_mor
     
     def product(self, y: 'Obj'):
-        from ..ambient.cart import Span
+        from ..ambient.cart import Product
+        # This result of this has to pass backend.Span.check.
+        # We use Product for purity (since it defines __eq__),
+        # but we don't need its check method. When definining the
+        # backend theory, the morphisms returned here are not used
+        # as projections, so there is no need for eval (although
+        # one still should have purity and composition).
         x = self
-        source = Obj()
-        return Span(Mor(source, x), Mor(source, y))
+        source = Product((('x', x), ('y', y)))
+        #return Mor(source, x), Mor(source, y)
+        # Use proj for purity
+        return source.proj('x'), source.proj('y')
     
     def __str__(self):
         return f'<type_{id(self)}>'
@@ -145,10 +169,34 @@ class Mor:
         return TerminalMorUnique(self)
     
     def pairing(self, q: 'Mor'):
-        # TODO: Should signature type hints only be used when there is
-        # no type checking in the body?
         from ..ambient.cart import ProductMor
         p = self
+        # There is no need to check this construction in checked/cart.py,
+        # since it is not taking by any function as argument.
+        # The produced instance is not used for type checking
+        # (nor evaluating, nor proving). For type checking, one
+        # uses Pairing (which supports multiple components).
+        # Instances of both TerminalMor and ProductMor must pass
+        # type checking by Pairing (and the hat).
+        # source = p.source
+        # pt = p.target.product(q.target)
+        # _p, _q = pt
+        # target = p.source
+        # mor = Mor(source, target)
+        # p_eq = Eq(_p.compose(mor), p)
+        # q_eq = Eq(_q.compose(mor), q)
+        # return mor, p, q, p_eq, q_eq
+        return ProductMor(p, q).to_tuple()
+    
+    def pairing_unique(self, p: 'Mor', q: 'Mor'):
+        from ..ambient.cart import PairingUnique
+        return PairingUnique(self, p, q)
+
+    #def pairing(self, q: 'Mor'):
+        # TODO: Should signature type hints only be used when there is
+        # no type checking in the body?
+    #    from ..ambient.cart import ProductMor
+    #    p = self
         # TODO: Notice how one needs type conversion from ProductMor
         # to Span. For Mor this is supported as a projection.
         # The way to go is to compose with Span (or Mor), i.e. the identity,
@@ -177,7 +225,7 @@ class Mor:
         # replicate using inheritance, etc.
         # TODO: Remember to handle param projections and assigments,
         # which allow having local variables. Check other notes!
-        return ProductMor(p, q)
+    #    return ProductMor(p, q)
     
     #def __eq__(self, x: 'Mor'):
         # Plugging equalities through transitivity without too much
@@ -216,7 +264,7 @@ class Mor:
         if x is self:
             return True
         if isinstance(x, DefMor):
-            return self == x.value 
+            return self.eql(x.value)
         return False
     
     def check_signature(self, value: 'Mor'): #object):
@@ -501,9 +549,8 @@ class Eq:
     
     @property
     def proof(self) -> Optional['Eq']:
-        return
-        #if self._proven:
-        #    return self
+        if self.proven:
+            return self
     
     def assume(self) -> None:
         raise Error
@@ -561,6 +608,17 @@ class Eq:
     
     def __repr__(self):
         return f'`eq {self!s}: {self.ssource} == {self.starget}`'
+    
+class ProvenEq(Eq):
+    __slots__ = ()
+
+    @property
+    def proven(self):
+        return True
+    
+    @property
+    def proof(self):
+        return self
 
 class PrimEq(Eq):
     __slots__ = 'name', '_proven'
@@ -579,15 +637,10 @@ class PrimEq(Eq):
     def proven(self):
         return getattr(self, '_proven', False)
 
-    @property    
-    def proof(self):
-        if hasattr(self, '_proven'):
-            return self
-
     def assume(self):
         # self.proven is the conjunction of the proven values of
         # all trans operands.
-        if hasattr(self, '_proven'):
+        if self.proven:
             raise Error
         self._proven = True
 
@@ -679,26 +732,21 @@ class HatEq(Eq):
     @property
     def proven(self):
         return self._hat_mor.hat_proven
-    
-    @property
-    def proof(self) -> Eq | None:
-        if self._hat_mor.hat_proven:
-            return self
 
     def __str__(self):
         return f'^{self._hat_mor}'
 
 class DefHatEq(HatEq):
     __slots__ = '_hat_mor',
+    _hat_mor: DefHatMor
 
     def __init__(self, hat_mor: DefHatMor):
         super().__init__(hat_mor)
-        self._hat_mor = hat_mor
 
     @property
     def proof(self):
         return self._hat_mor.hat_proof
-    
+        
 def _hat_ssource_starget(mor: HatMor | DefHatMor):
     return mor.hat_source, mor.hat_target.compose(mor)
 
