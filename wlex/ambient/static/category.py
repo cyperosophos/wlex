@@ -51,3 +51,6 @@ def associativity(s: AssociativitySource) -> Eq:
 def compose_eq(c: ComposableEq) -> Eq:
     d, e = c
     return d.compose_eq(e)
+
+# TODO: left_identity
+# TODO: right_identity

@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, TypeGuard
 from itertools import chain
 from collections.abc import Sequence, Mapping, Sized, Callable #, Iterator
 
@@ -61,7 +61,7 @@ class TerminalMor(Mor):
     def __repr__(self):
         return f'`terminal_mor {self!s}[{self.source}]`'
     
-class ProductMor(Mor):
+class ProductMor3(Mor):
     __slots__ = 'p', 'q', 'pt'
 
     def __init__(self, p: Mor, q: Mor):
@@ -78,7 +78,7 @@ class ProductMor(Mor):
 
     def eql(self, x: Mor):
         return (
-            isinstance(x, ProductMor)
+            isinstance(x, ProductMor3)
             and self.p.eql(x.p)
             and self.q.eql(x.q)
         )
@@ -108,7 +108,17 @@ class UnsourcedTerminalMor(Unsourced):
     
     def __repr__(self):
         return '`unsourced_terminal_mor`'
-
+    
+# One treats Ref as the prototypical proven Eq, and then all proven
+# Eq follow from Ref and extensional equality. equiv (e.g. Mor.equiv)
+# has to be modified to handle the equality. This replaces
+# TerminalMorUnique and PairingUnique, and also p_eq, q_eq,
+# which get made extensional modifying Comp.equiv.
+# TODO: Use Ref for TerminalMorUnique, etc. ProvenEq doesn't seem to be needed.
+# TODO: Separate the theoreticall cell methods through inheritance
+# inside the cell directory.
+# TODO: Implement Pairing and use it instead of ProductMor and TerminalMor
+# when implementing the corresponding theoretical cell methods. 
 class TerminalMorUnique(ProvenEq):
     __slots__ = ()
 
@@ -174,32 +184,40 @@ class PairingUnique(Eq):
 # The Mor values that make up the Span are not evaluated
 # since they are not used by the backend, however they
 # are used for type checking (e.g. in compositions).
-
+from typing import TypeVar
 ProductParams = Sequence[tuple[str, Obj] | tuple[tuple[str, ...], 'Product']]
 ProductParamName = str | Obj
 ProductParamKey = int | ProductParamName
-ProductSequence = Sequence[object]
+ObjectSequence = Sequence[object]
+ObjectMapping = Mapping[object, object]
 ProductMapping = Mapping[ProductParamKey, object]
-ProductElement = ProductSequence | ProductMapping
-ProductSequenceGetter = Callable[[ProductSequence, ProductParamName], object]
+ProductElement = ObjectSequence | ObjectMapping
+T = TypeVar('T', bound=ProductElement)
+ProductSequenceGetter = Callable[[ObjectSequence, ProductParamName], object]
 ProductMappingGetter = Callable[[ProductMapping, ProductParamName], object]
-ProductElementGetter = ProductSequenceGetter | ProductMappingGetter
+ProductGetter = Callable[[T, ProductParamName], object]
+#ProductElementGetter = ProductSequenceGetter | ProductMappingGetter
 # ProductElement = (
 #     tuple[ProductSequence, ProductSequenceGetter] 
 #     | tuple[ProductMapping, ProductMappingGetter]
 # )
+# The args of the pairing get converted to kwargs using the common Product source.
+# The pairing method also handles unsourced morphisms.
+ProductMorParams = Sequence[tuple[str, Mor] | tuple[tuple[str, ...], Mor]]
+ProductMorGlue = Mapping[ProductParamName, Eq]
+ProductProjParams = Sequence[tuple[str, ProductParamKey]]
 
-def _get_product_element(
-        x: ProductElement,
-        name: ProductParamName,
-        get: ProductElementGetter,
-    ):
-    return get(
-        x, # type: ignore
-        name,
-    )
+def _isinstance_ObjectSequence(x: object) -> TypeGuard[ObjectSequence]:
+    if isinstance(x, Sequence):
+        return True
+    return False
 
-def _isinstance_ProductMapping(x: object):
+def _isinstance_ObjectMapping(x: object) -> TypeGuard[ObjectMapping]:
+    if isinstance(x, Mapping):
+        return True
+    return False
+
+def _isinstance_ProductMapping(x: object) -> TypeGuard[ProductMapping]:
     if isinstance(x, Mapping):
         for key in x: # type: ignore
             if isinstance(key, ProductParamKey):
@@ -209,13 +227,31 @@ def _isinstance_ProductMapping(x: object):
     return False
 
 class Product(Obj, Mapping[ProductParamKey, Obj]):
-    __slots__ = 'params', '_flat', 'names'
+    # TODO: Consider implementing W-Cart. W-Types don't require all limits.
+    # In this case one would have two possible backends for Category:
+    # one based on ambient Lex, and another based on ambient Dist (extensive cartesian).
+    # In the latter `compose` relies on the Maybe monad.
+    # See: nlab/ Polynomial functor (literal polynomial functor)
+    # See: nlab/ Polynomail monad (free monoid)
+    # See: nlab/ Extensive category
+    # See: nlab/ Distributive categories
+    __slots__ = 'components', 'names'
     weakened = True
     _terminal: 'Product'
-    # TODO: Make immutable?
-    params: ProductParams
-    _flat: dict[ProductParamName, tuple[int, Obj]]
+    # TODO: Remove params!
+    #params: ProductParams
+    components: dict[ProductParamName, tuple[int, Obj]]
     names: list[ProductParamName]
+
+    #def weakener?
+    def renamer(self, names: tuple[str]):
+        if len(names) != len(self.components):
+            raise ValueError
+        params = [
+            (name, typ) for (name, (_, (_, typ)))
+            in zip(names, self.components.items())
+        ]
+        return Product(params)
 
     def _proj(self, key: ProductParamKey):
         if isinstance(key, int):
@@ -224,11 +260,19 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
             name = key
         return Proj(name, self)
 
-    def proj(self, *args: ProductParamKey) -> Mor:
-        if len(args) == 0:
-            return TerminalMor(self)
+    def proj(self, params: ProductProjParams) -> Mor:
+        # This is used by renamer, weakening, etc. So no need to handle
+        # nested products.
+        # The Mor can have a non product as target (no pairing).
+        #if len(args) == 0:
+        #    return TerminalMor(self)
         # This needs pairing
-        pass
+        # Disallowing repeated names (after converting empty names to types)
+        # is handled by ProductMor.__init__. It is not possible to provide glue.
+        return ProductMor(self, [
+            (name, self._proj(key))
+            for (name, key) in params
+        ])
 
     def __new__(cls, params: ProductParams, weakened: bool = True):
         if not params:
@@ -248,49 +292,50 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
     def __contains__(self, key: object):
         if isinstance(key, int):
             return 0 <= key < len(self)
-        return key in self._flat
+        return key in self.components
     
     def includes(self, prod: 'Product') -> bool:
         return all(
-            name in self._flat
+            name in self.components
             and self.name_to_type(name) == prod.name_to_type(name)
             for name in prod.names
         )
 
     def name_to_type(self, name: ProductParamName):
-        return self._flat[name][1]
+        return self.components[name][1]
 
     def _add_name(self, name: ProductParamName, typ: Obj):
-        if name in self._flat:
-            _, t = self._flat[name]
-            # TODO: Make sure types are always checked to be equal
-            # not identical. This is needed in order to compare Product.
-            if t != typ:
+        if name in self.components:
+            _, t = self.components[name]
+            if not t.equiv(typ):
                 raise ValueError
         else:
-            self._flat[name] = (len(self._flat), typ)
+            self.components[name] = (len(self.components), typ)
 
     def pos_to_type(self, pos: int):
-        return self._flat[self.names[pos]][1]
+        return self.components[self.names[pos]][1]
     
     def pos_to_name(self, pos: int):
         return self.names[pos]
 
     def pos_to_name_and_type(self, pos: int):
         name = self.names[pos]
-        return name, self._flat[name][1]
+        return name, self.components[name][1]
     
     def _add_names_from_type(self, typ: 'Product'):
-        for subname, (_, t) in typ._flat.items():
+        for subname, (_, t) in typ.components.items():
             self._add_name(subname, t)
 
     def __init__(self, params: ProductParams, weakened: bool = True):
-        self.params = params
-        self._flat = dict() # maps to position
+        if not params and self is self._terminal and hasattr(self, 'params'):
+            return
+        
+        #self.params = params
+        self.components = dict() # maps to position
 
         if len(params) == 1:
             # Disallow Product as single component
-            name, typ = params[0]
+            _, typ = params[0]
             if isinstance(typ, Product):
                 raise ValueError
 
@@ -333,27 +378,39 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
             # Also one may use a single parameter product in order to
             # set the name of a parameter before a nameless product parameter.
             # Hence treat equalizers (when needed) as single parameter products.
-        self.names = list(self._flat.keys())
+        self.names = list(self.components.keys())
 
     def equiv(self, x: Obj):
+        # TODO: Notice that the order matters when comparing to Product
+        # types, however the order does not matter when checking an object
+        # of type Mapping. When a morphisms (e.g. a pairing) is guarantied
+        # to always produce Mapping, the return type should reflect this,
+        # i.e. it should be a product type that only accepts Mappings (probably not needed).
+        # What is in fact needed is type conversions (similar to weakening)
+        # between Product types with the same list of names but distinct orderings.
+        # They are not equiv but isomorphic. The situation here should be handled
+        # just like weakening. One can also have conversions when the types
+        # coincide (and have the same order) but the names are different.
+        # This is useful with pairig where the names aren't specified and
+        # are therefore indices.
         return super().equiv(x) or (
             isinstance(x, Product)
             and self.weakened == x.weakened
             #and self.params == v.params
             and all(
                 n == m and s.equiv(t)
-                for (n, s), (m, t)
-                in zip(self.params, x.params)
+                for (n, (_, s)), (m, (_, t))
+                in zip(self.components.items(), x.components.items())
             )
         )
     
     def __len__(self):
-        return len(self._flat)
+        return len(self.components)
     
-    def _check(
-            self, x: ProductElement,
-            _get: ProductElementGetter,
-        ):
+    def _check[T: ProductElement](
+        self, x: T,
+        _get: ProductGetter[T],
+    ):
         # Handle the mandatory flattening of nameless parameters in x that provide
         # subparameters. This is done with args and kwargs whose keys
         # are tuples.
@@ -364,33 +421,34 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         # including the product type only once.
         # If the overriding name is a tuple, names must be provided for all subparams.
         # TODO: If it is a dict (or k, v list), then only overridden names.
-        for name, typ in self.params:
-            if name:
-                if isinstance(name, str):
-                    typ.check(_get_product_element(x, name, _get))
-                else:
-                    assert(isinstance(typ, Product))
-                    # Handle empty subname by replacing it with the
-                    # name in the product param.
-                    typ._check(
-                        self._sequence_from_subnames(x, name, typ, _get),
-                        self._get_from_sequence,
-                    )
-            elif isinstance(typ, Product):
-                typ._check(
-                    self._sequence_from_type(x, typ, _get),
-                    self._get_from_sequence,
-                )
-            else:
-                typ.check(_get_product_element(x, typ, _get))
+        for name, (_, typ) in self.components.items():
+            typ.check(_get(x, name))
+            # if name:
+            #     if isinstance(name, str):
+            #         typ.check(_get(x, name))
+            #     else:
+            #         assert(isinstance(typ, Product))
+            #         # Handle empty subname by replacing it with the
+            #         # name in the product param.
+            #         typ._check(
+            #             self._sequence_from_subnames(x, name, typ, _get),
+            #             self._get_from_sequence,
+            #         )
+            # elif isinstance(typ, Product):
+            #     typ._check(
+            #         self._sequence_from_type(x, typ, _get),
+            #         self._get_from_sequence,
+            #     )
+            # else:
+            #     typ.check(_get(x, typ))
 
-    def _get_from_sequence(self, x: ProductSequence, name: ProductParamName):
+    def _get_from_sequence(self, x: ObjectSequence, name: ProductParamName):
         # No requirements are made here about x passing the type check.
         # We don't allow index instead of name, because flattening makes indices too complicated.
-        return x[self._flat[name][0]]
+        return x[self.components[name][0]]
 
-    def _get_from_mapping(self, x: ProductMapping, name: ProductParamName):
-        return x.get(name) or x[self._flat[name][0]]
+    def _get_from_mapping(self, x: ObjectMapping, name: ProductParamName):
+        return x.get(name) or x[self.components[name][0]]
 
     def eval_proj(self, x: object, name: ProductParamName):
         # No need to check length, since this would be part of actual eval method in Proj.
@@ -401,17 +459,17 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         #    return self._get_from_mapping(x, name)
         #return self._get_from_sequence(x, name)
         # Type checking here is more forgiving.
-        if isinstance(x, Mapping):
+        if _isinstance_ObjectMapping(x):
             self._get_from_mapping(
-                x, # type: ignore
+                x,
                 name,
             )
-        elif isinstance(x, Sequence):
+        elif _isinstance_ObjectSequence(x):
             self._check(
-                x, # type: ignore
+                x,
                 self._get_from_sequence,
             )
-        elif self._flat:
+        elif self.components:
             return x
         else:
             return
@@ -449,24 +507,26 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
             length = 1
 
         if self.weakened:
-            if length < len(self._flat):
+            if length < len(self.components):
                 raise Error
-        elif length != len(self._flat):
+        elif length != len(self.components):
             raise Error
         
         if _isinstance_ProductMapping(x):
+            assert(_isinstance_ObjectMapping(x))
             self._check(
-                x, # type: ignore
+                x,
                 self._get_from_mapping,
             )
         elif isinstance(x, Mapping):
-            raise TypeError
-        elif isinstance(x, Sequence):
+            # Can't accept mappings with wrong keys
+            raise Error
+        elif _isinstance_ObjectSequence(x):
             self._check(
-                x, # type: ignore
+                x,
                 self._get_from_sequence,
             )
-        elif self._flat:
+        elif self.components:
             # TODO: Projection must handle an argument like x (not a collection).
             # TODO: What if there is only one param, and it is itself a product?
             #       Disallow this kind of product!!?
@@ -476,62 +536,61 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         else:
             raise Error
     
-    @staticmethod
-    def _sequence_from_subnames(
-            x: ProductElement,
-            subnames: tuple[str, ...],
-            typ: 'Product',
-            _get: ProductElementGetter,
-        ):
-        return [
-            _get_product_element(x, subname or typ.pos_to_name(i), _get)
-            for i, subname in enumerate(subnames)
-        ]
+    # @staticmethod
+    # def _sequence_from_subnames[T: ProductElement](
+    #     x: T,
+    #     subnames: tuple[str, ...],
+    #     typ: 'Product',
+    #     _get: ProductGetter[T],
+    # ):
+    #     return [
+    #         _get(x, subname or typ.pos_to_name(i))
+    #         for i, subname in enumerate(subnames)
+    #     ]
     
-    @staticmethod
-    def _sequence_from_type(
-            x: ProductElement,
-            typ: 'Product',
-            _get: ProductElementGetter,
-        ):
-        return [
-            _get_product_element(x, subname, _get)
-            for subname in typ.names
-        ]
+    # @staticmethod
+    # def _sequence_from_type[T: ProductElement](
+    #         x: T,
+    #         typ: 'Product',
+    #         _get: ProductGetter[T],
+    #     ):
+    #     return [
+    #         _get(x, subname)
+    #         for subname in typ.names
+    #     ]
         
-    def _check_eql(
-            self,
-            x: ProductElement,
-            y: ProductElement,
-            _x_get: ProductElementGetter,
-            _y_get: ProductElementGetter,
-        ):
+    def _check_eql[T: ProductElement, U: ProductElement](
+        self,# x_get: T, y: U,
+        x_get: tuple[T, ProductGetter[T]],
+        y_get: tuple[U, ProductGetter[U]],
+    ):
+        x, _x_get = x_get
+        y, _y_get = y_get
         _gfs = self._get_from_sequence
-        for name, typ in self.params:
-            if name:
-                if isinstance(name, str):
-                    typ.check_eql(
-                        _get_product_element(x, name, _x_get),
-                        _get_product_element(y, name, _y_get),
-                    )
-                else:
-                    assert(isinstance(typ, Product))
-                    typ._check_eql(
-                        self._sequence_from_subnames(x, name, typ, _x_get),
-                        self._sequence_from_subnames(y, name, typ, _y_get),
-                        _gfs, _gfs,
-                    )
-            elif isinstance(typ, Product):
-                typ._check_eql(
-                    self._sequence_from_type(x, typ, _x_get),
-                    self._sequence_from_type(y, typ, _y_get),
-                    _gfs, _gfs,
-                )
-            else:
-                typ.check_eql(
-                    _get_product_element(x, typ, _x_get),
-                    _get_product_element(y, typ, _y_get),
-                )
+        for name, (_, typ) in self.components.items():
+            typ.check_eql(_x_get(x, name), _y_get(y, name))
+            # if name:
+            #     if isinstance(name, str):
+            #         typ.check_eql(
+            #             _x_get(x, name),
+            #             _y_get(y, name),
+            #         )
+            #     else:
+            #         assert(isinstance(typ, Product))
+            #         typ._check_eql(
+            #             (self._sequence_from_subnames(x, name, typ, _x_get), _gfs),
+            #             (self._sequence_from_subnames(y, name, typ, _y_get), _gfs),
+            #         )
+            # elif isinstance(typ, Product):
+            #     typ._check_eql(
+            #         (self._sequence_from_type(x, typ, _x_get), _gfs),
+            #         (self._sequence_from_type(y, typ, _y_get), _gfs),
+            #     )
+            # else:
+            #     typ.check_eql(
+            #         _x_get(x, typ),
+            #         _y_get(y, typ),
+            #     )
         
     def check_eql(self, x: object, y: object):
         # This assumes that the type of x, y has already been checked.
@@ -546,26 +605,18 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         #)
         # Under weakened checking x and y can be equal even if they don't have the
         # same number of components.
-        def to_sequence(v: object) -> ProductElement:
-            if _isinstance_ProductMapping(v):
-                return v # type: ignore
-            if isinstance(v, Mapping):
-                raise TypeError
-            if isinstance(v, Sequence):
-                return v # type: ignore
-            return v,
-
-        _x_get, _y_get = (
-            self._get_from_mapping
-            if isinstance(v, Mapping)
-            else self._get_from_sequence
-            for v in (x, y)
-        )
+        def with_getter(v: object):
+            if _isinstance_ObjectMapping(v):
+                return v, self._get_from_mapping
+            if _isinstance_ObjectSequence(v):
+                return v, self._get_from_sequence
+            #u = v,
+            #assert(_isinstance_ObjectSequence(u))
+            return (v,), self._get_from_sequence
 
         self._check_eql(
-            to_sequence(x),
-            to_sequence(y),
-            _x_get, _y_get,
+            with_getter(x), # type: ignore
+            with_getter(y), # type: ignore
         )
 
     def __str__(self):
@@ -584,7 +635,87 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
     def __repr__(self):
         return f'`product {self!s}`'
     
-# class TProj?
+class ProductMor(Mor):
+    # There should also be UnsourcedProductMor which can only be the result
+    # of having a pairing (ProductMor) consisting only of unsourced morphisms.
+    # When not all morpshisms are unsourced, one must use these to determine
+    # the source of the unsourced morphisms.
+    __slots__ = 'components', 'names'
+    #params: ProductMorParams
+    _terminal: 'ProductMor'
+    components: dict[ProductParamName, tuple[int, Mor]]
+    names: list[ProductParamName]
+
+    def _add_name(self, name: ProductParamName, )
+
+    def __new__(
+        cls, source: Obj, params: ProductMorParams,
+        glue: ProductMorGlue | None = None,
+    ):
+        if not params:
+            if not hasattr(cls, '_terminal'):
+                cls._terminal = super().__new__(cls)
+            return cls._terminal
+        return super().__new__(cls)
+
+    def __init__(
+        self, source: Obj, params: ProductMorParams,
+        glue: ProductMorGlue | None = None,
+    ):
+        if not params and self is self._terminal and hasattr(self, 'params'):
+            return
+
+        #self.params = params
+        # This must mostly work the same as Product.__init__ except for
+        # repeated keys. In the case of repeated keys one needs proof
+        # that their corresponding values will always be the same.
+        
+        self.components = dict()
+
+        if len(params) == 1:
+            _, mor = params[0]
+            typ = mor.target
+            if isinstance(typ, Product):
+                raise ValueError
+
+        for arg in params:
+            name, mor = arg
+            typ = mor.target
+            if isinstance(name, tuple):
+                if not isinstance(typ, Product):
+                    raise TypeError
+                
+                if len(name) != len(typ):
+                    raise ValueError
+                # Make a renaming pairing to compose with mor.
+                # The proof for name overlaps must be checked.
+                # The proof doesn't include this pairing. The
+                # overlap occurs after composition with the pairing.
+                # The proof to only some of the components returned
+                # by the morphisms, in which case it its ssource and starget
+                # are composed with (the pairing of) projections.
+                for i, subname in enumerate(name):
+                    if subname:
+                        self._add_name(subname, typ.pos_to_type(i))
+
+    def eql(self, x: Mor):
+        return super().eql(x) or (
+            isinstance(x, ProductMor)
+            and all(
+                n == m and s.eql(t)
+                for (n, (_, s)), (m, (_, t))
+                in zip(self.components.items(), x.components.items())
+            )
+        )
+    
+    def eval(
+        self, x: object,
+        check_source: bool = True,
+        check_target: bool = True,
+    ):
+        [for name, mor in self.params.items()]
+            
+        
     
 class Proj(Mor):
     def __init__(self, name: ProductParamName, source: Obj):
@@ -607,10 +738,10 @@ class Proj(Mor):
             raise ValueError
     
     def eval(
-            self, x: object,
-            check_source: bool = True,
-            check_target: bool = True,
-        ):
+        self, x: object,
+        check_source: bool = True,
+        check_target: bool = True,
+    ):
         source = self.source
         if isinstance(source, Product):
             if check_source:

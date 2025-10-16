@@ -1,6 +1,6 @@
 from functools import wraps
 from typing import Optional, Union
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 class Error(Exception):
     pass
@@ -24,13 +24,24 @@ class Obj:
         from ..ambient.category import Id
         return Id(self)
     
-    def proj(self, *args: Union[str, 'Obj']) -> 'Mor':
+    # TODO: Place this in cells.cart where type of params can be ProductProjParams
+    def proj(self, params: Sequence[tuple[str, Union[int, str, 'Obj']]]) -> 'Mor':
         from ..ambient.cart import TerminalMor
-        if len(args) == 0:
+        if len(params) == 0:
+            # TODO: Use ProductMor
             return TerminalMor(self)
-        elif len(args) > 1 or args[0] != self:
+        elif len(params) == 1:
+            name, key = params
+            if key == self:
+                if name:
+                    # TODO: Return ProductMor of single param.
+                    pass
+                else:
+                    return self.identity()
+            else:
+                raise ValueError
+        else:
             raise ValueError
-        return self.identity()
     
     @staticmethod
     def terminal():

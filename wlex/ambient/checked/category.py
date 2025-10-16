@@ -9,13 +9,18 @@ _compose_eq = compose_eq
 
 def valid_composable(c: Composable):
     f, g = c
-    # No check_eq here since at this levelthe type of source is Obj
+    # No check_eql here since at this level the type of source is Obj
     # not some instance of Obj (like when using backend).
-    # One may though end up using a method instead of __eq__.
+    # The equiv comparison should not be modified to handle weakening
+    # since conversion may be required anyway, and the comparison would
+    # not be symmetric.
     return f.source.equiv(g.target)
 
 def valid_path(p: Path):
     f, g = p
+    # TODO: Wrap ssource and starget so that the comparison gets
+    # actually done with ssource and ssource, etc., that is sym
+    # equivalence is taken into account.
     return f.ssource.eql(g.starget)
 
 def valid_eq_unique_source(s: EqUniqueSource):

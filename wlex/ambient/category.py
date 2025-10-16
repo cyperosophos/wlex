@@ -1,8 +1,6 @@
 from functools import wraps
 from typing import Any
 from collections.abc import Callable
-from collections import defaultdict
-import weakref
 
 from .cells import (
     Obj, Mor, DefMor, HatMor, DefHatMor, Eq,
@@ -158,6 +156,19 @@ class Trans(Eq):
     g: Eq
 
     def __init__(self, f: Eq, g: Eq):
+        # If one treats sym as id, then one would have to check
+        # the direction of f and g, this amounts to dyn typ checking,
+        # which is handled in checked.category.trans. However, the
+        # code here should work even without type checking.
+        # TODO: The biggest problem with treating sym as id is in
+        # compose_eq. There is no way to determine if one gets
+        # f(x) = g(y) or f(y) = g(x). Suppose one would like to
+        # apply trans with g(x) = k. There is no way to know if one
+        # must also apply trans with g(x = y).
+        # The solution is to treat sym the way type conversions
+        # (renaming, weakening) are treated. One has to handle it
+        # in high level trans and in Category.eq (for checking
+        # signature of proof when producing ThesisEq).
         ssource = g.ssource
         starget = f.starget
         super().__init__(ssource, starget)
@@ -208,19 +219,6 @@ class Ref(ProvenEq):
     def __repr__(self):
         # This appears to be ref(m) not ref[m].
         return f'`ref {self!s}`'
-    
-def _extract_subkw(kw: dict[str, object]):
-    # Changes kw in place
-    subkw: dict[str, dict[str, object]] = dict()
-    key: str
-    # Needs to get all the keys before calling pop
-    for key in list(kw):
-        skey = key.split('.', 1)
-        if len(skey) > 1:
-            d: dict[str, object] = dict()
-            subkw[skey[0]] = d
-            d[skey[1]] = kw.pop(key)
-    return subkw
 
 #CellMapping = dict[str, Union[CellLike, 'CellMapping']]
 Theory = dict[str, 'CellsLike']
