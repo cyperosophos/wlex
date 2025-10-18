@@ -5,6 +5,7 @@ from collections.abc import Sequence, Mapping, Sized, Callable #, Iterator
 from ..theory.cart import Cart as BCart
 from .cells import Obj, Mor, Eq, ProvenEq
 from .category import Category, Unsourced, CheckedCategory, Composable, Comp as BaseComp
+from .cells.cart import ProjKey
 
 class Error(Exception):
     pass
@@ -203,9 +204,9 @@ ProductGetter = Callable[[T, ProductParamName], object]
 # )
 # The args of the pairing get converted to kwargs using the common Product source.
 # The pairing method also handles unsourced morphisms.
-ProductMorParams = Sequence[tuple[str, Mor] | tuple[tuple[str, ...], Mor]]
+ProductMorParams = Sequence[tuple[str | tuple[str, ...], Mor]]
 ProductMorGlue = Mapping[ProductParamName, Eq]
-ProductProjParams = Sequence[tuple[str, ProductParamKey]]
+ProductProjParams = Sequence[tuple[str | tuple[str, ...], ProductParamKey]]
 
 def _isinstance_ObjectSequence(x: object) -> TypeGuard[ObjectSequence]:
     if isinstance(x, Sequence):
@@ -225,6 +226,11 @@ def _isinstance_ProductMapping(x: object) -> TypeGuard[ProductMapping]:
             return False
         return True
     return False
+
+def filter_proj_arg[T: ProductParamKey](arg: T | tuple[str, T]) -> tuple[str, T]:
+    if isinstance(arg, tuple):
+        return arg
+    return '', arg
 
 class Product(Obj, Mapping[ProductParamKey, Obj]):
     # TODO: Consider implementing W-Cart. W-Types don't require all limits.
@@ -253,16 +259,16 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         ]
         return Product(params)
 
-    def _proj(self, key: ProductParamKey):
+    def _proj_single(self, key: ProductParamKey):
         if isinstance(key, int):
             name = self.pos_to_name(key)
         else:
             name = key
         return Proj(name, self)
 
-    def proj(self, params: ProductProjParams) -> Mor:
+    def _proj(self, params: Sequence[tuple[str, ProductParamKey]]) -> Mor:
         # This is used by renamer, weakening, etc. So no need to handle
-        # nested products.
+        # nested products?
         # The Mor can have a non product as target (no pairing).
         #if len(args) == 0:
         #    return TerminalMor(self)
@@ -270,9 +276,14 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         # Disallowing repeated names (after converting empty names to types)
         # is handled by ProductMor.__init__. It is not possible to provide glue.
         return ProductMor(self, [
-            (name, self._proj(key))
+            (name, self._proj_single(key))
             for (name, key) in params
         ])
+    
+    def proj(self, *args: ProjKey, *kwargs: ProjKey):
+        all_args = chain((
+            arg if isinstance(arg, tuple) else ('', arg)
+        ))
 
     def __new__(cls, params: ProductParams, weakened: bool = True):
         if not params:
@@ -641,31 +652,22 @@ class ProductMor(Mor):
     # When not all morpshisms are unsourced, one must use these to determine
     # the source of the unsourced morphisms.
     __slots__ = 'components', 'names'
-    #params: ProductMorParams
-    _terminal: 'ProductMor'
     components: dict[ProductParamName, tuple[int, Mor]]
     names: list[ProductParamName]
 
-    def _add_name(self, name: ProductParamName, )
-
-    def __new__(
-        cls, source: Obj, params: ProductMorParams,
-        glue: ProductMorGlue | None = None,
-    ):
-        if not params:
-            if not hasattr(cls, '_terminal'):
-                cls._terminal = super().__new__(cls)
-            return cls._terminal
-        return super().__new__(cls)
+    def _add_name(self, name: ProductParamName, ):
+        pass
 
     def __init__(
         self, source: Obj, params: ProductMorParams,
         glue: ProductMorGlue | None = None,
     ):
-        if not params and self is self._terminal and hasattr(self, 'params'):
-            return
+        # In the high level interface, one uses continuation to pass the glue? No.
+        # One simply passes the proofs in the args, and identifies them based on their
+        # ssource and starget (the morphisms which must be equal).
+        # This turns out mos useful when there is overlaps between return values
+        # of product type. In this case, composing with proj is needed.
 
-        #self.params = params
         # This must mostly work the same as Product.__init__ except for
         # repeated keys. In the case of repeated keys one needs proof
         # that their corresponding values will always be the same.
@@ -1048,13 +1050,15 @@ class Pairer:
     def pairing_eq(p: SpanEq) -> Eq:
         pass
     
-def _filter_arg(arg):
+def filter_product_arg[T](arg):
+    # Superfluous type checking
     if isinstance(arg, tuple):
         name, typ = arg
         if isinstance(name, tuple):
             for subname in name:
                 if not isinstance(subname, str):
                     raise TypeError
+                # Wrong
                 if not subname:
                     raise ValueError
         elif not isinstance(name, str):
@@ -1065,6 +1069,10 @@ def _filter_arg(arg):
     else:
         raise TypeError
     return name, typ
+
+def id(x: object): return x
+
+def f(x: int): return x*2
 
 # WeakenedMor is extensionally equal to the composition of self.orig
 # with the appropriate projection or pairing of projections.

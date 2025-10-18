@@ -19,55 +19,6 @@ class Obj:
     
     def set_check_eql(self, method: Callable[[object, object], bool]) -> None:
         raise Error
-
-    def identity(self):
-        from ..ambient.category import Id
-        return Id(self)
-    
-    # TODO: Place this in cells.cart where type of params can be ProductProjParams
-    def proj(self, params: Sequence[tuple[str, Union[int, str, 'Obj']]]) -> 'Mor':
-        from ..ambient.cart import TerminalMor
-        if len(params) == 0:
-            # TODO: Use ProductMor
-            return TerminalMor(self)
-        elif len(params) == 1:
-            name, key = params
-            if key == self:
-                if name:
-                    # TODO: Return ProductMor of single param.
-                    pass
-                else:
-                    return self.identity()
-            else:
-                raise ValueError
-        else:
-            raise ValueError
-    
-    @staticmethod
-    def terminal():
-        from ..ambient.cart import Product
-        return Product(())
-    
-    def terminal_mor(self):
-        # The result of this has to pass backend.TerminalMor.check.
-        #return Mor(self, Product(()))
-        # TODO: Use this instead for purity
-        return self.proj()
-        # See cart.weaken_mor
-    
-    def product(self, y: 'Obj'):
-        from ..ambient.cart import Product
-        # This result of this has to pass backend.Span.check.
-        # We use Product for purity (since it defines __eq__),
-        # but we don't need its check method. When definining the
-        # backend theory, the morphisms returned here are not used
-        # as projections, so there is no need for eval (although
-        # one still should have purity and composition).
-        x = self
-        source = Product((('x', x), ('y', y)))
-        #return Mor(source, x), Mor(source, y)
-        # Use proj for purity
-        return source.proj('x'), source.proj('y')
     
     def __str__(self):
         return f'<type_{id(self)}>'
