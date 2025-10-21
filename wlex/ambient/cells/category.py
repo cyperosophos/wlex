@@ -44,6 +44,10 @@ class CategoryDefMor(DefMor, CategoryMor):
 
 class CategoryEq(Eq):
     @override
+    def sym(self):
+        return Sym(self)
+
+    @override
     def trans(self, g: Eq):
         return Trans(self, g)
     
@@ -52,6 +56,7 @@ class CategoryEq(Eq):
         return CompEq(self, e)
     
 class CategoryPrimEq(PrimEq, CategoryEq):
+    # TODO: This type of multiple inheritance may not work with __slots__
     pass
 
 class CategoryThesisEq(ThesisEq, CategoryEq):
@@ -79,6 +84,17 @@ class Comp(CategoryMor):
         # with identity here, as the result would just be one of the args.
         # Cf. the case of single component Product/ProductMor with no name.
         # Id and Comp would become a single class.
+        # Composing pairing with projection (or with pairing of projections)
+        # results in single morphism (or pairing), so this should be handled
+        # by Mor.compose.
+        # DefMor is a wrapper around a Mor. It's the closest to parenthesization.
+        # It may be better to simply replace (as is the case with Obj), in this case
+        # one just needs to ability to set a name on any Mor (this helps with debugging).
+        # This applies to ThesisEq.
+        # Ideally one should make __eq__ ref and sym, however it may be possible
+        # for it to not be trans nor compose_eq.
+        # (f @ g) @ h == f @ (g @ h) == f @ k<g @ h> (k is DefMor)
+        # The first == is ref((f @ g) @ h). The second == is ref(f) @ ref(g @ h).
         source = g.source
         target = f.target
         super().__init__(source, target)
@@ -167,6 +183,25 @@ def _monoidal_eq(x: Comp | Id, y: Mor):
         isinstance(y, (Comp, Id))
         and all(vx.eql(vy) for vx, vy in zip(x.hint(), y.hint()))
     )
+
+class Sym(CategoryEq):
+    inv: Eq
+
+    def __init__(self, inv: Eq):
+        self.inv = inv
+        ssource = inv.starget
+        starget = inv.ssource
+        super().__init__(ssource, starget)
+
+    @property
+    def proven(self):
+        return self.inv.proven
+    
+    def __str__(self):
+        return f'~{self.inv}'
+    
+    def __repr__(self):
+        return f'`sym {self!s}`'
 
 class Trans(CategoryEq):
     __slots__ = 'f', 'g'

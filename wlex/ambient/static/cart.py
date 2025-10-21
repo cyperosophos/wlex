@@ -8,20 +8,29 @@ Span = tuple[Mor, Mor]
 ProductMor = tuple[Mor, Mor, Mor, Eq, Eq]
 #SpanEq = tuple[Span, Span, Eq, Eq]
 
-def terminal_mor(obj: Obj):
+def terminal(cls: type[Obj]) -> Obj:
+    return cls.terminal()
+
+def terminal_mor(obj: Obj) -> TerminalMor:
     return obj.terminal_mor()
 
-def terminal_mor_unique(mor: TerminalMor):
-    return mor.terminal_mor_unique()
+def terminal_mor_unique(mor: TerminalMor) -> Eq:
+    # TODO: This requires appropriate Mor.__eq__
+    return mor.ref()
 
-def product(xy: ObjObj):
+def product(xy: ObjObj) -> Span:
     x, y = xy
-    return x.product(y)
+    obj = x.product(y)
+    return obj.proj('x'), obj.proj('y')
 
-def pairing(s: Span):
+def pairing(s: Span) -> ProductMor:
     p, q = s
-    return p.pairing(q)
+    pm = p.pairing(q)
+    return pm, p, q, p.ref(), q.ref()
 
 def pairing_unique(pm: ProductMor):
-    mor, p, q, _, _ = pm
+    # This cannot rely on ref, it can't be extensional, because
+    # one needs the p_eq equalities in order get this equality.
+    # Analogously, trans can't be based on ref because it requires
+    # equalities, which can be extensional.
     return mor.pairing_unique(p, q)

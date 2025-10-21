@@ -41,7 +41,7 @@ def eq_unique(s: EqUniqueSource) -> Eq:
     return d
 
 def sym(eq: Eq) -> Eq:
-    return eq
+    return eq.sym()
 
 def associativity(s: AssociativitySource) -> Eq:
     f, g, h = s

@@ -32,6 +32,11 @@ type ProductMor := (
     # TODO: This needs some special notation like @>.
     (compose @ (($p, $q) @ pt, Mor), Span) == eq @ ($p_eq, $q_eq),
 );
+# TODO: Notice that it is possible to take Span out of ProductMor
+# and just leave p_eq and q_eq, since these alread contain Span.
+# The same may apply to SpanEq, etc. However one would then need
+# to include the Span condition source @ target (p_eq == q_eq).
+# fn pairing: Span -> target @ (p_eq, q_eq) @ ProductMor
 
 fn pairing: Span @ ($ -> ProductMor);
 fn pairing_unique: Mor @ (pairing, $) @ ProductMor -> eq;

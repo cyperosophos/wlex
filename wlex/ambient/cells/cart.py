@@ -8,6 +8,7 @@ ProductParamName = Union[str, 'Obj']
 ProductParamKey = int | ProductParamName
 ProductMorParam = tuple[str | tuple[str, ...], 'Mor']
 ProductProjParam = tuple[str | tuple[str, ...], ProductParamKey]
+PairingUniqueTriangle = tuple[]
 # TODO: Include all Cart cells here, e.g. Product, ProductMor
 
 class CartObj(CategoryObj):
@@ -90,10 +91,7 @@ class CartObj(CategoryObj):
         # as projections, so there is no need for eval (although
         # one still should have purity and composition).
         x = self
-        source = Product((('x', x), ('y', y)))
-        #return Mor(source, x), Mor(source, y)
-        # Use proj for purity
-        return source.proj('x'), source.proj('y')
+        return Product((('x', x), ('y', y)))
 
 class CartPrimObj(CategoryPrimObj, CartObj):
     pass
@@ -115,8 +113,13 @@ class CartMor(CategoryMor):
         # Instances of both TerminalMor and ProductMor must pass
         # type checking by Pairing (and the hat).
         # Here the names end up being discarded.
-        pm = ProductMor(p.source, (('p', p), ('q', q)))
-        return pm, p, q, Ref(p), Ref(q)
+        return ProductMor(p.source, (('p', p), ('q', q)))
+    
+class CartPrimMor(PrimMor, CartMor):
+    pass
+
+class CartDefMor(DefMor, CartMor):
+    pass
     
 def _isinstance_sequence_object(x: object) -> TypeGuard[Sequence[object]]:
     return isinstance(x, Sequence)
@@ -537,8 +540,9 @@ class ProductMor(CartMor):
         for arg in params:
             name, mor = arg
             typ = mor.target
-            if not mor.source.equiv(source):
-                raise ValueError
+            # Span validation is backend type checking it belongs outside.
+            #if not mor.source.equiv(source):
+            #    raise ValueError
             if isinstance(name, tuple):
                 if not isinstance(typ, Product):
                     raise TypeError
@@ -653,5 +657,13 @@ class ProductMor(CartMor):
 def _is_identity(mor: Mor):
     # This needs to be documented as part of a spec.
     return mor.hint() == ()
-    
+
+class PairingUnique(Eq): # CartEq?
+    # The span is extracted from the equalities
+    def __init__(self, mor: Mor, triangles: Sequence[Eq]):
+        # No type checking is done here that belongs to backend type checking.
+        # We don't check the ssource and starget of the triangles.
+        ssource = ProductMor(mor.source, [
+
+        ])
 

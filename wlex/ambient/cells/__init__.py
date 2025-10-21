@@ -51,7 +51,7 @@ class Obj:
     def terminal_mor(self) -> 'Mor':
         raise NotImplementedError
     
-    def product(self, y: 'Obj') -> tuple['Mor', 'Mor']:
+    def product(self, y: 'Obj') -> 'Obj':
         raise NotImplementedError
 
 class PrimObj(Obj):
@@ -259,7 +259,7 @@ class Mor:
     def compose(self, g: 'Mor') -> 'Mor':
         raise NotImplementedError
     
-    def pairing(self, q: 'Mor') -> tuple['Mor', 'Mor', 'Mor', 'Eq', 'Eq']:
+    def pairing(self, q: 'Mor') -> 'Mor':
         raise NotImplementedError
     
 class PrimMor(Mor):
@@ -451,20 +451,13 @@ class Eq:
 
     # for Obj.eql use equiv
     def parallel(self, proof: 'Eq'):
+        # TODO: Symmetry has to be handled at the high-level.
         if proof is self:
             return True
-        ssource = proof.ssource
-        starget = proof.starget
-        if self.ssource == ssource:
-            if self.starget == starget:
-                return True
-            return False
-        elif self.ssource == starget:
-            # Symmetry
-            if self.starget == ssource:
-                return True
-            return False
-        return False
+        return (
+            self.ssource == proof.ssource
+            and self.starget == proof.starget
+        )
     
     def weaken(self, source: Obj) -> 'Eq':
         # TODO: Too high-level
@@ -477,6 +470,9 @@ class Eq:
     def __repr__(self):
         return f'`eq {self!s}: {self.ssource} == {self.starget}`'
     
+    def sym(self) -> 'Eq':
+        raise NotImplementedError
+
     def trans(self, g: 'Eq') -> 'Eq':
         raise NotImplementedError
     
