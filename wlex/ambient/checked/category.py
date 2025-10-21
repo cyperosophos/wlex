@@ -42,7 +42,7 @@ def valid_composable_eq(c: ComposableEq):
     return d.ssource.source.equiv(e.starget.target)
 
 def compose(c: Composable) -> Mor:
-    # TODO: Handle weaken here?
+    # TODO: Handle weaken here? Probably not. Too high-level.
     require(valid_composable(c))
     return _compose(c)
 
@@ -62,3 +62,6 @@ def compose_eq(c: ComposableEq):
     # TODO: Handle weaken here?
     require(valid_composable_eq(c))
     return _compose_eq(c)
+
+# TODO: Shouldn't there be a way to check equalities, e.g. globular conditions.
+# This would mean having new_* functions here.

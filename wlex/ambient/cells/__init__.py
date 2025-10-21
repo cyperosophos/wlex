@@ -29,8 +29,30 @@ class Obj:
     def __eq__(self, x: object):
         return isinstance(x, Obj) and self.equiv(x)
     
+    def __hash__(self):
+        return hash(self.hint())
+    
+    def hint(self) -> object:
+        return id(self)
+    
     def equiv(self, x: 'Obj'):
         return self is x
+    
+    def identity(self) -> 'Mor':
+        raise NotImplementedError
+    
+    def proj(self, key: Union[int, str, 'Obj']) -> 'Mor':
+        raise NotImplementedError
+    
+    @staticmethod
+    def terminal() -> 'Obj':
+        raise NotImplementedError
+    
+    def terminal_mor(self) -> 'Mor':
+        raise NotImplementedError
+    
+    def product(self, y: 'Obj') -> tuple['Mor', 'Mor']:
+        raise NotImplementedError
 
 class PrimObj(Obj):
     __slots__ = 'name', '_check', '_check_eql'
@@ -91,6 +113,9 @@ class Mor:
     source: Obj
     target: Obj
 
+    #def compose(self, g: MorT) -> MorT:
+    #    raise NotImplementedError
+
     def eval(
             self,
             x: object,
@@ -115,44 +140,10 @@ class Mor:
         # triangle involving the terminal object.
         # It is better in fact to just raise an Error.
         raise Error
-
-    def ref(self):
-        from ..ambient.category import Ref
-        return Ref(self)
     
-    def compose(self, g: 'Mor'):
-        from ..ambient.category import Comp
-        f = self
-        return Comp(f, g)
-    
-    def terminal_mor_unique(self):
-        # Just like with comp, we don't check the equalizer.
-        from ..ambient.cart import TerminalMorUnique
-        return TerminalMorUnique(self)
-    
-    def pairing(self, q: 'Mor'):
-        from ..ambient.cart import ProductMor
-        p = self
-        # There is no need to check this construction in checked/cart.py,
-        # since it is not taking by any function as argument.
-        # The produced instance is not used for type checking
-        # (nor evaluating, nor proving). For type checking, one
-        # uses Pairing (which supports multiple components).
-        # Instances of both TerminalMor and ProductMor must pass
-        # type checking by Pairing (and the hat).
-        # source = p.source
-        # pt = p.target.product(q.target)
-        # _p, _q = pt
-        # target = p.source
-        # mor = Mor(source, target)
-        # p_eq = Eq(_p.compose(mor), p)
-        # q_eq = Eq(_q.compose(mor), q)
-        # return mor, p, q, p_eq, q_eq
-        return ProductMor(p, q).to_tuple()
-    
-    def pairing_unique(self, p: 'Mor', q: 'Mor'):
-        from ..ambient.cart import PairingUnique
-        return PairingUnique(self, p, q)
+    # def pairing_unique(self, p: 'Mor', q: 'Mor'):
+    #     from ..ambient.cart import PairingUnique
+    #     return PairingUnique(self, p, q)
 
     #def pairing(self, q: 'Mor'):
         # TODO: Should signature type hints only be used when there is
@@ -210,16 +201,17 @@ class Mor:
         # There are a few cases where one should verify the signature,
         # e.g. identity.
         return isinstance(x, Mor) and self.eql(x)
+    
+    def __hash__(self):
+        return hash(self.hint())
+    
+    def hint(self) -> object:
+        return id(self)
 
     def eql(self, x: 'Mor'):
-        from .category import Comp
         if self.eql_definitional(x):
             return True
-        if isinstance(x, Comp):
-            # Defer to Comp.__eq__.
-            # This is especially useful in the case of p_eq, q_eq of pairing.
-            return x.eql(self)
-        # TODO: Same for comp with projection?
+        # TODO: Same for comp with projection? (?)
         return False
     
     def eql_definitional(self, x: 'Mor'):
@@ -249,6 +241,7 @@ class Mor:
         raise Error(f'Sources of {self!r} and {value!r} differ')
 
     def weaken(self, source: 'Obj') -> 'Mor':
+        # TODO: Should this be here? Isn't it actually too high-level?
         # TODO: The weakening flag must only be in the ambient and then
         # be passed as an argument to methods of other classes.
         from .cart import weaken_mor
@@ -259,13 +252,22 @@ class Mor:
     
     def __repr__(self):
         return f'`fn {self!s}: {self.source} -> {self.target}`'
+    
+    def ref(self) -> 'Eq':
+        raise NotImplementedError
 
+    def compose(self, g: 'Mor') -> 'Mor':
+        raise NotImplementedError
+    
+    def pairing(self, q: 'Mor') -> tuple['Mor', 'Mor', 'Mor', 'Eq', 'Eq']:
+        raise NotImplementedError
+    
 class PrimMor(Mor):
     __slots__ = 'name', '_eval'
     name: str
     _eval: Callable[[object, bool, bool], object]
 
-    def __init__(self, name: str, source: Obj, target: Obj,):
+    def __init__(self, name: str, source: Obj, target: Obj):
         self.name = name
         super().__init__(source, target)
 
@@ -337,7 +339,7 @@ class DefMor(Mor):
             self, name: str,
             source: Obj,
             target: Obj,
-            value: Mor | Unsourced | Obj,
+            value: Mor, #Mor | Unsourced | Obj,
             #value: object,
             #weakened: bool = False,
         ):
@@ -352,11 +354,12 @@ class DefMor(Mor):
         # to make sense.
         # Interpreting Obj value as morphism is also part of the syntax not of the theory.
 
-        if isinstance(value, Unsourced):
-            value = value.with_source(source)
-        elif isinstance(value, Obj):
-            value = value.identity()
-        value = value.weaken(source)
+        # TODO: This is too high-level
+        # if isinstance(value, Unsourced):
+        #     value = value.with_source(source)
+        # elif isinstance(value, Obj):
+        #     value = value.identity()
+        # value = value.weaken(source)
         self.check_signature(value)
         self.value = value
 
@@ -368,13 +371,193 @@ class DefMor(Mor):
         ):
         return self.value.eval(x, check_source, check_target)
     
+    def hint(self):
+        return self.value
+    
     def eql(self, x: Mor):
         if super().eql(x):
             return True
         if isinstance(x, DefMor):
             return self.value.eql(x.value)
         return self.value.eql(x)
+    
+def _source_target_from_hat(hat_source: Mor, hat_target: Mor):
+    source = hat_source.source
+    target = hat_target.source
+    return source, target, hat_source, hat_target
 
+class Eq:
+    __slots__ = 'ssource', 'starget'
+    ssource: Mor
+    starget: Mor
+
+    def __init__(
+        self,
+        ssource: Mor,
+        starget: Mor,
+        #proof: Optional['Eq'] = None,
+        #weakened: bool = False,
+    ):
+        # No checking of globular conditions here
+        self.ssource = ssource
+        self.starget = starget
+        # Notice that __eq__ is not affected by weakening.
+        # Notice that with weaking some errors get raised earlier,
+        # there more as syntax errors than as type checking errors.
+        #if not isinstance(proof, Eq):
+        #    raise TypeError
+
+    @property
+    def proven(self) -> bool:
+        # This can change. For example f can be assumed after instantiation
+        # Trans. Hence a property not an attribute.
+        #if self._proven:
+        #    return True
+        return False
+    
+    # @property
+    # def proof(self) -> Optional['Eq']:
+    #     if self.proven:
+    #         return self
+    
+    def assume(self) -> None:
+        raise Error
+    
+    def verify(
+            self, x: object,
+            check_source: bool = True,
+            check_target: bool = True,
+        ):
+        ssource = self.ssource
+        starget = self.starget
+        left_side = ssource.eval(x, check_source, check_target)
+        right_side = starget.eval(x, check_source, check_target)
+        ssource.target.check_eql(left_side, right_side)
+    
+    def __eq__(self, proof: object):
+        # TODO: It is possible that one might just end up forgoing
+        # the use of __eq__ altogether due to the mandatory object type
+        # annotation, which is too lax.
+        # self.proven can't be set here as that would modify the state.
+        # No need for backend type checking here.
+        return isinstance(proof, Eq) and self.parallel(proof)
+    
+    def __hash__(self):
+        return hash(self.hint())
+    
+    def hint(self):
+        # parallel in one direction
+        return (self.ssource, self.starget)
+
+    # for Obj.eql use equiv
+    def parallel(self, proof: 'Eq'):
+        if proof is self:
+            return True
+        ssource = proof.ssource
+        starget = proof.starget
+        if self.ssource == ssource:
+            if self.starget == starget:
+                return True
+            return False
+        elif self.ssource == starget:
+            # Symmetry
+            if self.starget == ssource:
+                return True
+            return False
+        return False
+    
+    def weaken(self, source: Obj) -> 'Eq':
+        # TODO: Too high-level
+        from .cart import weaken_eq
+        return weaken_eq(self, source)
+    
+    def __str__(self):
+        return f'<eq_{id(self)}>'
+    
+    def __repr__(self):
+        return f'`eq {self!s}: {self.ssource} == {self.starget}`'
+    
+    def trans(self, g: 'Eq') -> 'Eq':
+        raise NotImplementedError
+    
+    def compose_eq(self, e: 'Eq') -> 'Eq':
+        raise NotImplementedError
+
+class PrimEq(Eq):
+    __slots__ = 'name', '_proven'
+    name: str
+    _proven: bool
+
+    def __init__(
+        self, name: str,
+        ssource: Mor, starget: Mor,
+    ):
+        # No checking of globular conditions here
+        self.name = name
+        super().__init__(ssource, starget)
+
+    @property
+    def proven(self):
+        return getattr(self, '_proven', False)
+
+    def assume(self):
+        # self.proven is the conjunction of the proven values of
+        # all trans operands.
+        if self.proven:
+            raise Error
+        self._proven = True
+
+    def __str__(self):
+        return self.name
+
+class ThesisEq(Eq):
+    __slots__ = 'name', 'proof'
+    name: str
+    proof: Eq
+
+    def __init__(
+        self, name: str,
+        ssource: Mor, starget: Mor,
+        proof: Eq,
+    ):
+        self.name = name
+        super().__init__(ssource, starget)
+        #source = ssource.source
+        # TODO: high-level
+        #proof = proof.weaken(source)
+        if self.parallel(proof):
+            self.proof = proof
+        else:
+            raise Error
+
+    @property      
+    def proven(self):
+        return self.proof.proven
+    
+    # @property
+    # def proof(self):
+    #     return self._proof.proof
+        
+    def __repr__(self):
+        return f'{super().__repr__()[1:-1]} = {self.proof}'
+
+class HatEq(Eq):
+    # There is probably no point in having DefHatEq with proof property
+    # since it would not be a subclass of ThesisEq.
+    __slots__ = 'hat_mor',
+
+    def __init__(self, hat_mor: Union['HatMor', 'DefHatMor']):
+        ssource, starget = _hat_ssource_starget(hat_mor)
+        super().__init__(ssource, starget)
+        self.hat_mor = hat_mor
+
+    @property
+    def proven(self):
+        return self.hat_mor.hat_proven
+
+    def __str__(self):
+        return f'^{self.hat_mor}'
+    
 class HatMor(Mor):
     __slots__ = 'name', '_eval', 'hat_source', 'hat_target', 'hat_proven'
     name: str
@@ -382,6 +565,7 @@ class HatMor(Mor):
     hat_source: 'Mor'
     hat_target: 'Mor'
     hat_proven: bool
+    hat_eq_cls: type[HatEq] = HatEq
 
     def __str__(self):
         return self.name
@@ -391,23 +575,25 @@ class HatMor(Mor):
 
     def __init__(
         self, name: str,
-        source: Mor | Obj,
-        target: Mor | Obj,
+        hat_source: Mor,# | Obj,
+        hat_target: Mor,# | Obj,
         #source: object,
         #target: object,
     ):
         self.name = name
         # One way to avoid redundant type checking is move all type checking (and possibly
         # identity() calls) to Category.mor. However, this makes the code more complicated.
+        # TODO: Too high-level
         source, target, self.hat_source, self.hat_target = \
-            _unfold_source_target(source, target)
+            _source_target_from_hat(hat_source, hat_target)
+        #    _unfold_source_target(source, target)
         super().__init__(source, target)
         self.hat_proven = False
 
     @property
     def hat(self):
         # self.hat_proven is True only after set_eval has been called.
-        return HatEq(self)
+        return self.hat_eq_cls(self)
 
     def set_eval(self, method: Callable[[object], object]):
         if hasattr(self, '_eval'):
@@ -480,234 +666,49 @@ class HatMor(Mor):
         self._eval = wrapper
         self.hat_proven = True
 
-class Eq:
-    __slots__ = 'ssource', 'starget'
-    ssource: Mor
-    starget: Mor
-
-    def __init__(
-        self,
-        ssource: Mor,
-        starget: Mor,
-        #proof: Optional['Eq'] = None,
-        #weakened: bool = False,
-    ):
-        # No checking of globular conditions here
-        self.ssource = ssource
-        self.starget = starget
-        # Notice that __eq__ is not affected by weakening.
-        # Notice that with weaking some errors get raised earlier,
-        # there more as syntax errors than as type checking errors.
-        #if not isinstance(proof, Eq):
-        #    raise TypeError
-
-    @property
-    def proven(self) -> bool:
-        # This can change. For example f can be assumed after instantiation
-        # Trans. Hence a property not an attribute.
-        #if self._proven:
-        #    return True
-        return False
-    
-    @property
-    def proof(self) -> Optional['Eq']:
-        if self.proven:
-            return self
-    
-    def assume(self) -> None:
-        raise Error
-    
-    def verify(
-            self, x: object,
-            check_source: bool = True,
-            check_target: bool = True,
-        ):
-        ssource = self.ssource
-        starget = self.starget
-        left_side = ssource.eval(x, check_source, check_target)
-        right_side = starget.eval(x, check_source, check_target)
-        ssource.target.check_eql(left_side, right_side)
-    
-    def __eq__(self, proof: object):
-        # TODO: It is possible that one might just end up forgoing
-        # the use of __eq__ altogether due to the mandatory object type
-        # annotation, which is too lax.
-        # self.proven can't be set here as that would modify the state.
-        # No need for backend type checking here.
-        return isinstance(proof, Eq) and self.parallel(proof)
-
-    # for Obj.eql use equiv
-    def parallel(self, proof: 'Eq'):
-        if proof is self:
-            return True
-        ssource = proof.ssource
-        starget = proof.starget
-        if self.ssource == ssource:
-            if self.starget == starget:
-                return True
-            return False
-        elif self.ssource == starget:
-            # Symmetry
-            if self.starget == ssource:
-                return True
-            return False
-        return False
-    
-    def weaken(self, source: Obj) -> 'Eq':
-        from .cart import weaken_eq
-        return weaken_eq(self, source)
-    
-    def trans(self, g: 'Eq'):
-        from ..ambient.category import Trans
-        return Trans(self, g)
-    
-    def compose_eq(self, e: 'Eq'):
-        from ..ambient.category import CompEq
-        return CompEq(self, e)
-    
-    def __str__(self):
-        return f'<eq_{id(self)}>'
-    
-    def __repr__(self):
-        return f'`eq {self!s}: {self.ssource} == {self.starget}`'
-    
-class ProvenEq(Eq):
-    __slots__ = ()
-
-    @property
-    def proven(self):
-        return True
-    
-    @property
-    def proof(self):
-        return self
-
-class PrimEq(Eq):
-    __slots__ = 'name', '_proven'
-    name: str
-    _proven: bool
-
-    def __init__(
-        self, name: str,
-        ssource: Mor, starget: Mor,
-    ):
-        # No checking of globular conditions here
-        self.name = name
-        super().__init__(ssource, starget)
-
-    @property
-    def proven(self):
-        return getattr(self, '_proven', False)
-
-    def assume(self):
-        # self.proven is the conjunction of the proven values of
-        # all trans operands.
-        if self.proven:
-            raise Error
-        self._proven = True
-
-    def __str__(self):
-        return self.name
-
-class ThesisEq(Eq):
-    __slots__ = 'name', '_proof'
-    name: str
-    _proof: Eq
-
-    def __init__(
-        self, name: str,
-        ssource: Mor, starget: Mor,
-        proof: Eq,
-    ):
-        self.name = name
-        super().__init__(ssource, starget)
-        source = ssource.source
-        proof = proof.weaken(source)
-        if self.parallel(proof):
-            self._proof = proof
-        else:
-            raise Error
-
-    @property      
-    def proven(self):
-        return self._proof.proven
-    
-    @property
-    def proof(self):
-        return self._proof.proof
-        
-    def __repr__(self):
-        return f'{super().__repr__()[1:-1]} = {self._proof}'
-
 class DefHatMor(DefMor):
     __slots__ = 'hat_source', 'hat_target', '_hat_proof'
     hat_source: Mor
     hat_target: Mor
     _hat_proof: Eq
+    hat_eq_cls: type[HatEq] = HatEq
 
     @property
     def hat_proven(self):
         return self._hat_proof.proven
     
-    @property
-    def hat_proof(self):
-        return self._hat_proof.proof
+    # @property
+    # def hat_proof(self):
+    #     return self._hat_proof.proof
 
     def __repr__(self):
         return f'`fn {self!s}: {self.hat_source} -> {self.hat_target} = {self.value}`' 
 
     def __init__(
         self, name: str,
-        source: Mor | Obj, target: Mor | Obj,
-        value: Mor | Unsourced | Obj,
-        proof: Eq | Mor | Obj,
+        hat_source: Mor,# | Obj,
+        hat_target: Mor,# | Obj,
+        value: Mor,# | Unsourced | Obj,
+        proof: Eq,# | Mor | Obj,
     ):
         source, target, self.hat_source, self.hat_target = \
-            _unfold_source_target(source, target)
+            _source_target_from_hat(hat_source, hat_target)
+        #    _unfold_source_target(source, target)
         super().__init__(name, source, target, value)
-        if isinstance(proof, Obj):
-            proof = proof.identity()
-        if isinstance(proof, Mor):
-            proof = proof.ref()
-        hat = self._hat()
-        proof = proof.weaken(source)
-        if hat.parallel(proof):
-            self._hat_proof = proof
+        #if isinstance(proof, Obj):
+        #    proof = proof.identity()
+        #if isinstance(proof, Mor):
+        #    proof = proof.ref()
+        #hat = self._hat()
+        #proof = proof.weaken(source)
+        if self.hat.parallel(proof):
+           self._hat_proof = proof
         else:
-            raise Error
-
-    def _hat(self):
-        return DefHatEq(self)
+           raise Error
 
     @property
     def hat(self):
-        return self._hat()
-
-class HatEq(Eq):
-    __slots__ = '_hat_mor',
-
-    def __init__(self, hat_mor: HatMor | DefHatMor):
-        ssource, starget = _hat_ssource_starget(hat_mor)
-        super().__init__(ssource, starget)
-        self._hat_mor = hat_mor
-
-    @property
-    def proven(self):
-        return self._hat_mor.hat_proven
-
-    def __str__(self):
-        return f'^{self._hat_mor}'
-
-class DefHatEq(HatEq):
-    __slots__ = '_hat_mor',
-    _hat_mor: DefHatMor
-
-    def __init__(self, hat_mor: DefHatMor):
-        super().__init__(hat_mor)
-
-    @property
-    def proof(self):
-        return self._hat_mor.hat_proof
+        return self.hat_eq_cls(self)
         
 def _hat_ssource_starget(mor: HatMor | DefHatMor):
     return mor.hat_source, mor.hat_target.compose(mor)
