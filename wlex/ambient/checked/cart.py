@@ -15,14 +15,15 @@ def valid_span(s: Span):
 
 def valid_product_mor(pm: ProductMor):
     mor, p, q, p_eq, q_eq = pm
-    pt = p.target.product(q.target)
-    pt_p, pt_q = pt
+    source_pt = p.target.product(q.target)
+    _p = source_pt.proj('x')
+    _q = source_pt.proj('y')
     return (
         mor.source.equiv(p.source)
-        and mor.target.equiv(pt_p.source)
-        and pt_p.compose(mor).eql(p_eq.ssource)
+        and mor.target.equiv(source_pt)
+        and _p.compose(mor).eql(p_eq.ssource)
         and p.eql(p_eq.starget)
-        and pt_q.compose(mor).eql(q_eq.ssource)
+        and _q.compose(mor).eql(q_eq.ssource)
         and q.eql(q_eq.starget)
     )
 

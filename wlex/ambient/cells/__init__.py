@@ -262,6 +262,9 @@ class Mor:
     def pairing(self, q: 'Mor') -> 'Mor':
         raise NotImplementedError
     
+    def pairing_unique(self, p_eq: 'Eq', q_eq: 'Eq') -> 'Eq':
+        raise NotImplementedError
+    
 class PrimMor(Mor):
     __slots__ = 'name', '_eval'
     name: str

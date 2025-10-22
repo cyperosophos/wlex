@@ -63,5 +63,13 @@ def compose_eq(c: ComposableEq):
     require(valid_composable_eq(c))
     return _compose_eq(c)
 
-# TODO: Shouldn't there be a way to check equalities, e.g. globular conditions.
-# This would mean having new_* functions here.
+# Equalities that are constructed through the operations are
+# assumed to fulfill the globular conditions. PrimEq must on
+# the other handed be checked.
+# Checking only to be done once, hence we group this functions
+# in their own module.
+def source_globular_cond(eq: Eq):
+    return eq.ssource.source.equiv(eq.starget.source)
+
+def target_globular_cond(eq: Eq):
+    return eq.ssource.target.equiv(eq.starget.target)

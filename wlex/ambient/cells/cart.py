@@ -8,7 +8,7 @@ ProductParamName = Union[str, 'Obj']
 ProductParamKey = int | ProductParamName
 ProductMorParam = tuple[str | tuple[str, ...], 'Mor']
 ProductProjParam = tuple[str | tuple[str, ...], ProductParamKey]
-PairingUniqueTriangle = tuple[]
+NamedTriangle = tuple[str | tuple[str, ...], 'Eq']
 # TODO: Include all Cart cells here, e.g. Product, ProductMor
 
 class CartObj(CategoryObj):
@@ -115,11 +115,24 @@ class CartMor(CategoryMor):
         # Here the names end up being discarded.
         return ProductMor(p.source, (('p', p), ('q', q)))
     
+    @override
+    def pairing_unique(self, p_eq: 'Eq', q_eq: 'Eq'):
+        mor = self
+        return PairingUnique(mor, (('p', p_eq), ('q', q_eq)))
+    
 class CartPrimMor(PrimMor, CartMor):
     pass
 
 class CartDefMor(DefMor, CartMor):
     pass
+
+CartEq = CategoryEq
+# class CartEq(CategoryEq):
+#     @override
+#     def pairing_unique(self, q_eq: 'Eq'):
+#         p_eq = self
+#         mor = self.ssource
+#         return PairingUnique(mor, ())
     
 def _isinstance_sequence_object(x: object) -> TypeGuard[Sequence[object]]:
     return isinstance(x, Sequence)
@@ -658,12 +671,23 @@ def _is_identity(mor: Mor):
     # This needs to be documented as part of a spec.
     return mor.hint() == ()
 
-class PairingUnique(Eq): # CartEq?
+class PairingUnique(CartEq):
+    # __slots__
     # The span is extracted from the equalities
-    def __init__(self, mor: Mor, triangles: Sequence[Eq]):
+    def __init__(
+        self, mor: Mor, triangles: Sequence[NamedTriangle],
+        consistency: Sequence[Eq] = (),
+    ):
         # No type checking is done here that belongs to backend type checking.
         # We don't check the ssource and starget of the triangles.
+        # Just like we don't backend type check in Comp.__init__.
         ssource = ProductMor(mor.source, [
+            (name, t.starget) for name, t in triangles
+        ], consistency=consistency)
+        starget = mor
+        super().__init__(ssource, starget)
+        self.triangles = triangles
 
-        ])
-
+    @property
+    def proven(self):
+        return all(t.proven for _, t in self.triangles)

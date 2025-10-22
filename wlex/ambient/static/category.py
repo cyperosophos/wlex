@@ -36,6 +36,13 @@ def trans(p: Path) -> Eq:
     f, g = p
     return f.trans(g)
 
+left_identity_law = right_identity_law = ref
+
+def associativity(s: AssociativitySource) -> Eq:
+    f, g, h = s
+    # Type checking s and return value is enough.
+    return f.compose(g).compose(h).ref()
+
 def eq_unique(s: EqUniqueSource) -> Eq:
     d, _ = s
     return d
@@ -43,14 +50,6 @@ def eq_unique(s: EqUniqueSource) -> Eq:
 def sym(eq: Eq) -> Eq:
     return eq.sym()
 
-def associativity(s: AssociativitySource) -> Eq:
-    f, g, h = s
-    # Type checking s and return value is enough.
-    return f.compose(g).compose(h).ref()
-
 def compose_eq(c: ComposableEq) -> Eq:
     d, e = c
     return d.compose_eq(e)
-
-# TODO: left_identity
-# TODO: right_identity

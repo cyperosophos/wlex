@@ -25,12 +25,13 @@ def product(xy: ObjObj) -> Span:
 
 def pairing(s: Span) -> ProductMor:
     p, q = s
-    pm = p.pairing(q)
-    return pm, p, q, p.ref(), q.ref()
+    mor = p.pairing(q)
+    return mor, p, q, p.ref(), q.ref()
 
-def pairing_unique(pm: ProductMor):
+def pairing_unique(pm: ProductMor) -> 'Eq':
     # This cannot rely on ref, it can't be extensional, because
     # one needs the p_eq equalities in order get this equality.
     # Analogously, trans can't be based on ref because it requires
     # equalities, which can be extensional.
-    return mor.pairing_unique(p, q)
+    mor, _, _, p_eq, q_eq = pm
+    return mor.pairing_unique(p_eq, q_eq)
