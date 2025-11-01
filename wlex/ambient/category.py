@@ -4,105 +4,24 @@ from collections.abc import Callable
 
 from .cells import (
     Obj, Mor, DefMor, HatMor, DefHatMor, Eq,
-    Unsourced, PrimObj, PrimMor, PrimEq, ThesisEq, ProvenEq,
-    MorLike, EqLike, CellLike,
+    PrimObj, PrimMor, PrimEq, ThesisEq,
+    #MorLike, EqLike, CellLike,
 )
 from ..theory.category import Category as BCategory
+
+MorLike = Mor | Unsourced | Obj
+EqLike = Eq | Mor | Obj
+CellLike = Obj | MorLike | EqLike
     
 class Error(Exception):
     pass
 
-class Comp(Mor):
-    __slots__ = 'f', 'g'
-    f: Mor
-    g: Mor
-
-    def __init__(self, f: Mor, g: Mor):
-        source = g.source
-        target = f.target
-        super().__init__(source, target)
-        self.f = f
-        self.g = g
-
-    # TODO: Use always the most specific return type.
-    def eval(
-            self,
-            x: object,
-            check_source: bool = True,
-            check_target: bool = True,
-        ):
-        # self is not Composable, so self.f is not a projection.
-        return self.f.eval(
-            self.g.eval(x, check_source=check_source),
-            check_source=False,
-            check_target=check_target,
-        )
-    
-    def flat(self) -> tuple[Mor, ...]:
-        if isinstance(self.f, (Comp, Id)):
-            if isinstance(self.g, (Comp, Id)):
-                return (*self.f.flat(), *self.g.flat())
-            return (*self.f.flat(), self.g)
-        elif isinstance(self.g, (Comp, Id)):
-            return (self.f, *self.g.flat())
-        else:
-            return (self.f, self.g)
-    
-    def eql(self, x: Mor):
-        # True should take less time.
-        # True or False
-        # Calling super().__eq__ would cause infinite loop.
-        if self.eql_definitional(x):
-            return True
-        return _monoidal_eq(self, x)
-            
-    def __str__(self):
-        return f'({self.f} @ {self.g})'
-            
-    def __repr__(self):
-        return f'`comp {self!s}`'
-
-class Id(Mor):
+class Unsourced:
     __slots__ = ()
 
-    def __init__(self, obj: Obj):
-        super().__init__(obj, obj)
-        # Recall that eval is only called by the checked ambient.
-        #self.set_eval(lambda *args, **kwargs: (args, kwargs))
-
-    def flat(self):
-        return ()
-    
-    def eql(self, x: Mor):
-        if self.eql_definitional(x):
-            return True
-        return (
-            _monoidal_eq(self, x)
-            and self.source == x.source
-        )
-    
-    def eval(
-            self, x: object, 
-            check_source: bool = True,
-            check_target: bool = True
-        ):
-        # TODO: Is it possible to have eval without type checking?
-        # e.g. in the most concrete theory, which implements IO, etc.
-        if check_source or check_target:
-            self.source.check(x)
-        return x
-    
-    def __str__(self):
-        return f'{self.source}'
-    
-    def __repr__(self):
-        return f'`id {self!s}`'
-
-def _monoidal_eq(x: Comp | Id, y: Mor):
-    return (
-        isinstance(y, (Comp, Id))
-        and all(vx.eql(vy) for vx, vy in zip(x.flat(), y.flat()))
-    )
+    # There must be a separate class for unsourced projections, etc.
+    def with_source(self, source: Obj) -> 'Mor':
+        raise NotImplementedError
 
 class UnsourcedComp(Unsourced):
     __slots__ = 'f', 'g', '_comp'
@@ -149,76 +68,6 @@ class UnsourcedId(Unsourced):
     
     def __repr__(self):
         return '`unsourced_id`'
-    
-class Trans(Eq):
-    __slots__ = 'f', 'g'
-    f: Eq
-    g: Eq
-
-    def __init__(self, f: Eq, g: Eq):
-        # If one treats sym as id, then one would have to check
-        # the direction of f and g, this amounts to dyn typ checking,
-        # which is handled in checked.category.trans. However, the
-        # code here should work even without type checking.
-        # TODO: The biggest problem with treating sym as id is in
-        # compose_eq. There is no way to determine if one gets
-        # f(x) = g(y) or f(y) = g(x). Suppose one would like to
-        # apply trans with g(x) = k. There is no way to know if one
-        # must also apply trans with g(x = y).
-        # The solution is to treat sym the way type conversions
-        # (renaming, weakening) are treated. One has to handle it
-        # in high level trans and in Category.eq (for checking
-        # signature of proof when producing ThesisEq).
-        ssource = g.ssource
-        starget = f.starget
-        super().__init__(ssource, starget)
-        self.f = f
-        self.g = g
-    
-    @property
-    def proven(self):
-        return self.f.proven and self.g.proven
-    
-    def __str__(self):
-        return f'({self.f} & {self.g})'
-            
-    def __repr__(self):
-        return f'`trans {self!s}`'
-    
-class CompEq(Eq):
-    __slots__ = 'd', 'e'
-    d: Eq
-    e: Eq
-
-    def __init__(self, d: Eq, e: Eq):
-        ssource  = d.ssource.compose(e.ssource)
-        starget = d.starget.compose(e.starget)
-        super().__init__(ssource, starget)
-        self.d = d
-        self.e = e
-
-    @property
-    def proven(self):
-        return self.d.proven and self.e.proven
-    
-    def __str__(self):
-        return f'{self.d} & {self.e}'
-            
-    def __repr__(self):
-        return f'`comp_eq {self!s}`'
-
-class Ref(ProvenEq):
-    __slots__ = ()
-
-    def __init__(self, mor: Mor):
-        super().__init__(mor, mor)
-
-    def __str__(self):
-        return f'{self.ssource}'
-    
-    def __repr__(self):
-        # This appears to be ref(m) not ref[m].
-        return f'`ref {self!s}`'
 
 #CellMapping = dict[str, Union[CellLike, 'CellMapping']]
 Theory = dict[str, 'CellsLike']

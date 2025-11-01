@@ -14,20 +14,20 @@ def valid_composable(c: Composable):
     # The equiv comparison should not be modified to handle weakening
     # since conversion may be required anyway, and the comparison would
     # not be symmetric.
-    return f.source.equiv(g.target)
+    return f.source.identical(g.target)
 
 def valid_path(p: Path):
     f, g = p
     # TODO: Wrap ssource and starget so that the comparison gets
     # actually done with ssource and ssource, etc., that is sym
     # equivalence is taken into account.
-    return f.ssource.eql(g.starget)
+    return f.ssource.same(g.starget)
 
 def valid_eq_unique_source(s: EqUniqueSource):
     d, e = s
     return (
-        d.ssource.eql(e.ssource)
-        and d.starget.eql(e.starget)
+        d.ssource.same(e.ssource)
+        and d.starget.same(e.starget)
     )
 
 def valid_associativity_source(s: AssociativitySource):
@@ -39,7 +39,7 @@ def valid_associativity_source(s: AssociativitySource):
 
 def valid_composable_eq(c: ComposableEq):
     d, e = c
-    return d.ssource.source.equiv(e.starget.target)
+    return d.ssource.source.identical(e.starget.target)
 
 def compose(c: Composable) -> Mor:
     # TODO: Handle weaken here? Probably not. Too high-level.
@@ -69,7 +69,7 @@ def compose_eq(c: ComposableEq):
 # Checking only to be done once, hence we group this functions
 # in their own module.
 def source_globular_cond(eq: Eq):
-    return eq.ssource.source.equiv(eq.starget.source)
+    return eq.ssource.source.identical(eq.starget.source)
 
 def target_globular_cond(eq: Eq):
-    return eq.ssource.target.equiv(eq.starget.target)
+    return eq.ssource.target.identical(eq.starget.target)

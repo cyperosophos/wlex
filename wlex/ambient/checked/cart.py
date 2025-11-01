@@ -7,11 +7,11 @@ _pairing_unique = pairing_unique
 
 def valid_terminal_mor(mor: TerminalMor):
     target = mor.target
-    return target.equiv(target.terminal())
+    return target.identical(target.terminal())
 
 def valid_span(s: Span):
     p, q = s
-    return p.source.equiv(q.source)
+    return p.source.identical(q.source)
 
 def valid_product_mor(pm: ProductMor):
     mor, p, q, p_eq, q_eq = pm
@@ -19,12 +19,12 @@ def valid_product_mor(pm: ProductMor):
     _p = source_pt.proj('x')
     _q = source_pt.proj('y')
     return (
-        mor.source.equiv(p.source)
-        and mor.target.equiv(source_pt)
-        and _p.compose(mor).eql(p_eq.ssource)
-        and p.eql(p_eq.starget)
-        and _q.compose(mor).eql(q_eq.ssource)
-        and q.eql(q_eq.starget)
+        mor.source.identical(p.source)
+        and mor.target.identical(source_pt)
+        and _p.compose(mor).same(p_eq.ssource)
+        and p.same(p_eq.starget)
+        and _q.compose(mor).same(q_eq.ssource)
+        and q.same(q_eq.starget)
     )
 
 def terminal_mor_unique(mor: TerminalMor):

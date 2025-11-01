@@ -41,7 +41,7 @@ class CartObj(CategoryObj):
     #     from ..cart import ProductMor
     #     if not (args or kwargs):
     #         return ProductMor(self, ())
-        
+
     #     if len(args) > 0:
     #         if len(args) > 1 or kwargs:
     #             raise ValueError
@@ -63,25 +63,25 @@ class CartObj(CategoryObj):
     #             return ProductMor(self, ((name, mor),))
     #         return mor
     #     raise ValueError
-    
+
     @override
     def proj(self, key: ProductParamKey) -> Mor:
         if key == self:
             return self.identity()
         raise ValueError
-    
+
     @override
     @staticmethod
     def terminal():
         return Product(())
-    
+
     @override
     def terminal_mor(self):
         # The result of this has to pass backend.TerminalMor.check.
         #return Mor(self, Product(()))
         return ProductMor(self, ())
         # See cart.weaken_mor
-    
+
     @override
     def product(self, y: Obj):
         # This result of this has to pass backend.Span.check.
@@ -114,12 +114,12 @@ class CartMor(CategoryMor):
         # type checking by Pairing (and the hat).
         # Here the names end up being discarded.
         return ProductMor(p.source, (('p', p), ('q', q)))
-    
+
     @override
     def pairing_unique(self, p_eq: 'Eq', q_eq: 'Eq'):
         mor = self
         return PairingUnique(mor, (('p', p_eq), ('q', q_eq)))
-    
+
 class CartPrimMor(PrimMor, CartMor):
     pass
 
@@ -133,14 +133,14 @@ CartEq = CategoryEq
 #         p_eq = self
 #         mor = self.ssource
 #         return PairingUnique(mor, ())
-    
+
 def _isinstance_sequence_object(x: object) -> TypeGuard[Sequence[object]]:
     return isinstance(x, Sequence)
 
 def _isinstance_mutable_sequence_object(x: object) -> TypeGuard[MutableSequence[object]]:
     return isinstance(x, MutableSequence)
 
-# TODO Use @overload where needed instead of unions. 
+# TODO Use @overload where needed instead of unions.
 class Product(CartObj, Sequence[Obj]):
     # TODO: Consider implementing W-Cart. W-Types don't require all limits.
     # In this case one would have two possible backends for Category:
@@ -177,7 +177,7 @@ class Product(CartObj, Sequence[Obj]):
     #    if isinstance(key, int):
     #        return 0 <= key < len(self)
     #    return key in self.components
-    
+
     def includes(self, prod: 'Product') -> bool:
         return all(
             name in self.components
@@ -191,14 +191,14 @@ class Product(CartObj, Sequence[Obj]):
     def _add_name(self, name: ProductParamName, typ: Obj):
         if name in self.components:
             _, t = self.components[name]
-            if not t.equiv(typ):
+            if not t.identical(typ):
                 raise ValueError
         else:
             self.components[name] = (len(self.components), typ)
 
     def pos_to_type(self, pos: int):
         return self.components[self.names[pos]][1]
-    
+
     def pos_to_name(self, pos: int):
         return self.names[pos]
 
@@ -209,7 +209,7 @@ class Product(CartObj, Sequence[Obj]):
     def __init__(self, params: Sequence[ProductParam]):
         if not params and self is self._terminal and hasattr(self, 'params'):
             return
-        
+
         self.components = dict() # maps to position
 
         if len(params) == 1:
@@ -257,7 +257,7 @@ class Product(CartObj, Sequence[Obj]):
             # Hence treat equalizers (when needed) as single parameter products.
         self.names = list(self.components.keys())
 
-    def equiv(self, x: Obj):
+    def identical(self, x: Obj):
         # TODO: Notice that the order matters when comparing to Product
         # types, however the order does not matter when checking an object
         # of type Mapping. When a morphisms (e.g. a pairing) is guarantied
@@ -270,21 +270,21 @@ class Product(CartObj, Sequence[Obj]):
         # coincide (and have the same order) but the names are different.
         # This is useful with pairig where the names aren't specified and
         # are therefore indices.
-        return super().equiv(x) or (
+        return super().identical(x) or (
             isinstance(x, Product)
             and all(
-                n == m and s.equiv(t)
+                n == m and s.identical(t)
                 for (n, (_, s)), (m, (_, t))
                 in zip(self.components.items(), x.components.items())
             )
         )
-    
+
     def hint(self):
         return ((n, s) for n, (_, s) in self.components.items())
-    
+
     def __len__(self):
         return len(self.components)
-    
+
     # def _check(self, x: Sequence[object]):
     #     # Handle the mandatory flattening of nameless parameters in x that provide
     #     # subparameters. This is done with args and kwargs whose keys
@@ -316,7 +316,7 @@ class Product(CartObj, Sequence[Obj]):
         if _isinstance_sequence_object(x):
             return self._get_from_sequence(x, name)
         return x
-    
+
     def check(self, x: object):
         # x can be category.AttrDict, tuple or dict.
         # AttrDict is simply treated as dict.
@@ -351,7 +351,7 @@ class Product(CartObj, Sequence[Obj]):
 
         if length != len(self.components):
             raise Error
-        
+
         if _isinstance_sequence_object(x):
             for name, (_, typ) in self.components.items():
                 typ.check(self._get_from_sequence(x, name))
@@ -362,7 +362,7 @@ class Product(CartObj, Sequence[Obj]):
             self.pos_to_type(0).check(x)
         else:
             raise Error
-    
+
     # @staticmethod
     # def _sequence_from_subnames[T: ProductElement](
     #     x: T,
@@ -374,7 +374,7 @@ class Product(CartObj, Sequence[Obj]):
     #         _get(x, subname or typ.pos_to_name(i))
     #         for i, subname in enumerate(subnames)
     #     ]
-    
+
     # @staticmethod
     # def _sequence_from_type[T: ProductElement](
     #         x: T,
@@ -385,8 +385,8 @@ class Product(CartObj, Sequence[Obj]):
     #         _get(x, subname)
     #         for subname in typ.names
     #     ]
-        
-    def check_eql(self, x: object, y: object):
+
+    def equal(self, x: object, y: object):
         # This assumes that the type of x, y has already been checked.
         #if isinstance(x, Mapping):
         #    x = x.items()
@@ -405,14 +405,14 @@ class Product(CartObj, Sequence[Obj]):
         )
         _gfs = self._get_from_sequence
         for name, (_, typ) in self.components.items():
-            typ.check_eql(_gfs(_x, name), _gfs(_y, name))
+            typ.equal(_gfs(_x, name), _gfs(_y, name))
 
     def __str__(self):
         return f'({', '.join(f'{name}: {typ}' for name, (_, typ) in self.components.items())})'
-    
+
     def __repr__(self):
         return f'`product {self!s}`'
-    
+
 class Proj(CartMor):
     def __init__(self, name: ProductParamName, source: Obj):
         self.name = name
@@ -432,8 +432,8 @@ class Proj(CartMor):
             return source
         else:
             raise ValueError
-    
-    def eval(
+
+    def ev(
         self, x: object,
         check_source: bool = True,
         check_target: bool = True,
@@ -453,16 +453,16 @@ class Proj(CartMor):
             if check_source or check_target:
                 source.check(x)
             return x
-        
-    def eql(self, x: Mor):
-        if super().eql(x):
+
+    def same(self, x: Mor):
+        if super().same(x):
             return True
         return (
             isinstance(x, Proj)
             and self.name == x.name
-            and self.source.equiv(x.source)
+            and self.source.identical(x.source)
         )
-    
+
     def hint(self):
         return self.name, self.source
 
@@ -474,7 +474,7 @@ class Proj(CartMor):
 
     def __repr__(self):
         return f'`proj {self!s}[{self.source}]`'
-    
+
 class ProductMor(CartMor):
     # There should also be UnsourcedProductMor which can only be the result
     # of having a pairing (ProductMor) consisting only of unsourced morphisms.
@@ -518,7 +518,7 @@ class ProductMor(CartMor):
         # This must mostly work the same as Product.__init__ except for
         # repeated keys. In the case of repeated keys one needs proof
         # that their corresponding values will always be the same.
-        
+
         # TODO: when doing assignments there is a pairing with the identity on the
         # product. A reassignment thus would require glue to prove that the assigned
         # value is the same as the one already assigned. Truly reassigning would require
@@ -532,7 +532,7 @@ class ProductMor(CartMor):
                 raise ValueError
             elif not name:
                 raise ValueError
-        
+
         self.components = []
         components = self.components
         target_params: list[ProductParam] = []
@@ -619,21 +619,21 @@ class ProductMor(CartMor):
         target = Product(target_params)
         super().__init__(source, target)
 
-    def eql(self, x: Mor):
-        return super().eql(x) or (
+    def same(self, x: Mor):
+        return super().same(x) or (
             isinstance(x, ProductMor)
-            and self.target.equiv(x.target)
+            and self.target.identical(x.target)
             and all(
-                u == v and s.eql(t)
+                u == v and s.same(t)
                 for (u, s), (v, t)
                 in zip(self.components, x.components)
             )
         )
-    
+
     def hint(self):
         return self.target, self.components
-    
-    def eval(
+
+    def ev(
         self, x: object,
         check_source: bool = True,
         check_target: bool = True,
@@ -643,7 +643,7 @@ class ProductMor(CartMor):
         # Right before the return, the local namespace is made inmutable,
         # so that it can for example be safely returned, duplicated, etc.
         def _extend(res: MutableSequence[object], u: bool, m: Mor):
-            r = m.eval(x)
+            r = m.ev(x)
             if u:
                 assert(_isinstance_mutable_sequence_object(r))
                 res.extend(r)
@@ -666,10 +666,10 @@ class ProductMor(CartMor):
             _extend(_res, *c)
 
         return tuple(_res)
-        
+
 def _is_identity(mor: Mor):
     # This needs to be documented as part of a spec.
-    return mor.hint() == ()
+    return isinstance(mor, Comp) and mor.factors == ()
 
 class PairingUnique(CartEq):
     # __slots__

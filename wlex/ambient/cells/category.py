@@ -8,9 +8,10 @@ from ..cells import *
 # type checker is unable to guarantee). This is a compromise.
 
 class CategoryObj(Obj):
+    """Models object `category.Obj`"""
     @override
     def identity(self):
-        return Id(self)
+        return Comp(self)
 
 class CategoryPrimObj(PrimObj, Obj):
     pass
@@ -19,12 +20,13 @@ class CategoryMor(Mor):
     @override
     def ref(self):
         return Ref(self)
-    
+
     @override
     def compose(self, g: Mor):
+        source = self.source
         f = self
-        return Comp(f, g)
-    
+        return Comp(source, f, g)
+
     # TODO: This goes is cart.Mor
     # def eql(self, x: cells.Mor):
     #     from ..category import Comp
@@ -35,7 +37,7 @@ class CategoryMor(Mor):
     #         # This is especially useful in the case of p_eq, q_eq of pairing.
     #         return x.eql(self)
     #     return False
-    
+
 class CategoryPrimMor(PrimMor, CategoryMor):
     pass
 
@@ -50,11 +52,11 @@ class CategoryEq(Eq):
     @override
     def trans(self, g: Eq):
         return Trans(self, g)
-    
+
     @override
     def compose_eq(self, e: Eq):
         return CompEq(self, e)
-    
+
 class CategoryPrimEq(PrimEq, CategoryEq):
     # TODO: This type of multiple inheritance may not work with __slots__
     pass
@@ -72,11 +74,10 @@ class CategoryDefHatMor(DefHatMor, CategoryMor):
     hat_eq_cls = CategoryHatEq
 
 class Comp(CategoryMor):
-    __slots__ = 'f', 'g'
-    f: Mor
-    g: Mor
+    __slots__ = 'factors',
+    factors: tuple[Mor, ...]
 
-    def __init__(self, f: Mor, g: Mor):
+    def __init__(self, source: Obj, *factors: Mor):
         # TODO: It would make more sense to just flatten everything here
         # (and simplify the hint). In Trans this doesn't seem to be needed.
         # In fact this may support multiargs (just like Product and ProductMor).
@@ -95,94 +96,99 @@ class Comp(CategoryMor):
         # for it to not be trans nor compose_eq.
         # (f @ g) @ h == f @ (g @ h) == f @ k<g @ h> (k is DefMor)
         # The first == is ref((f @ g) @ h). The second == is ref(f) @ ref(g @ h).
-        source = g.source
-        target = f.target
+        # See other notes about reg(g @ h) & ref(k) (__eq__ not being an equiv rel),
+        # ref(f) @ ref(g) being the same as ref(f @ g), etc.
+        # (f, g) @ h == (f @ h, g @ h) follows from PairingUnique, which is necessarily
+        # intensional.
+        if not factors:
+            target = source
+        else:
+            target = factors[0].target
         super().__init__(source, target)
-        self.f = f
-        self.g = g
 
-    # TODO: Use always the most specific return type.
-    def eval(
-            self,
-            x: object,
-            check_source: bool = True,
-            check_target: bool = True,
-        ):
-        # self is not Composable, so self.f is not a projection.
-        return self.f.eval(
-            self.g.eval(x, check_source=check_source),
-            check_source=False,
-            check_target=check_target,
-        )
-    
-    def hint(self) -> tuple[Mor, ...]:
+        _factors: list[Mor] = []
+        for factor in factors:
+            if isinstance(factor, Comp):
+                _factors.extend(factor.factors)
+            else:
+                _factors.append(factor)
+
+        if len(_factors) == 1:
+            # Do identity stripping before instantiation.
+            raise ValueError
+
+        self.factors = tuple(_factors)
         # TODO: Because equal morphisms must have the same hash,
         # CartComp must accommodate p_eq.
-        if isinstance(self.f, (Comp, Id)):
-            if isinstance(self.g, (Comp, Id)):
-                return *self.f.hint(), *self.g.hint()
-            return *self.f.hint(), self.g
-        elif isinstance(self.g, (Comp, Id)):
-            return self.f, *self.g.hint()
-        else:
-            return self.f, self.g
-    
-    def eql(self, x: Mor):
+
+
+    # TODO: Use always the most specific return type.
+    def ev(self, x: object):
+        # Why type checks here? The content of eval can only be dynamically
+        # guaranteed to respect the signature. When skipping type checking
+        # or making it static as much as possible one uses static.* or checked.*.
+        # The backend uses part of static.* as its primitives. But not for type checking.
+        # The fact that one doens't need any dynamic type checking within the functions of
+        # static.* and checked.* (except for the args in checked.*). The result of dynamic
+        # checking beyond the args is guaranteed by the assumption that one is replicating
+        # the theory, which has a lex ambient, and there for can't be handled solely through
+        # static type checking. The backend is the theory itself not its replication, only
+        # the primitives need to be provided. The ambient of the backend can be static,
+        # checked or dynamic. `compose` can only be defined in a lex ambient, because its
+        # input requires a proof. Suspending all type checking when defining the theory is pointless
+        # since defining the theory is compilation. The compiled ambient is checked since
+        # dynamic type checking is still needed for the arguments. So the assumption that
+        # a checked theory replicates the theory (hence no type checking beyond args of public interface) can
+        # be restated as saying that the checked theory is the compiled theory.
+        # Recall also that when the backend is being defined as a theory (no setting of primitives)
+        # type checking is based on types not on elements. One can proof that the target of the primitive
+        # is always the correct one (making check_target superfluous). More difficulty one can even prove
+        # the same about the source. This would make all type checking superfluous.
+        # Actually checked.* is not the compiled the theory, but the result of its execution after
+        # setting primitives. This can code or functions produced at runtime,
+        # e.g. for the public interface def compose(c): backend.Composable.check(c); backend.compose(c);
+        # and the same pattern can be followed for the rest of the public interface.
+        # Obviously backend is itself the private interface.
+        # Obj.check is used in the public interface. What about Eq.proven?
+        # Setting the primitives may actually be handled by using 2-(co)limits, or by using sub
+        # (i.e. embedding the theory in a larger one). Relying on other theories still requires
+        # setting primitives on those other theories.
+        # Trusting the target of the eval primitive is analogous to not providing a proof when
+        # assuming a primitive eq.
+        # Variadic functions with conversions, etc. of course cannot be the result of compiling
+        # the ambient theory, as this would be too complicated (although accomplishable with List, etc.),
+        # so they are built on simple functions which take care of type checking the arguments.
+        # What about the rest of the body of such complicated functions? Just assume the return type is correct.
+        # The instantiation functions (obj, mor, eq) are also not part of the theory.
+
+        res = x
+        for factor in self.factors:
+            res = factor.ev(res)
+        return res
+
+    def hint(self):
+        return self.source, self.factors
+
+    def same(self, x: Mor):
         # True should take less time.
         # True or False
         # Calling super().__eq__ would cause infinite loop.
         # TODO: This only applies to cart.Comp
-        if self.eql_definitional(x):
-            return True
-        return _monoidal_eq(self, x)
-            
-    def __str__(self):
-        return f'({self.f} @ {self.g})'
-            
-    def __repr__(self):
-        return f'`comp {self!s}`'
-
-class Id(CategoryMor):
-    __slots__ = ()
-
-    def __init__(self, obj: Obj):
-        super().__init__(obj, obj)
-        # Recall that eval is only called by the checked ambient.
-        #self.set_eval(lambda *args, **kwargs: (args, kwargs))
-
-    def hint(self):
-        return ()
-    
-    def eql(self, x: Mor):
+        # TODO: In fact Mor of different classes should always be different.
         if self.eql_definitional(x):
             return True
         return (
-            _monoidal_eq(self, x)
-            and self.source == x.source
+            isinstance(x, Comp)
+            and all(f.same(g) for f, g in zip(self.factors, x.factors))
+            # This is required for comparing identities.
+            and self.source.identical(x.source)
         )
-    
-    def eval(
-            self, x: object, 
-            check_source: bool = True,
-            check_target: bool = True
-        ):
-        # TODO: Is it possible to have eval without type checking?
-        # e.g. in the most concrete theory, which implements IO, etc.
-        if check_source or check_target:
-            self.source.check(x)
-        return x
-    
-    def __str__(self):
-        return f'{self.source}'
-    
-    def __repr__(self):
-        return f'`id {self!s}`'
 
-def _monoidal_eq(x: Comp | Id, y: Mor):
-    return (
-        isinstance(y, (Comp, Id))
-        and all(vx.eql(vy) for vx, vy in zip(x.hint(), y.hint()))
-    )
+    def __str__(self):
+        return f'({'@'.join(str(factor) for factor in self.factors)})'
+
+    def __repr__(self):
+        return f'`comp {self!s}`'
 
 class Sym(CategoryEq):
     inv: Eq
@@ -196,19 +202,20 @@ class Sym(CategoryEq):
     @property
     def proven(self):
         return self.inv.proven
-    
+
     def __str__(self):
         return f'~{self.inv}'
-    
+
     def __repr__(self):
         return f'`sym {self!s}`'
 
 class Trans(CategoryEq):
-    __slots__ = 'f', 'g'
-    f: Eq
-    g: Eq
+    __slots__ = 'factors',
+    # There are two approaches (cf. CompEq). One is store the equalities
+    # required for the proof, the other is to discard them.
+    factors: tuple[Eq, ...]
 
-    def __init__(self, f: Eq, g: Eq):
+    def __init__(self, ssource: Mor, *factors: Eq):
         # If one treats sym as id, then one would have to check
         # the direction of f and g, this amounts to dyn typ checking,
         # which is handled in checked.category.trans. However, the
@@ -222,57 +229,54 @@ class Trans(CategoryEq):
         # (renaming, weakening) are treated. One has to handle it
         # in high level trans and in Category.eq (for checking
         # signature of proof when producing ThesisEq).
-        ssource = g.ssource
-        starget = f.starget
+        if not factors:
+            starget = ssource
+        else:
+            starget = factors[0].starget
         super().__init__(ssource, starget)
-        self.f = f
-        self.g = g
-    
+
+        _factors: list[Eq] = []
+        for factor in factors:
+            if isinstance(factor, Trans):
+                _factors.extend(factor.factors)
+            else:
+                _factors.append(factor)
+
+        if len(_factors) == 1:
+            raise ValueError
+
+        self.factors = tuple(_factors)
+
     @property
     def proven(self):
-        return self.f.proven and self.g.proven
-    
+        return all(factor.proven for factor in self.factors)
+
     def __str__(self):
-        return f'({self.f} & {self.g})'
-            
+        return f'({'&'.join(str(factor) for factor in self.factors)})'
+
     def __repr__(self):
         return f'`trans {self!s}`'
-    
-class CompEq(CategoryEq):
-    __slots__ = 'd', 'e'
-    d: Eq
-    e: Eq
 
-    def __init__(self, d: Eq, e: Eq):
-        ssource  = d.ssource.compose(e.ssource)
-        starget = d.starget.compose(e.starget)
+class CompEq(CategoryEq):
+    __slots__ = 'factors',
+    factors: tuple[Eq, ...]
+
+    def __init__(self, *factors: Eq):
+        if len(factors) <= 1:
+            # ref(id(source)) should be created using Comp
+            raise ValueError
+        source = factors[-1].ssource.source
+        ssource = Comp(source, *(factor.ssource for factor in factors))
+        starget = Comp(source, *(factor.starget for factor in factors))
         super().__init__(ssource, starget)
-        self.d = d
-        self.e = e
+        self.factors = tuple(factors)
 
     @property
     def proven(self):
-        return self.d.proven and self.e.proven
-    
+        return all(factor.proven for factor in self.factors)
+
     def __str__(self):
-        return f'{self.d} & {self.e}'
-            
+        return f'({'@'.join(str(factor) for factor in self.factors)})'
+
     def __repr__(self):
         return f'`comp_eq {self!s}`'
-
-class Ref(CategoryEq):
-    __slots__ = ()
-
-    def __init__(self, mor: Mor):
-        super().__init__(mor, mor)
-
-    def __str__(self):
-        return f'{self.ssource}'
-    
-    def __repr__(self):
-        # This appears to be ref(m) not ref[m].
-        return f'`ref {self!s}`'
-    
-    @property
-    def proven(self):
-        return True

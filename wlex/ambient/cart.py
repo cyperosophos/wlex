@@ -32,8 +32,8 @@ class TerminalMor(Mor):
         # Not type checked, part of the definition of terminal_mor
         target = source.terminal()
         super().__init__(source, target)
-    
-    def eval(
+
+    def ev(
             self, x: object,
             check_source: bool = True,
             check_target: bool = True,
@@ -42,18 +42,18 @@ class TerminalMor(Mor):
             Cart.source(self).check(x)
         # No need to check target
         return ()
-    
-    def eql(self, x: Mor):
+
+    def same(self, x: Mor):
         # __eq__ equality is extensional. The full uniqueness
         # (i.e. two morphisms with terminal object as target being equal)
         # is proved through terminal_mor_unique.
-        if super().eql(x):
+        if super().same(x):
             return True
         return (
-            self.source.equiv(x.source)
-            and self.target.equiv(x.target)
+            self.source.identical(x.source)
+            and self.target.identical(x.target)
         )
-    
+
     def __str__(self):
         # It's ok to not write ()[T], because the contexts where this
         # will show up will often make the type clear.
@@ -61,7 +61,7 @@ class TerminalMor(Mor):
 
     def __repr__(self):
         return f'`terminal_mor {self!s}[{self.source}]`'
-    
+
 class ProductMor3(Mor):
     __slots__ = 'p', 'q', 'pt'
 
@@ -77,16 +77,16 @@ class ProductMor3(Mor):
         # components of pt.
         self.pt = pt
 
-    def eql(self, x: Mor):
+    def same(self, x: Mor):
         return (
             isinstance(x, ProductMor3)
-            and self.p.eql(x.p)
-            and self.q.eql(x.q)
+            and self.p.same(x.p)
+            and self.q.same(x.q)
         )
-    
+
     # No eval and no proven, this is not used when implementing a theory,
     # e.g. the backend theory.
-    
+
     def to_tuple(self):
         mor = self
         p = self.p
@@ -103,13 +103,13 @@ class UnsourcedTerminalMor(Unsourced):
 
     def with_source(self, source: Obj):
         return source.terminal_mor()
-    
+
     def __str__(self):
         return '()'
-    
+
     def __repr__(self):
         return '`unsourced_terminal_mor`'
-    
+
 # One treats Ref as the prototypical proven Eq, and then all proven
 # Eq follow from Ref and extensional equality. equiv (e.g. Mor.equiv)
 # has to be modified to handle the equality. This replaces
@@ -119,7 +119,7 @@ class UnsourcedTerminalMor(Unsourced):
 # TODO: Separate the theoreticall cell methods through inheritance
 # inside the cell directory.
 # TODO: Implement Pairing and use it instead of ProductMor and TerminalMor
-# when implementing the corresponding theoretical cell methods. 
+# when implementing the corresponding theoretical cell methods.
 class TerminalMorUnique(ProvenEq):
     __slots__ = ()
 
@@ -127,7 +127,7 @@ class TerminalMorUnique(ProvenEq):
         ssource = mor.source.terminal_mor()
         starget = mor
         super().__init__(ssource, starget)
-    
+
     def __str__(self):
         # One simply uses [] instead of something like {} regardless
         # of naturality, functoriality, etc., since these properties
@@ -140,21 +140,21 @@ class TerminalMorUnique(ProvenEq):
         # is supported. One may in fact define macros.
         # TODO: Should interface functors use a different syntax?
         return f'terminal_mor_unique[{self.starget}]'
-    
+
     def __repr__(self):
         return f'`terminal_mor_unique {self!s}`'
-    
+
 # Recall that PairingUnique is not used by backend, so it doesn't need to be proven.
-    
+
 class PairingUnique(Eq):
     def __init__(self, mor: Mor, p: Mor, q: Mor):
         ssource = p.pairing(q)[0]
         starget = mor
         super().__init__(ssource, starget)
-    
+
     def __str__(self):
         return f'pairing_unique[{self.starget}]'
-    
+
     def __repr__(self):
         return f'`pairing_unique {self!s}`'
 
@@ -199,7 +199,7 @@ ProductMappingGetter = Callable[[ProductMapping, ProductParamName], object]
 ProductGetter = Callable[[T, ProductParamName], object]
 #ProductElementGetter = ProductSequenceGetter | ProductMappingGetter
 # ProductElement = (
-#     tuple[ProductSequence, ProductSequenceGetter] 
+#     tuple[ProductSequence, ProductSequenceGetter]
 #     | tuple[ProductMapping, ProductMappingGetter]
 # )
 # The args of the pairing get converted to kwargs using the common Product source.
@@ -279,7 +279,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
             (name, self._proj_single(key))
             for (name, key) in params
         ])
-    
+
     def proj(self, *args: ProjKey, *kwargs: ProjKey):
         all_args = chain((
             arg if isinstance(arg, tuple) else ('', arg)
@@ -304,7 +304,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         if isinstance(key, int):
             return 0 <= key < len(self)
         return key in self.components
-    
+
     def includes(self, prod: 'Product') -> bool:
         return all(
             name in self.components
@@ -318,21 +318,21 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
     def _add_name(self, name: ProductParamName, typ: Obj):
         if name in self.components:
             _, t = self.components[name]
-            if not t.equiv(typ):
+            if not t.identical(typ):
                 raise ValueError
         else:
             self.components[name] = (len(self.components), typ)
 
     def pos_to_type(self, pos: int):
         return self.components[self.names[pos]][1]
-    
+
     def pos_to_name(self, pos: int):
         return self.names[pos]
 
     def pos_to_name_and_type(self, pos: int):
         name = self.names[pos]
         return name, self.components[name][1]
-    
+
     def _add_names_from_type(self, typ: 'Product'):
         for subname, (_, t) in typ.components.items():
             self._add_name(subname, t)
@@ -340,7 +340,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
     def __init__(self, params: ProductParams, weakened: bool = True):
         if not params and self is self._terminal and hasattr(self, 'params'):
             return
-        
+
         #self.params = params
         self.components = dict() # maps to position
 
@@ -391,7 +391,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
             # Hence treat equalizers (when needed) as single parameter products.
         self.names = list(self.components.keys())
 
-    def equiv(self, x: Obj):
+    def identical(self, x: Obj):
         # TODO: Notice that the order matters when comparing to Product
         # types, however the order does not matter when checking an object
         # of type Mapping. When a morphisms (e.g. a pairing) is guarantied
@@ -404,20 +404,20 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         # coincide (and have the same order) but the names are different.
         # This is useful with pairig where the names aren't specified and
         # are therefore indices.
-        return super().equiv(x) or (
+        return super().identical(x) or (
             isinstance(x, Product)
             and self.weakened == x.weakened
             #and self.params == v.params
             and all(
-                n == m and s.equiv(t)
+                n == m and s.identical(t)
                 for (n, (_, s)), (m, (_, t))
                 in zip(self.components.items(), x.components.items())
             )
         )
-    
+
     def __len__(self):
         return len(self.components)
-    
+
     def _check[T: ProductElement](
         self, x: T,
         _get: ProductGetter[T],
@@ -484,7 +484,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
             return x
         else:
             return
-    
+
     def check(self, x: object):
         # x can be category.AttrDict, tuple or dict.
         # AttrDict is simply treated as dict.
@@ -522,7 +522,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
                 raise Error
         elif length != len(self.components):
             raise Error
-        
+
         if _isinstance_ProductMapping(x):
             assert(_isinstance_ObjectMapping(x))
             self._check(
@@ -546,7 +546,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
             return
         else:
             raise Error
-    
+
     # @staticmethod
     # def _sequence_from_subnames[T: ProductElement](
     #     x: T,
@@ -558,7 +558,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
     #         _get(x, subname or typ.pos_to_name(i))
     #         for i, subname in enumerate(subnames)
     #     ]
-    
+
     # @staticmethod
     # def _sequence_from_type[T: ProductElement](
     #         x: T,
@@ -569,7 +569,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
     #         _get(x, subname)
     #         for subname in typ.names
     #     ]
-        
+
     def _check_eql[T: ProductElement, U: ProductElement](
         self,# x_get: T, y: U,
         x_get: tuple[T, ProductGetter[T]],
@@ -579,7 +579,7 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
         y, _y_get = y_get
         _gfs = self._get_from_sequence
         for name, (_, typ) in self.components.items():
-            typ.check_eql(_x_get(x, name), _y_get(y, name))
+            typ.equal(_x_get(x, name), _y_get(y, name))
             # if name:
             #     if isinstance(name, str):
             #         typ.check_eql(
@@ -602,8 +602,8 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
             #         _x_get(x, typ),
             #         _y_get(y, typ),
             #     )
-        
-    def check_eql(self, x: object, y: object):
+
+    def equal(self, x: object, y: object):
         # This assumes that the type of x, y has already been checked.
         #if isinstance(x, Mapping):
         #    x = x.items()
@@ -642,10 +642,10 @@ class Product(Obj, Mapping[ProductParamKey, Obj]):
                 return f':{typ}'
 
         return f'({', '.join(f'{format_param(*p)}' for p in self.params)})'
-    
+
     def __repr__(self):
         return f'`product {self!s}`'
-    
+
 class ProductMor(Mor):
     # There should also be UnsourcedProductMor which can only be the result
     # of having a pairing (ProductMor) consisting only of unsourced morphisms.
@@ -671,7 +671,7 @@ class ProductMor(Mor):
         # This must mostly work the same as Product.__init__ except for
         # repeated keys. In the case of repeated keys one needs proof
         # that their corresponding values will always be the same.
-        
+
         self.components = dict()
 
         if len(params) == 1:
@@ -686,7 +686,7 @@ class ProductMor(Mor):
             if isinstance(name, tuple):
                 if not isinstance(typ, Product):
                     raise TypeError
-                
+
                 if len(name) != len(typ):
                     raise ValueError
                 # Make a renaming pairing to compose with mor.
@@ -700,83 +700,22 @@ class ProductMor(Mor):
                     if subname:
                         self._add_name(subname, typ.pos_to_type(i))
 
-    def eql(self, x: Mor):
-        return super().eql(x) or (
+    def same(self, x: Mor):
+        return super().same(x) or (
             isinstance(x, ProductMor)
             and all(
-                n == m and s.eql(t)
+                n == m and s.same(t)
                 for (n, (_, s)), (m, (_, t))
                 in zip(self.components.items(), x.components.items())
             )
         )
-    
-    def eval(
+
+    def ev(
         self, x: object,
         check_source: bool = True,
         check_target: bool = True,
     ):
         [for name, mor in self.params.items()]
-            
-        
-    
-class Proj(Mor):
-    def __init__(self, name: ProductParamName, source: Obj):
-        self.name = name
-        target = self._get_target(source)
-        super().__init__(source, target)
-
-    def _get_target(self, source: Obj):
-        if isinstance(source, Product):
-            # Get the type corresponding to self.key.
-            return source.name_to_type(self.name)
-        elif source is self.name:
-            # source must be self.key. Return it unchanged.
-            # source and self.key are required to be identical.
-            # This seems to work because it doesn't make sense for
-            # key to be a Product. If one needs to extract multiple attributes,
-            # one uses a pairing of projections.
-            return source
-        else:
-            raise ValueError
-    
-    def eval(
-        self, x: object,
-        check_source: bool = True,
-        check_target: bool = True,
-    ):
-        source = self.source
-        if isinstance(source, Product):
-            if check_source:
-                source.check(x)
-            y = source.eval_proj(x, self.name) # Must occur after check_source
-            if check_target and not check_source:
-                # If source has been checked, there is no need to check the target.
-                target = self.target
-                target.check(y)
-            return y
-        else:
-            # Same as category.Id
-            if check_source or check_target:
-                source.check(x)
-            return x
-        
-    def eql(self, x: Mor):
-        if super().eql(x):
-            return True
-        return (
-            isinstance(x, Proj)
-            and self.name == x.name
-            and self.source.equiv(x.source)
-        )
-
-    def __str__(self):
-        name = self.name
-        if isinstance(name, str):
-            return f'${name}'
-        return str(name)
-
-    def __repr__(self):
-        return f'`proj {self!s}[{self.source}]`'
 
 class UnsourcedProj(Unsourced):
     def __init__(self, name: ProductParamName):
@@ -815,7 +754,7 @@ class TProductMor(Mor, Mapping):
         def proven(self):
             # TODO: Should this be implemented? cf. _Proj.eval.
             return True
-        
+
         def assume(self):
             raise Error
 
@@ -849,18 +788,18 @@ class TProductMor(Mor, Mapping):
     def p_eq(self):
         # this Eq must have proven = True, just like there must be an eval for
         # the pairing. Cf. TerminalMorUnique.
-        # TODO: No type checking of t_compose, etc.? 
+        # TODO: No type checking of t_compose, etc.?
         return self._PProjEq(self)
-    
+
     @property
     def q_eq(self):
         return self._QProjEq(self)
 
     __iter__ = TProduct.__iter__
-    
+
     def __len__(self):
         return 5
-    
+
     def __getitem__(self, key):
         if key not in self._keys:
             raise KeyError
@@ -873,7 +812,7 @@ class TProductMor(Mor, Mapping):
 
     # __str__
     # __repr__
-    
+
     #def __iter__(self): # -> Iterator[Mor, Mor]:
     #    return iter(getattr(self, name) for name in self.__slots__)
 
@@ -896,7 +835,7 @@ class WithAttrs(Sequence):
 
     def __len__(self):
         return 1 + len(self.attr_names)
-    
+
     def __iter__(self):
         return iter((self, *(getattr(self, n) for n in self.attr_names)))
 
@@ -929,7 +868,7 @@ class ProductMorEq(Eq):
     @property
     def proven(self):
         return True
-    
+
 class ProductMorPEq(Eq):
     proj_name = 'p'
 
@@ -965,7 +904,7 @@ class ProductMor2(Mor, WithAttrs):
         mor = self
         return Eq(self.pt.p.compose(mor), self.p)
         #return ProductMorPEq(self)
-    
+
     @property
     def q_eq(self):
         mor = self
@@ -973,7 +912,7 @@ class ProductMor2(Mor, WithAttrs):
         #return ProductMorQEq(self)
 
     # No eval. Pairing, not this, is used by backend type checking.
-    
+
 #def foo(pm: ProductMor):
 #    m, p, q, p_eq, q_eq = pm
 
@@ -983,7 +922,7 @@ class SpanEq(NamedTuple):
     y: Span
     p_eq: Eq
     q_eq: Eq
-    
+
 class UnsourcedPair:
     def __init__(self, p: Unsourced, q: Unsourced):
         self.p = p
@@ -991,7 +930,7 @@ class UnsourcedPair:
 
     def with_source(self, source):
         # TODO: Why not allowing backend type checking?
-        return 
+        return
 
 class Pairer:
     # Somehow this should produce an AttrDict or similar.
@@ -1015,7 +954,7 @@ class Pairer:
                 s = Cart.source(Cart.ssource(q))
                 p = Cart.ref(p.with_source(s))
                 return cls.pairing_eq((p, q))
-            
+
             p = p.with_source(Cart.source(q))
             return cls.pairing((p, q))
 
@@ -1024,23 +963,23 @@ class Pairer:
                 s = Cart.source(Cart.ssource(p))
                 q = Cart.ref(q.with_source(s))
                 return cls.pairing_eq((p, q))
-            
+
             if isinstance(q, Eq):
                 return cls.pairing_eq((p, q))
-            
+
             q = Cart.ref(q)
             return cls.pairing_eq((p, q))
-        
+
         if isinstance(q, Unsourced):
             q = q.with_source(Cart.source(p))
             return cls.pairing((p, q))
-        
+
         if isinstance(q, Eq):
             p = Cart.ref(p)
             return cls.pairing_eq((p, q))
-        
+
         return cls.pairing((p, q))
-    
+
     @staticmethod
     def pairing(p: Span) -> ProductMor:
         # This means t_pair.
@@ -1049,7 +988,7 @@ class Pairer:
     @staticmethod
     def pairing_eq(p: SpanEq) -> Eq:
         pass
-    
+
 def filter_product_arg[T](arg):
     # Superfluous type checking
     if isinstance(arg, tuple):
@@ -1108,7 +1047,7 @@ def weaken_mor(f: Mor, source: Obj) -> Mor:
     #     g = source.proj(s) # Projection with source.
     # else:
     #     raise ValueError
-    
+
     return f.compose(g)
 
 def weaken_eq(d: Eq, source: Obj) -> Eq:
@@ -1130,7 +1069,7 @@ def weaken_eq(d: Eq, source: Obj) -> Eq:
 
 #     def __str__(self):
 #         return f'{self.orig}'
-    
+
 #     def __repr__(self):
 #         return f'`weakened_mor {self!s}: {self.source} -> {self.orig.source} -> {self.target}`'
 
@@ -1212,18 +1151,18 @@ class Cart(Category):
         # the function always returns TProduct.
         x, y = p
         return x.product(y)
-    
+
     def t_pairing(self, s: Span) -> ProductMor:
         # Remember: there is not point in type checking intermediate
         # steps. The construction is correct as long as it coincide with
         # the signature.
         p, q = s
         return p.pairing(q)
-    
+
     def product(self, *args, **kwargs):
         if not args and not kwargs:
             return self.terminal
-        
+
         all_args = chain(args, kwargs.items())
         params = []
         acc = None
@@ -1232,7 +1171,7 @@ class Cart(Category):
             acc = self.checked_product(acc, typ)
             params.append((name, typ))
         return type(self.terminal)(params)
-    
+
     def checked_product(self, acc, typ):
         return acc
 
@@ -1240,7 +1179,7 @@ class Cart(Category):
     def terminal_mor(t: Obj) -> Mor:
         # TODO: t.terminal_mor
         return TerminalMor(t)
-    
+
     @staticmethod
     def terminal_mor_unique(mor: Mor) -> Eq:
         # TODO: t.terminal_mor_unique
@@ -1275,10 +1214,10 @@ class CheckedCart(CheckedCategory):
     @property
     def terminal(self):
         return self.backend.terminal.eval(())
-    
+
     def terminal_mor(self, x):
         return self.backend.terminal_mor.eval(x)
-    
+
     def terminal_mor_unique(self, x):
         return self.backend.terminal_mor_unique.eval(x)
 
@@ -1287,5 +1226,5 @@ class CheckedCart(CheckedCategory):
             @staticmethod
             def t_product(p):
                 return self.t_product(p)
-  
+
         self.product = _Producer.product
