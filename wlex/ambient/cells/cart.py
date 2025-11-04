@@ -11,6 +11,28 @@ ProductProjParam = tuple[str | tuple[str, ...], ProductParamKey]
 NamedTriangle = tuple[str | tuple[str, ...], 'Eq']
 # TODO: Include all Cart cells here, e.g. Product, ProductMor
 
+    # TODO: This goes is cart.Mor
+    # def eql(self, x: cells.Mor):
+    #     from ..category import Comp
+    #     if super().eql(x):
+    #         return True
+    #     if isinstance(x, Comp):
+    #         # Defer to Comp.__eq__.
+    #         # This is especially useful in the case of p_eq, q_eq of pairing.
+    #         return x.eql(self)
+    #     return False
+
+        # Composing pairing with projection (or with pairing of projections)
+        # results in single morphism (or pairing), so this should be handled
+        # by Mor.compose.
+        # TODO: Because equal morphisms must have the same hash,
+        # CartComp must accommodate p_eq.
+        # Variadic functions with conversions, etc. of course cannot be the result of compiling
+        # the ambient theory, as this would be too complicated (although accomplishable with List, etc.),
+        # so they are built on simple functions which take care of type checking the arguments.
+        # What about the rest of the body of such complicated functions? Just assume the return type is correct.
+        # The instantiation functions (obj, mor, eq) are also not part of the theory.
+
 class CartObj(CategoryObj):
     # TODO: Keep high-level interface in the ambient class (Cart).
     # It seems that having a proj method in Product makes sense,
@@ -669,7 +691,7 @@ class ProductMor(CartMor):
 
 def _is_identity(mor: Mor):
     # This needs to be documented as part of a spec.
-    return isinstance(mor, Comp) and mor.factors == ()
+    return isinstance(mor, Composition) and mor.factors == ()
 
 class PairingUnique(CartEq):
     # __slots__

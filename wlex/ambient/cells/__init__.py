@@ -1,8 +1,5 @@
-"""
-Base classes for cells
-"""
+"""Base classes for cells and cell exceptions"""
 from functools import wraps
-from typing import Optional, Union, override
 from collections.abc import Callable, Sequence
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
@@ -11,35 +8,113 @@ class Error(Exception):
     """Base class for cell exceptions"""
 
 class TargetInvalid(Error):
-    pass
+    """Invalid value for target during morphism evaluation
+
+    This error is only raised during defensive evaluation.
+    """
+    def __init__(self, message: str, x: 'Defensive', res: object = None):
+        super().__init__(message)
+        self.x = x.copy()
+        self.res = res
+
+    def __str__(self):
+        x = self.x
+        res = self.res
+        return f"{super().__str__()} {x=} {res=}"
 
 class TargetFailure(TargetInvalid):
-    pass
+    """Invalid due to unfulfilled equalities
+
+    The source of these equalities is the target of the morphism. Being due to
+    an exception unable to establish that all equalities are fulfilled also
+    counts as this exception.
+    """
+    def __init__(
+            self, message: str, x: 'Defensive', res: object = None,
+            failed: Sequence['Eq'] = (),
+        ):
+        super().__init__(message, x, res)
+        self.failed = failed
+
+    def __str__(self):
+        failed = self.failed
+        return f"{super().__str__()} {failed=}"
 
 class TargetMismatch(TargetInvalid):
-    pass
+    """Invalid due to not being accepted by the target
+
+    If there was no value to check against target then `res` is not provided.
+    This occurs after an exception, which will then be the `__cause__` of this
+    exception. Being unable due to an exception to check that the value gets
+    accepted also counts as this exception.
+    """
 
 class SourceInvalid(Error):
-    pass
+    """Invalid value for source during morphism evaluation
+
+    This error is only raised during public evaluation. The public function that
+    evaluates the morphism will raise a TypeError from this exception.
+    """
+    def __init__(self, message: str, x: object):
+        super().__init__(message)
+        self.x = x
+
+    def __str__(self):
+        x = self.x
+        return f"{super().__str__()} {x=}"
 
 class SourceFailure(SourceInvalid):
-    pass
+    """Invalid due to unfulfilled equalities
+
+    The source of these equalities is the source of the morphism. Being unable
+    due to an exception to establish that all equalities are fulfilled also
+    counts as this exception.
+    """
+    def __init__(self, message: str, x: object, failed: Sequence['Eq'] = ()):
+        super().__init__(message, x)
+        self.failed = failed
+
+    def __str__(self):
+        failed = self.failed
+        return f"{super().__str__()} {failed=}"
 
 class SourceMismatch(SourceInvalid):
-    pass
+    """Invalid due to not being accepted by the source
+
+    Being unable due to an exception to check that the value gets accepted also
+    counts as this exception.
+    """
+
+class VerificationError(Error):
+    """Unable to verify equality"""
+    def __init__(self, message: str, eq: 'Eq'):
+        super().__init__(message)
+        self.eq = eq
+
+    def __str__(self):
+        eq = self.eq
+        return f"{super().__str__()} {eq=}"
+
+class VerificationSsourceError(VerificationError):
+    """Unable to evaluate setoid source due to exception"""
+
+class VerificationStargetError(VerificationError):
+    """Unable to evaluate setoid source due to exception"""
+
+class VerificationSamenessError(VerificationError):
+    """Unable to establish sameness due to exception"""
+    def __init__(self, message: str, eq: 'Eq', s: object, t: object):
+        super().__init__(message, eq)
+        self.s = s
+        self.t = t
+
+    def __str__(self):
+        s = self.s
+        t = self.t
+        return f"{super().__str__()} {s=} {t=}"
 
 class Defensive:
     """Wraps argument passed to defensive morphisms"""
-    # Can't use WeakDict since the same value could have different stacks
-    # according to where it's being used as argument.
-    # Any cell (in)directly containing a defensive morphism is defensive,
-    # so for example a morphism with a defensive source or target is defensive
-    # but only for purposes of type-checking not ev. So some granularity is required.
-    # When defensive comes only from source and target, there is no need for attr defensive.
-    # If accepts, same, etc. raise an exception, this exception must be treated the same as
-    # False under defensive checking (and also reraised).
-    # So a TargetInvalid from failed_eqs will get handled (caught) by the defensive checking,
-    # so there is probably no need to use defensive wrapping when calling failed_eqs, etc.
     __slots__ = 'value', 'stack'
     value: object
     stack: list[object]
@@ -48,18 +123,25 @@ class Defensive:
         self.value = value
         self.stack = []
 
+    def copy(self):
+        """Create a copy of `self`"""
+        res = Defensive(self.value)
+        res.stack = [*self.stack]
+        return res
+
 class Obj(metaclass=ABCMeta):
     """Base class for objects (0-cells)"""
     __slots__ = ('name',)
     name: str
     defined = True
-    defensive_accepts = False
-    defensive_failed_eqs = False
     eqs: dict['Obj', list['Eq']] = defaultdict(list)
 
     @abstractmethod
     def accepts(self, x: object) -> bool:
         """`self` accepts `x` as element."""
+        # `accepts` may require verication of equalities in subclass,
+        # specifically in equalizers. In this case `self` is the source
+        # of the equalities.
 
     @abstractmethod
     def same(self, x: object, y: object) -> bool:
@@ -156,7 +238,7 @@ class PrimObj(Obj):
     def define(self, accepts: Callable[[object], bool], same: Callable[[object, object], bool]):
         """Set the `accepts` and `same` methods of the primitive object"""
         if self.defined:
-            raise ValueError("Can't redefine")
+            raise ValueError("Can't redefine primitive object")
         self._accepts = accepts
         self._same = same
 
@@ -177,9 +259,25 @@ class Mor(metaclass=ABCMeta):
     defined = True
     defensive = False
 
+    def _as_defensive(self, x: object):
+        if not isinstance(x, Defensive):
+            x = Defensive(x)
+        x.stack.append(self)
+        return x
+
     @abstractmethod
     def ev(self, x: object) -> object:
         """Element, to which morphism `self` maps `x`"""
+
+    def public_ev(self, x: object):
+        """Checks `x` against source before evaluation"""
+        source = self.source
+        if source.accepts(x):
+            failed = source.failed_eqs(x)
+            if failed:
+                raise SourceFailure("Unfulfilled equalities:", x, failed)
+            return self.ev(x)
+        raise SourceMismatch("Not accepted by source:", x)
 
     def __init__(self, source: Obj, target: Obj):
         self.source = source
@@ -245,13 +343,19 @@ class PrimMor(Mor):
     after initialization, that is during execution of the theory, to which the
     primitive morphisms belong.
     """
-    __slots__ = ('_ev',)
+    __slots__ = ('_ev', '_defensive')
     _ev: Callable[[object], object]
+    _defensive: bool
 
     def ev(self, x: object) -> object:
         return self._ev(x)
 
-    def define(self, ev: Callable[[object], object], defensive: bool=False):
+    @property
+    def defensive(self) -> bool:
+        """`self` was defined with the `defensive` flag."""
+        return getattr(self, '_defensive', False)
+
+    def define(self, ev: Callable[[object], object], defensive: bool = False):
         """Set the `ev` method of the primitive morphism
 
         When `defensive` is `True`, the value returned by `ev` is checked
@@ -261,35 +365,53 @@ class PrimMor(Mor):
         public interface (and also includes checking equalities).
         """
         if self.defined:
-            raise ValueError("Can't redefine")
+            raise ValueError("Can't redefine primitive morphism")
 
+        self._defensive = defensive
         if defensive:
             target = self.target
 
             @wraps(ev)
             def wrapper(x: object) -> object:
+                x = self._as_defensive(x)
+                # TargetInvalid can only get caught outside the call stack, so
+                # there is never a need to pop from the stack list when raising
+                # such exception.
+
                 try:
-                    res = ev(x)
+                    res = ev(x.value)
                 except Exception as exc:
-                    raise TargetMismatch(f"") from exc
-                if target.accepts(res):
-                    failed = target.failed_eqs(res)
+                    raise TargetMismatch(
+                        "No result against which to accept target:", x,
+                    ) from exc
+
+                try:
+                    accepts = target.accepts(res)
+                except Exception as exc:
+                    raise TargetMismatch(
+                        "Unable to check if result is accepted:", x, res,
+                    ) from exc
+
+                if accepts:
+                    try:
+                        failed = target.failed_eqs(res)
+                    except Exception as exc:
+                        raise TargetFailure(
+                            "Unable to check if there are unfulfilled "
+                            "equalities", x, res,
+                        ) from exc
+
                     if failed:
-                        raise TargetFailure(f"{x} fails equalities {failed}.")
+                        raise TargetFailure(
+                            "Unfulfilled equalities:", x, res, failed,
+                        )
+
+                    x.stack.pop()
                     return res
-                raise TargetMismatch(f"{x} is not accepted by {target}.")
+                raise TargetMismatch("Not accepted by target:", x, res)
 
             self._ev = wrapper
         else:
-            # TODO: wrapper must take extra arg: stack, which allows tracing
-            # nested ev calls (as in compose and pairing), ev within
-            # verify within failed_eqs within ev, ev with equalizer accepts, etc.
-            # How does one contextualize other errors (besides target errors)?
-            # Any exception raised by dev is a target error, since exceptions can't
-            # be part of the type indicated by target (no Maybe monad), so doing
-            # defensive ev requires catching all exceptions. Instead of passing extra
-            # arg to ev, one wraps x inside a value containing the stack, this way the
-            # original ev does not need to be wrapped when it's not defensive.
             self._ev = ev
 
     @property
@@ -310,28 +432,46 @@ class Eq:
         self.starget = starget
 
     def verify(self, x: object):
+        """Verify that `x` satisfies equality `self`"""
         ssource = self.ssource
         starget = self.starget
-        ssource.target.same(ssource.ev(x), starget.ev(x))
+
+        try:
+            s = ssource.ev(x)
+        except TargetInvalid as err:
+            raise VerificationSsourceError(
+                "Unable to evaluate setoid source of equality:", self,
+            ) from err
+
+        try:
+            t = starget.ev(x)
+        except TargetInvalid as err:
+            raise VerificationStargetError(
+                "Unable to evaluate setoid target of equality:", self,
+            ) from err
+
+        try:
+            return ssource.target.same(s, t)
+        except Exception as exc:
+            raise VerificationSamenessError(
+                "Unable to verify sameness", self, s, t,
+            ) from exc
 
     def __eq__(self, proof: object):
-        # TODO: It is possible that one might just end up forgoing
-        # the use of __eq__ altogether due to the mandatory object type
-        # annotation, which is too lax.
-        # self.proven can't be set here as that would modify the state.
-        # No need for backend type checking here.
         return isinstance(proof, Eq) and self.parallel(proof)
 
     def __hash__(self):
         return hash(self.hint())
 
     def hint(self):
-        # parallel in one direction
+        """The signature of the equality
+
+        Equalities are fully characterized by their setoid source and target,
+        that is their signature."""
         return (self.ssource, self.starget)
 
-    # for Obj.eql use equiv
     def parallel(self, proof: 'Eq'):
-        # TODO: Symmetry has to be handled at the high-level.
+        """Equalities that coincide in their signature are parallel."""
         if proof is self:
             return True
         return (
@@ -339,282 +479,51 @@ class Eq:
             and self.starget == proof.starget
         )
 
-    def weaken(self, source: Obj) -> 'Eq':
-        # TODO: Too high-level
-        from .cart import weaken_eq
-        return weaken_eq(self, source)
-
     def __str__(self):
-        return f'<eq_{id(self)}>'
+        if hasattr(self, 'name'):
+            return self.name
+        return NotImplemented
 
     def __repr__(self):
         return f'`eq {self!s}: {self.ssource} == {self.starget}`'
 
     def sym(self) -> 'Eq':
-        raise NotImplementedError
+        """Models morphism `category.sym`"""
+        raise TypeError("Requires CategoryEq")
 
     def trans(self, g: 'Eq') -> 'Eq':
-        raise NotImplementedError
+        """Models morphism `category.trans`"""
+        raise TypeError("Requires CategoryEq")
 
     def compose_eq(self, e: 'Eq') -> 'Eq':
-        raise NotImplementedError
+        """Models morphism `category.compose_eq`"""
+        raise TypeError("Requires CategoryEq")
 
 class PrimEq(Eq):
-    __slots__ = 'name', '_proven'
+    """Base of primitive equalities
+
+    Primitive equalities are the ones which must be assumed (by calling method
+    `define`) after initialization, that is during execution of the theory, to
+    which the primitive equalities belong.
+    """
+    __slots__ = ('_proven',)
     name: str
     _proven: bool
 
-    def __init__(
-        self, name: str,
-        ssource: Mor, starget: Mor,
-    ):
-        # No checking of globular conditions here
-        self.name = name
-        super().__init__(ssource, starget)
-
     @property
-    def proven(self):
-        return getattr(self, '_proven', False)
+    def defined(self):
+        """Equality `self` has been assumed."""
+        if hasattr(self, '_proven'):
+            assert self._proven
+            return True
+        return False
 
-    def assume(self):
-        # self.proven is the conjunction of the proven values of
-        # all trans operands.
-        if self.proven:
-            raise Error
+    def define(self):
+        """Assume equality `self`"""
+        # Trusting the target of a primitive morphism is analogous to not
+        # providing a proof when assuming a primitive equality.
+        if self.defined:
+            raise ValueError("Can't redefine primitive equality")
         self._proven = True
 
-    def __str__(self):
-        return self.name
-
-class ThesisEq(Eq):
-    __slots__ = 'name', 'proof'
-    name: str
-    proof: Eq
-
-    def __init__(
-        self, name: str,
-        ssource: Mor, starget: Mor,
-        proof: Eq,
-    ):
-        self.name = name
-        super().__init__(ssource, starget)
-        #source = ssource.source
-        # TODO: high-level
-        #proof = proof.weaken(source)
-        if self.parallel(proof):
-            self.proof = proof
-        else:
-            raise Error
-
-    @property
-    def proven(self):
-        return self.proof.proven
-
-    # @property
-    # def proof(self):
-    #     return self._proof.proof
-
-    def __repr__(self):
-        return f'{super().__repr__()[1:-1]} = {self.proof}'
-
-class HatEq(Eq):
-    # There is probably no point in having DefHatEq with proof property
-    # since it would not be a subclass of ThesisEq.
-    __slots__ = 'hat_mor',
-
-    def __init__(self, hat_mor: Union['HatMor', 'DefHatMor']):
-        ssource, starget = _hat_ssource_starget(hat_mor)
-        super().__init__(ssource, starget)
-        self.hat_mor = hat_mor
-
-    @property
-    def proven(self):
-        return self.hat_mor.hat_proven
-
-    def __str__(self):
-        return f'^{self.hat_mor}'
-
-class HatMor(Mor):
-    __slots__ = 'name', '_eval', 'hat_source', 'hat_target', 'hat_proven'
-    name: str
-    _eval: Callable[[object, bool, bool], object]
-    hat_source: 'Mor'
-    hat_target: 'Mor'
-    hat_proven: bool
-    hat_eq_cls: type[HatEq] = HatEq
-
-    def __str__(self):
-        return self.name
-
-    def __repr__(self):
-        return f'`fn {self!s}: {self.hat_source} -> {self.hat_target}`'
-
-    def __init__(
-        self, name: str,
-        hat_source: Mor,# | Obj,
-        hat_target: Mor,# | Obj,
-        #source: object,
-        #target: object,
-    ):
-        self.name = name
-        # One way to avoid redundant type checking is move all type checking (and possibly
-        # identity() calls) to Category.mor. However, this makes the code more complicated.
-        # TODO: Too high-level
-        source, target, self.hat_source, self.hat_target = \
-            _source_target_from_hat(hat_source, hat_target)
-        #    _unfold_source_target(source, target)
-        super().__init__(source, target)
-        self.hat_proven = False
-
-    @property
-    def hat(self):
-        # self.hat_proven is True only after set_eval has been called.
-        return self.hat_eq_cls(self)
-
-    def set_eval(self, method: Callable[[object], object]):
-        if hasattr(self, '_eval'):
-            raise Error
-
-        peak = self.hat_source.target
-
-        @wraps(method)
-        def wrapper(
-            x: object,
-            check_source: bool,
-            check_target: bool,
-        ):
-            # This will check the type of the source and target
-            # Here the equality is not just assumed, it is also checked.
-            # The same should happen with all assumed equalities, even if they
-            # are not hat equalities? Hat equality checking is similar to type checking
-            # when one sees it as indexed type checking. The way other equalities
-            # are checked is ad hoc. See eq method of CheckedCategory with respect to
-            # globular conditions. This justifies the call to assume.
-            # Recall also that no type checking goes on in ambient Category.
-            # Type checking is part of the evaluation of backend methods
-            # by converting them into pointed functions (the point is the error).
-            # For example, compose is dynamically checked, whereas the composed
-            # functions are being statically checked. Type checking within compose
-            # is part of the evaluation which produces a composed morphism.
-            # Category does some type checking based on at most Cart, but since this
-            # is just duck typing it can be regarded as a single type which includes
-            # the point (error). This is, the default backend is a monoid.
-            # CheckedCategory needs the full Lex logic in order to check
-            # that source and target coincide when composing.
-            # Decidable type checking implies pointed functions not just partial functions.
-            # A statically type checked compose would require having proof of source
-            # and target coinciding, THIS IS THE CASE with the theory Category
-            # which uses Lex as its ambient, and is used as the backend of CheckedCategory.
-            # The static checking of theory Category (compose) occurs when using CheckedLex.
-            # The dynamic checking of theory Category occurs when using it as backend.
-            # Dynamic checking is required for the atomic cells. Static checking only provides
-            # guaranties for the composed cells. Notice that set_eval can't be called
-            # morphisms with value, etc. Static type checking proves correctness
-            # upon the assumption of correct atomic cells.
-            # Eq can be true or false just like Mor gets wrapped in the Maybe monad.
-            # The composed morphisms of the backend have an eval method which skips checking
-            # that source and target coincide. The type checking of a composed morphism comes
-            # the type checking of the atomic morphisms, which has to be dynamic.
-            # By skipping, all intermediate type checking of the composition remains static on one side.
-            # The backend can have composed morphisms
-            # because as a theory it uses an ambient which is at least a Category.
-            # If the ambient is CheckedCategory, then this ambient uses theory Category
-            # as backend, which in turn uses Lex as ambient.
-            # backend.compose.eval will then check that (f, g) is actually Composable.
-            # This is because compose is atomic. One trusts that no static type checking
-            # is needed on the backend, so the composed morphisms in the backend are assumed
-            # to come from Composable. If this static type checking is needed then one uses
-            # CheckedLex.
-            left_side = self.hat_source.ev(x, check_source=check_source)
-            result = method(x)
-            right_side = self.hat_target.ev(
-                result,
-                check_source=check_target,
-                check_target=False,
-            )
-            # This requires full_eq, because the type is not fixed.
-            peak.equal(left_side, right_side)
-            return result
-            # if peak.check_eq(left_side, right_side):
-            #     return result
-            # raise Error
-
-        self._eval = wrapper
-        self.hat_proven = True
-
-class DefHatMor(DefMor):
-    __slots__ = 'hat_source', 'hat_target', '_hat_proof'
-    hat_source: Mor
-    hat_target: Mor
-    _hat_proof: Eq
-    hat_eq_cls: type[HatEq] = HatEq
-
-    @property
-    def hat_proven(self):
-        return self._hat_proof.proven
-
-    # @property
-    # def hat_proof(self):
-    #     return self._hat_proof.proof
-
-    def __repr__(self):
-        return f'`fn {self!s}: {self.hat_source} -> {self.hat_target} = {self.value}`'
-
-    def __init__(
-        self, name: str,
-        hat_source: Mor,# | Obj,
-        hat_target: Mor,# | Obj,
-        value: Mor,# | Unsourced | Obj,
-        proof: Eq,# | Mor | Obj,
-    ):
-        source, target, self.hat_source, self.hat_target = \
-            _source_target_from_hat(hat_source, hat_target)
-        #    _unfold_source_target(source, target)
-        super().__init__(name, source, target, value)
-        #if isinstance(proof, Obj):
-        #    proof = proof.identity()
-        #if isinstance(proof, Mor):
-        #    proof = proof.ref()
-        #hat = self._hat()
-        #proof = proof.weaken(source)
-        if self.hat.parallel(proof):
-           self._hat_proof = proof
-        else:
-           raise Error
-
-    @property
-    def hat(self):
-        return self.hat_eq_cls(self)
-
-def _hat_ssource_starget(mor: HatMor | DefHatMor):
-    return mor.hat_source, mor.hat_target.compose(mor)
-
-def _unfold_source_target(source: Mor | Obj, target: Mor | Obj):
-    # This is syntax not theory.
-    # Some type checking of Category.mor is deferred to this method.
-    # TODO: hat_weakened
-    if isinstance(source, Mor):
-        if isinstance(target, Mor):
-            hat_target = target
-            target = hat_target.source
-        #elif isinstance(target, Obj):
-        else:
-            hat_target = target.identity()
-        #else:
-        #    raise TypeError
-        hat_source = source
-        source = hat_source.source
-    elif isinstance(target, Mor):
-        hat_target = target
-        target = hat_target.source
-        #if isinstance(source, Obj):
-        hat_source = source.identity()
-        #else:
-        #    raise TypeError
-    else:
-        # Both Obj not allowed
-        raise TypeError
-
-    # There is no point in weakening. source and target are guarantied
-    # to be the sources of hat_source and hat_target.
-    return source, target, hat_source, hat_target
+Cell = Obj | Mor | Eq
