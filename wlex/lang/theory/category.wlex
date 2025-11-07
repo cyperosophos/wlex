@@ -17,9 +17,9 @@ type Composable := P.Path;
 fn identity := P.ref;
 fn compose := P.trans;
 
-fn left_identity_law := (compose @ (identity @ target, $), $) @ Mor -> eq;
-fn right_identity_law := (compose @ ($, identity @ source), $) @ Mor -> eq;
-fn associativity := (
+fn left_identity_law: (compose @ (identity @ target, $), $) @ Mor -> eq;
+fn right_identity_law: (compose @ ($, identity @ source), $) @ Mor -> eq;
+fn associativity: (
     compose @ ($f, compose @ ($g, $h)),
     compose @ (compose @ ($f, $g), $h),
 ) @ (

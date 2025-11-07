@@ -117,7 +117,7 @@ class Defensive:
     """Wraps argument passed to defensive morphisms"""
     __slots__ = 'value', 'stack'
     value: object
-    stack: list[object]
+    stack: list['Mor']
 
     def __init__(self, value: object):
         self.value = value
@@ -128,6 +128,18 @@ class Defensive:
         res = Defensive(self.value)
         res.stack = [*self.stack]
         return res
+
+    def exit(self):
+        """Called when evaluation returns"""
+        self.stack.pop()
+
+    @classmethod
+    def enter(cls, x: object, mor: 'Mor'):
+        """Called when evaluation starts"""
+        if not isinstance(x, cls):
+            x = cls(x)
+        x.stack.append(mor)
+        return x
 
 class Obj(metaclass=ABCMeta):
     """Base class for objects (0-cells)"""
@@ -214,8 +226,12 @@ class Obj(metaclass=ABCMeta):
         raise TypeError("Requires CartObj")
 
     def product(self, y: 'Obj') -> 'Obj':
-        """Models source of span `cart.product`"""
+        """Models morphism that gets source of span `cart.product`"""
         raise TypeError("Requires CartObj")
+
+    def proj(self, name: object) -> 'Mor':
+        """Projection, that is leg of product span"""
+        raise TypeError("Requires Product")
 
 class PrimObj(Obj):
     """Base of primitive objects
@@ -259,11 +275,8 @@ class Mor(metaclass=ABCMeta):
     defined = True
     defensive = False
 
-    def _as_defensive(self, x: object):
-        if not isinstance(x, Defensive):
-            x = Defensive(x)
-        x.stack.append(self)
-        return x
+    def _defensive_enter(self, x: object):
+        return Defensive.enter(x, self)
 
     @abstractmethod
     def ev(self, x: object) -> object:
@@ -332,7 +345,7 @@ class Mor(metaclass=ABCMeta):
         """Models morphism `cart.pairing`"""
         raise TypeError("Requires CartMor")
 
-    def pairing_unique(self, p_eq: 'Eq', q_eq: 'Eq') -> 'Eq':
+    def pairing_unique(self, p: 'Mor', q: 'Mor') -> 'Eq':
         """Models morphism `cart.pairing_unique`"""
         raise TypeError("Requires CartMor")
 
@@ -373,7 +386,7 @@ class PrimMor(Mor):
 
             @wraps(ev)
             def wrapper(x: object) -> object:
-                x = self._as_defensive(x)
+                x = self._defensive_enter(x)
                 # TargetInvalid can only get caught outside the call stack, so
                 # there is never a need to pop from the stack list when raising
                 # such exception.
@@ -406,7 +419,7 @@ class PrimMor(Mor):
                             "Unfulfilled equalities:", x, res, failed,
                         )
 
-                    x.stack.pop()
+                    x.exit()
                     return res
                 raise TargetMismatch("Not accepted by target:", x, res)
 

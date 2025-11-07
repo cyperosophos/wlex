@@ -85,7 +85,7 @@ class Composition(CategoryMor):
         if isinstance(target, Obj):
             if factors:
                 raise ValueError(
-                    "Can't provide `factors` along with `source`. Composition"
+                    "Can't provide `factors` along with `target`. Composition"
                     "must be identity",
                 )
             super().__init__(target, target)
@@ -107,7 +107,7 @@ class Composition(CategoryMor):
 
         if len(_factors) == 1:
             # Identity stripping must occur before instantiation.
-            raise ValueError
+            raise ValueError("Removing identities gives single factor.")
 
         self.factors = tuple(_factors)
         self._defensive = any(f.defensive for f in _factors)
@@ -116,7 +116,7 @@ class Composition(CategoryMor):
         res = x
 
         if self.defensive:
-            res = self._as_defensive(res)
+            res = self._defensive_enter(res)
 
             for factor in self.factors:
                 if factor.defensive:
@@ -124,7 +124,7 @@ class Composition(CategoryMor):
                 else:
                     res.value = factor.ev(res.value)
 
-            res.stack.pop()
+            res.exit()
             return res.value
 
         for factor in self.factors:
@@ -144,7 +144,10 @@ class Composition(CategoryMor):
         )
 
     def __str__(self):
-        return f'({'@'.join(str(factor) for factor in self.factors)})'
+        name = super().__str__()
+        if name is NotImplemented:
+            return f'({'@'.join(str(factor) for factor in self.factors)})'
+        return name
 
     def __repr__(self):
         return f'`comp {self!s}`'
