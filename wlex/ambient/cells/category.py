@@ -1,7 +1,7 @@
 """Category cell classes"""
-from typing import override, overload
-from itertools import chain
+from typing import override
 from abc import ABCMeta
+from collections.abc import Sequence
 
 from ..cells import Obj, PrimObj, Mor, PrimMor, Eq, PrimEq
 
@@ -11,7 +11,7 @@ class CategoryObj(Obj, metaclass=ABCMeta):
 
     @override
     def identity(self):
-        return Composition(self)
+        return Composition.identity(self)
 
 class CategoryPrimObj(PrimObj, Obj):
     """Models object `category.Obj` as primitive"""
@@ -28,9 +28,7 @@ class CategoryMor(Mor, metaclass=ABCMeta):
     @override
     def compose(self, g: Mor) -> Mor:
         f = self
-        if isinstance(g, Composition) and not g.factors:
-            return f
-        return Composition(f, g)
+        return Composition.simplified(f, g)
 
 class CategoryPrimMor(PrimMor, CategoryMor):
     """Models object `category.Mor` as primitive"""
@@ -71,46 +69,48 @@ class Composition(CategoryMor):
         """Some morphism in the composition is defensive."""
         return getattr(self, '_defensive', False)
 
-    @override
-    def compose(self, g: Mor):
-        if not self.factors:
-            return g
-        return super().compose(g)
+    def __init__(
+            self, source: Obj, target: Obj, factors: tuple[Mor, ...],
+            defensive: bool = False,
+        ):
+        # Do not directly call class for instantiation, use `identity` or
+        # `simplified` instead.
+        super().__init__(source, target)
+        self.factors = factors
+        self._defensive = defensive
 
-    @overload
-    def __init__(self, target: Obj) -> None: ...
-    @overload
-    def __init__(self, *factors: Mor) -> None: ...
-    def __init__(self, target: Obj | Mor, *factors: Mor):
-        if isinstance(target, Obj):
-            if factors:
-                raise ValueError(
-                    "Can't provide `factors` along with `target`. Composition"
-                    "must be identity",
-                )
-            super().__init__(target, target)
-            self.factors = ()
-            return
+    @classmethod
+    def simplified(cls, *factors: Mor):
+        """Creates composition after simplifying factors"""
 
         if not factors:
-            raise ValueError("Single factor not allowed")
+            raise ValueError("Requires at least one factor")
 
-        first = target
-        factor_it = chain((first,), factors)
-        super().__init__(factors[-1].source, first.target)
+        _factors = cls.simplify(factors)
+
+        if len(_factors) == 1:
+            return _factors[0]
+
+        return cls(
+            factors[-1].source, factors[0].target, tuple(_factors),
+            defensive=any(f.defensive for f in _factors),
+        )
+
+    @classmethod
+    def identity(cls, obj: Obj):
+        """Creates identity"""
+        return cls(obj, obj, ())
+
+    @classmethod
+    def simplify(cls, factors: tuple[Mor, ...]) -> Sequence[Mor]:
+        """Simplifies factors"""
         _factors: list[Mor] = []
-        for factor in factor_it:
+        for factor in factors:
             if isinstance(factor, Composition):
                 _factors.extend(factor.factors)
             else:
                 _factors.append(factor)
-
-        if len(_factors) == 1:
-            # Identity stripping must occur before instantiation.
-            raise ValueError("Removing identities gives single factor.")
-
-        self.factors = tuple(_factors)
-        self._defensive = any(f.defensive for f in _factors)
+        return _factors
 
     def ev(self, x: object):
         res = x

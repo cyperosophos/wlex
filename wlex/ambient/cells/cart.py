@@ -6,28 +6,6 @@ from abc import ABCMeta
 from ..cells import Obj, Mor, Eq, PrimObj, PrimMor, PrimEq
 from .category import CategoryObj, CategoryMor, CategoryEq, Composition
 
-    # TODO: This goes is cart.Mor
-    # def eql(self, x: cells.Mor):
-    #     from ..category import Comp
-    #     if super().eql(x):
-    #         return True
-    #     if isinstance(x, Comp):
-    #         # Defer to Comp.__eq__.
-    #         # This is especially useful in the case of p_eq, q_eq of pairing.
-    #         return x.eql(self)
-    #     return False
-
-        # Composing pairing with projection (or with pairing of projections)
-        # results in single morphism (or pairing), so this should be handled
-        # by Mor.compose.
-        # TODO: Because equal morphisms must have the same hash,
-        # CartComp must accommodate p_eq.
-        # Variadic functions with conversions, etc. of course cannot be the result of compiling
-        # the ambient theory, as this would be too complicated (although accomplishable with List, etc.),
-        # so they are built on simple functions which take care of type checking the arguments.
-        # What about the rest of the body of such complicated functions? Just assume the return type is correct.
-        # The instantiation functions (obj, mor, eq) are also not part of the theory.
-
 class CartObj(CategoryObj, metaclass=ABCMeta):
     """Models object `cart.Obj`"""
     __slots__ = ()
@@ -53,6 +31,16 @@ class CartPrimObj(PrimObj, CartObj):
 class CartMor(CategoryMor, metaclass=ABCMeta):
     """Models object `cart.Mor`"""
     __slots__ = ()
+
+    @override
+    def same(self, x: 'Mor'):
+        # We handle sameness of terminal morphisms here.
+        terminal = Product()
+        return super().same(x) or (
+            self.target.identical(terminal)
+            and x.target.identical(terminal)
+            and self.source.identical(x.target)
+        )
 
     @override
     def pairing(self, q: 'Mor'):
@@ -91,12 +79,12 @@ class Product(CartObj):
     def proj(self, name: object):
         if name in self.components:
             assert isinstance(name, ComponentName)
-            return Proj(name, self)
+            return Projection.from_path(self, name)
 
         if isinstance(name, int):
             if name >= len(self.components):
                 raise ValueError("`name` of type `int` is out of range.")
-            return Proj(self.pos_to_name(name), self)
+            return Projection.from_path(self, self.pos_to_name(name))
 
         raise ValueError("`name` does not correspond to any component.")
 
@@ -117,6 +105,14 @@ class Product(CartObj):
         not correspond to any component.
         """
         return self.components[name][1]
+
+    def name_to_pos(self, name: ComponentName):
+        """Get the position in which `name` occurs
+
+        This will raise `KeyError` if `name` does not correspond to any
+        component.
+        """
+        return self.components[name][0]
 
     def _add_name(self, name: ComponentName, obj: Obj):
         if isinstance(name, str):
@@ -215,7 +211,8 @@ class Product(CartObj):
             else:
                 # The obj is the name.
                 self._add_name(obj, obj)
-        self.names = list(self.components.keys())
+
+        self.names = list(self.components)
 
     def identical(self, x: Obj):
         return super().identical(x) or (
@@ -280,16 +277,43 @@ class Product(CartObj):
     def __repr__(self):
         return f'`product {self!s}`'
 
-class Proj(CartMor):
+class Projection(CartMor):
     "Models morphism corresponding to projection"
-    __slots__ = ('component_name',)
+    __slots__ = ('path',)
 
-    def __init__(self, name: ComponentName, source: Product):
+    def __init__(
+            self, source: Product, target: Obj, path: tuple[ComponentName, ...],
+        ):
         # Instantiation occurs by calling `source.proj`, which takes care of
-        # checking `name`.
-        self.component_name = name
-        target = source.name_to_obj(name)
+        # checking `path`.
+        self.path = path
         super().__init__(source, target)
+
+    @classmethod
+    def from_path(cls, source: Product, *path: ComponentName):
+        """Create projection from path"""
+        target = source
+
+        for name in path:
+            if isinstance(target, Product):
+                target = target.name_to_obj(name)
+            else:
+                raise ValueError(
+                    "name in `path` does not correspond to `Product` component"
+                    "as expected."
+                )
+
+        if target is source:
+            raise ValueError("Empty `path`")
+
+        return cls(source, target, path)
+
+    def proj_compose(self, mor: 'Projection'):
+        """Compose with projection of the given component name"""
+        source = mor.source
+        target = self.target
+        assert isinstance(source, Product)
+        return Projection(source, target, (*self.path, *mor.path))
 
     def ev(self, x: object):
         # `x` is accepted by source (as can be checked in `self.public_ev`) is
@@ -298,17 +322,21 @@ class Proj(CartMor):
         # result when this is not guaranteed by having the source accept the
         # argument.
         source = self.source
-        assert isinstance(source, Product)
-        if _isinstance_sequence_object(x):
-            return source.get_from_sequence(x, self.component_name)
-        # Required for single component product.
+        for name in reversed(self.path):
+            if _isinstance_sequence_object(x):
+                assert isinstance(source, Product)
+                x = source.get_from_sequence(x, name)
+                source = source.name_to_obj(name)
+            else:
+                # Required for single component product.
+                break
         return x
 
     def same(self, x: Mor):
         if super().same(x):
             return True
         return (
-            isinstance(x, Proj)
+            isinstance(x, Projection)
             and self.name == x.name
             and self.source.identical(x.source)
         )
@@ -319,10 +347,10 @@ class Proj(CartMor):
     def __str__(self):
         name = super().__str__()
         if name is NotImplemented:
-            cname = self.component_name
-            if isinstance(cname, (int, str)):
-                return f'{cname}$'
-            return str(cname)
+            return ' '.join(
+                f'{n}$' if isinstance(n, (int, str)) else str(n)
+                for n in self.path
+            )
         return name
 
     def __repr__(self):
@@ -334,6 +362,104 @@ class ProductMor(CartMor):
 
     # The names are in the target. The bool is the unpack flag.
     components: list[tuple[bool, Mor]]
+
+    def after_proj(self, mor: Projection) -> Mor | tuple[Mor, Mor]:
+        """Get the morphism associated to projection in the pairing
+
+        The composition of `self` and `mor` may sometimes not reduce to a single
+        morphism. This is the case the target of the resulting morphism does not
+        coincide with the target of the projection. When this occurs, a tuple of
+        two morphisms is returned, the first one being the adapted projection
+        and the second one being the resulting morphism.
+        """
+        res = self
+
+        # Empty `path` is not allowed, since it would make Projection an
+        # identity.
+        exact = False
+        for i, name in enumerate(reversed(mor.path)):
+            if isinstance(res, ProductMor):
+                res, exact = res.after_component_name(name)
+
+                if exact:
+                    continue
+
+            # The returned projection is truncated to include all remaining
+            # names as well as the current projection with the target of `res`
+            # as its source. The result of `after_component_name` on morphisms
+            # that are not `ProductMor` would not be exact.
+            t = res.target
+            assert isinstance(t, Product)
+            return Projection.from_path(t, *mor.path[:-i or None]), res
+
+        return res
+
+
+    def after_component_name(self, name: ComponentName) -> tuple[Mor, bool]:
+        """Like `after_proj` but using component name instead of projection
+
+        The returned `bool` is True if the target of the projection coincides
+        with the target of the resulting morphism.
+        """
+        target = self.target
+        assert isinstance(target, Product)
+        # Recall that there is no flattening of components that are
+        # themselves instances of `ProductMor`. Therefore, `pos` does not
+        # translate directly to the position of the resulting morphism,
+        # as this morphism may be inside a `ProductMor` component.
+
+        pos = target.name_to_pos(name)
+        i = 0
+        for unpack, mor in self.components:
+            assert pos >= i
+
+            if unpack:
+                t = mor.target
+                assert isinstance(t, Product)
+                i += len(t.components)
+                if pos >= i:
+                    continue
+
+                if isinstance(mor, ProductMor):
+                    res = mor.after_component_name(name)
+                    return res
+
+                return mor, False
+
+            i += 1
+            if pos >= i:
+                continue
+
+            return mor, True
+
+        # If name is not in components the above call to `target.name_to_pos`
+        # will raise a KeyError.
+        assert False
+
+    def component_compose(self, mor: Mor):
+        """Compose each component with `mor`"""
+        def _as_str(d: object):
+            return d if isinstance(d, str) else ''
+
+        pos = 0
+        target = self.target
+        assert isinstance(target, Product)
+        tcomp = target.components
+
+        for unpack, m in self.components:
+            res = m.compose(mor)
+            if unpack:
+                t = m.target
+                assert isinstance(t, Product)
+                length = len(t.components)
+
+                yield tuple(
+                    _as_str(tcomp[i + pos]) for i in range(pos, pos + length)
+                ), res
+
+                pos += length
+            else:
+                yield _as_str(tcomp[pos]), res
 
     @staticmethod
     def _load_consistency(mor_to_eq: dict[Mor, Eq], consistency: Sequence[Eq]):
@@ -603,32 +729,92 @@ class CartComposition(Composition, CartMor):
     The extra condition is the one coming from composition of pairing and
     projection.
     """
-    # TODO: override CartMor.same to handle terminal morphisms.
+    __slots__ = ()
 
-    @staticmethod
-    def _
+    @classmethod
+    def _simplify_proj(cls, pmor: Mor, mor: Mor) -> Mor | tuple[Mor, Mor]:
+        # `pmor` is a morphism with projections such as (f @ a$, g @ b$). When
+        # composing with (a=m, b=n), one normalizes to (f @ m, g @ n).
+        # Composing with a morphism that is not (extensionally) a pairing
+        # cannot lead to normalization, because then the morphism would have to
+        # be duplicated. Something like the naturality of the diagonal would
+        # still be intensional. Normalization (simplification) gets applied
+        # left-associatively. There is no backtracking. Duplication of
+        # projections and identities is allowed. This includes composition and
+        # pairing of projections, which are actually projections of products of
+        # products.
 
-    def __init__(self, target: Obj | Mor, *factors: Mor):
-        super().__init__(target, *factors)
+        # First step is to compose with each component of `pmor`. Next step is
+        # to simplify each resulting component. Since simplification is applied
+        # left-associatively, one only takes the last two factors into account.
+
+        if isinstance(pmor, Composition):
+            if pmor.factors:
+                return cls._simplify_proj(pmor.factors[-1], mor)
+
+            return mor
+
+        if isinstance(pmor, Projection):
+            if isinstance(mor, Projection):
+                return pmor.proj_compose(mor)
+
+            if isinstance(mor, ProductMor):
+                return mor.after_proj(pmor)
+
+            return pmor, mor
+
+        if isinstance(pmor, ProductMor):
+            expensive: set[Mor] = set()
+            params: list[LabeledMor] = []
+            for label, m in pmor.component_compose(mor):
+                # If there is a repeated "expensive" morphism, then don't
+                # simplify. An "expensive" morphism is one that is not a
+                # projection nor a pairing of projections.
+                if not cls._extract_expensive_no_repeat(m, expensive):
+                    return pmor, mor
+
+                params.append((label, m))
+
+            return ProductMor(mor.source, params)
+
+        return pmor, mor
+
+    @classmethod
+    def _extract_expensive_no_repeat(cls, mor: Mor, dst: set[Mor]) -> bool:
+        # As stated above terminal morphisms get excluded from components.
+        if isinstance(mor, Projection):
+            return True
+
+        if isinstance(mor, ProductMor):
+            return all(
+                cls._extract_expensive_no_repeat(m, dst)
+                for _, m in mor.components
+            )
+
+        if mor in dst:
+            return False
+
+        dst.add(mor)
+        return True
+
+    @classmethod
+    def simplify(cls, factors: tuple[Mor, ...]):
+        factor_it = iter(super().simplify(factors))
+        for prev in factor_it:
+            break
+        else:
+            return ()
 
         _factors: list[Mor] = []
-        factor_it = iter(self.factors)
-        for _ in factor_it:
-            break
+        for factor in factor_it:
+            # The resulting morphism (or first morphism) will have the same
+            # target as `prev`.
+            mm = cls._simplify_proj(prev, factor)
+            if isinstance(mm, tuple):
+                p, prev = mm
+                _factors.append(p)
+            else:
+                prev = mm
+        _factors.append(prev)
 
-        # This is wrong in the sense that factor2 may be changed the previous iteration!
-        for factor1, factor2 in zip(self.factors, factor_it):
-            # (f @ a$, g @ b$) @ (a=m, b=n)
-            # becomes (f @ m, g @ n)
-            # (f @ a$, g @ b$) @ p
-            # can't become (f @ a$p, g @ b$p)
-            # The idea is then that if a morphism gets repeated during simplification
-            # then simplification doesn't go through.
-            _is_projs(factor1)
-
-        if len(_factors) == 1:
-            # Before instantiating one must make sure that composing pairings
-            # and projections does not result in single factor.
-            raise ValueError(
-                "Composing projections with pairings gives single factor.",
-            )
+        return _factors

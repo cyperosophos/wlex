@@ -322,7 +322,9 @@ class Mor(metaclass=ABCMeta):
         """
         # There are a few cases where one should (partially) verify the
         # signature, e.g. identity to ensure that being the same implies having
-        # the same signature.
+        # the same signature. This returns False when the signatures don't
+        # coincide even if the sameness comparison is actually nonsensical in
+        # such case.
         return x is self
 
     def __str__(self):
