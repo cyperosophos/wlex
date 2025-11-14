@@ -146,7 +146,7 @@ class Obj(metaclass=ABCMeta):
     __slots__ = ('name',)
     name: str
     defined = True
-    eqs: dict['Obj', list['Eq']] = defaultdict(list)
+    eqs: dict['Obj', list[tuple['Eq', bool]]] = defaultdict(list)
 
     @abstractmethod
     def accepts(self, x: object) -> bool:
@@ -168,16 +168,28 @@ class Obj(metaclass=ABCMeta):
     def failed_eqs(self, x: object):
         """Equalities unfulfilled by `x`
 
-        Notice that this may raise a TargetMismatch, TargetFailure...
+        Notice that this may raise a `TargetInvalid` error due to defensive type
+        checking.
         """
         return [
-            eq for eq in self.eqs[self]
+            eq for eq, _ in self.eqs[self]
             if not eq.verify(x)
         ]
 
-    def require_eq(self, eq: 'Eq'):
+    def failed_public_eqs(self, x: object):
+        """Public equalities unfulfilled by `x`
+
+        "Public" means that the equality is not guaranteed to be fulfilled by
+        aguments of the public interface.
+        """
+        return [
+            eq for eq, public in self.eqs[self]
+            if public and eq.verify(x)
+        ]
+
+    def require_eq(self, eq: 'Eq', public: bool):
         """Associate equality `eq` to `self`"""
-        self.eqs[self].append(eq)
+        self.eqs[self].append((eq, public))
 
     def __str__(self):
         if hasattr(self, 'name'):
@@ -286,7 +298,7 @@ class Mor(metaclass=ABCMeta):
         """Checks `x` against source before evaluation"""
         source = self.source
         if source.accepts(x):
-            failed = source.failed_eqs(x)
+            failed = source.failed_public_eqs(x)
             if failed:
                 raise SourceFailure("Unfulfilled equalities:", x, failed)
             return self.ev(x)
@@ -533,12 +545,14 @@ class PrimEq(Eq):
             return True
         return False
 
-    def define(self):
+    def define(self, public: bool = False):
         """Assume equality `self`"""
         # Trusting the target of a primitive morphism is analogous to not
-        # providing a proof when assuming a primitive equality.
+        # providing a proof when assuming a primitive equality (especially a non
+        # public one).
         if self.defined:
             raise ValueError("Can't redefine primitive equality")
         self._proven = True
+        self.ssource.source.require_eq(self, public)
 
 Cell = Obj | Mor | Eq

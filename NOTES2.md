@@ -136,3 +136,5 @@ the ambient theory, as this would be too complicated (although accomplishable wi
 so they are built on simple functions which take care of type checking the arguments.
 What about the rest of the body of such complicated functions? Just assume the return type is correct.
 No point in doing defensive type checking. The instantiation functions (obj, mor, eq) are also not part of the theory.
+
+private > public > dynamic > defensive
