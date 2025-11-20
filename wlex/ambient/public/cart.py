@@ -1,13 +1,7 @@
 """Private model of `cart` morphisms"""
 from ..private import cart
-from ..cells import Mor, Eq
+from ..cells import Eq
 from . import validate
-
-TerminalMor = cart.TerminalMor
-ObjObj = cart.ObjObj
-Span = cart.Span
-ProductMor = cart.ProductMor
-SpanEq = cart.SpanEq
 
 terminal = cart.terminal
 terminal_mor = cart.terminal_mor
@@ -25,6 +19,11 @@ def pairing(s: cart.Span) -> cart.ProductMor:
     return cart.pairing(s)
 
 def pairing_unique(pm: cart.ProductMor) -> Eq:
-    """Private model of morphism `cart.pairing_unique`"""
+    """Public model of morphism `cart.pairing_unique`"""
     validate(pm, cart.is_product_mor)
     return cart.pairing_unique(pm)
+
+def pairing_eq(se: cart.SpanEq) -> Eq:
+    """Public model of morphism `cart.pairing_eq`"""
+    validate(se, cart.is_span_eq)
+    return cart.pairing_eq(se)

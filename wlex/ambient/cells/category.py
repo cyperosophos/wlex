@@ -45,6 +45,13 @@ class CategoryEq(Eq):
     @override
     def trans(self, g: Eq):
         f = self
+        # If `f` or `g` is ref, avoid creating new `Eq`.
+        if f.ssource.same(f.starget):
+            return g
+
+        if g.ssource.same(g.starget):
+            return f
+
         return Eq(g.ssource, f.starget)
 
     @override

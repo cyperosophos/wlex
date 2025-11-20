@@ -7,6 +7,37 @@ from abc import ABCMeta, abstractmethod
 class Error(Exception):
     """Base class for cell exceptions"""
 
+class Unfit(Error):
+    """Cell is unfit for conversion."""
+
+    def __init__(self, message: str, frm: 'Cell', to: 'Cell'):
+        super().__init__(message)
+        self.frm = frm
+        self.to = to
+
+    def __str__(self):
+        frm = self.frm
+        to = self.to
+        return f"{super().__str__()} {frm=} {to=}"
+
+class ObjUnfit(Unfit):
+    """Object is unfit for conversion."""
+
+class TargetUnfit(ObjUnfit):
+    """Target is unfit for conversion."""
+
+class SourceUnfit(ObjUnfit):
+    """Source is unfit for conversion."""
+
+class MorUnfit(Unfit):
+    """Morphism is unfit for conversion."""
+
+class STargetUnfit(ObjUnfit):
+    """Setoid target is unfit for conversion."""
+
+class SSourceUnfit(ObjUnfit):
+    """Setoid source is unfit for conversion."""
+
 class TargetInvalid(Error):
     """Invalid value for target during morphism evaluation
 
@@ -141,12 +172,21 @@ class Defensive:
         x.stack.append(mor)
         return x
 
+Name = tuple[str, ...]
+
 class Obj(metaclass=ABCMeta):
     """Base class for objects (0-cells)"""
     __slots__ = ('name',)
-    name: str
+    name: Name
     defined = True
     eqs: dict['Obj', list[tuple['Eq', bool]]] = defaultdict(list)
+
+    def conversion(self, obj: 'Obj') -> 'Mor':
+        """Gives morphism that converts `self` into `obj`"""
+        if self.identical(obj):
+            return self.identity()
+
+        raise ObjUnfit("Can't convert", self, obj)
 
     @abstractmethod
     def accepts(self, x: object) -> bool:
@@ -193,11 +233,11 @@ class Obj(metaclass=ABCMeta):
 
     def __str__(self):
         if hasattr(self, 'name'):
-            return self.name
+            return '.'.join(self.name)
         return NotImplemented
 
     def __repr__(self):
-        return f'`type {self!s}`'
+        return f'Obj("{self!s}")'
 
     def __eq__(self, x: object):
         return isinstance(x, Obj) and self.identical(x)
@@ -253,7 +293,6 @@ class PrimObj(Obj):
     theory, to which the primitive objects belong.
     """
     __slots__ = '_accepts', '_same'
-    name: str
     _accepts: Callable[[object], bool]
     _same: Callable[[object, object], bool]
 
@@ -281,11 +320,17 @@ class PrimObj(Obj):
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
     __slots__ = 'name', 'source', 'target'
-    name: str
+    name: Name
     source: Obj
     target: Obj
     defined = True
     defensive = False
+
+    def conversion(self, mor: 'Mor'):
+        """Gives equality that converts `self` into `mor`"""
+        if self.same(mor):
+            return self.ref()
+        raise MorUnfit("Can't be convert", self, mor)
 
     def _defensive_enter(self, x: object):
         return Defensive.enter(x, self)
@@ -341,11 +386,11 @@ class Mor(metaclass=ABCMeta):
 
     def __str__(self):
         if hasattr(self, 'name'):
-            return self.name
+            return '.'.join(self.name)
         return NotImplemented
 
     def __repr__(self):
-        return f'`fn {self!s}: {self.source} -> {self.target}`'
+        return f'Mor("{self!s}: {self.source} -> {self.target}")'
 
     def ref(self) -> 'Eq':
         """Models morphism `category.ref`"""
@@ -449,7 +494,7 @@ class PrimMor(Mor):
 class Eq:
     """Base class for equalities (2-cells)"""
     __slots__ = 'name', 'ssource', 'starget'
-    name: str
+    name: Name
     ssource: Mor
     starget: Mor
     defined = True
@@ -508,11 +553,11 @@ class Eq:
 
     def __str__(self):
         if hasattr(self, 'name'):
-            return self.name
+            return '.'.join(self.name)
         return NotImplemented
 
     def __repr__(self):
-        return f'`eq {self!s}: {self.ssource} == {self.starget}`'
+        return f'Eq("{self!s}: {self.ssource} == {self.starget}")'
 
     def sym(self) -> 'Eq':
         """Models morphism `category.sym`"""
@@ -534,7 +579,6 @@ class PrimEq(Eq):
     which the primitive equalities belong.
     """
     __slots__ = ('_proven',)
-    name: str
     _proven: bool
 
     @property

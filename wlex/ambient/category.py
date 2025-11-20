@@ -1,821 +1,421 @@
-from functools import wraps
-from typing import Any
+"""High level interface to category ambient"""
 from collections.abc import Callable
+from abc import ABCMeta, abstractmethod
+from typing import Any, Self
 
-from .cells import (
-    Obj, Mor, DefMor, HatMor, DefHatMor, Eq,
-    PrimObj, PrimMor, PrimEq, ThesisEq,
-    #MorLike, EqLike, CellLike,
-)
-from ..theory.category import Category as BCategory
+from .cells import Name, Obj, Mor, Eq
+from . import cells
 
-MorLike = Mor | Unsourced | Obj
-EqLike = Eq | Mor | Obj
-CellLike = Obj | MorLike | EqLike
-    
-class Error(Exception):
-    pass
+# class _hat(str):
+#     __slots__ = ()
 
-class Unsourced:
-    __slots__ = ()
+#     def __str__(self):
+#         return f'^{super().__str__()}'
 
-    # There must be a separate class for unsourced projections, etc.
-    def with_source(self, source: Obj) -> 'Mor':
-        raise NotImplementedError
+#     def __repr__(self):
+#         return repr(str(self))
 
-class UnsourcedComp(Unsourced):
-    __slots__ = 'f', 'g', '_comp'
-    # Eval is not supported until converting to Comp.
-    # Conversion to Comp must occur even in the absence of
-    # type checking.
-    f: Mor
-    g: Unsourced
-    _comp: Callable[[Mor, Mor], Comp]
+#     def __eq__(self, v: object):
+#         return super().__eq__(v) and isinstance(v, _hat)
 
-    def __init__(
-            self, f: Mor,
-            g: Unsourced,
-            comp: Callable[[Mor, Mor], Comp],
-        ):
-        self.f = f
-        self.g = g
-        self._comp = comp
+#     def hash(self):
+#         return super().__hash__() + 1
 
-    def with_source(self, source: Obj):
-        # source should always be checked to ba Mor
-        # The full type checking for comp is done here.
-        # To avoid failing so late, one may trying requiring f to be Mor and
-        # precomposing it with g.target.identity. However, the target of g is
-        # not actually determined until a source is set.
-        return self._comp(
-            self.f,
-            self.g.with_source(source),
-        )
-    
-    __str__ = Comp.__str__
+Transformation = Callable[[Obj], Mor]
+MorLike = Mor | Obj | Transformation
 
-    def __repr__(self):
-        return f'`unsourced_comp {self!s}`'
+class _TransformationWrapper:
+    __slots__ = ('func',)
 
-class UnsourcedId(Unsourced):
-    __slots__ = ()
-    # TODO: Recall that pairing can be made out of unsourced components.
-    def with_source(self, source: Obj):
-        return source.identity()
-    
+    def __init__(self, func: Transformation):
+        self.func = func
+
+    def __call__(self, source: Obj):
+        return self.func(source)
+
     def __str__(self):
-        return 'id'
-    
+        return self.func.__name__
+
     def __repr__(self):
-        return '`unsourced_id`'
+        return f'Transformation("{self!s}")'
 
-#CellMapping = dict[str, Union[CellLike, 'CellMapping']]
-Theory = dict[str, 'CellsLike']
-CellsLike = CellLike | Theory
+def transformation(func: Transformation):
+    """Transformation decorator
 
-#Nat = tuple[()] | tuple['Nat']
-#zero: Nat = ()
-#def succ(n: Nat) -> Nat: return (n,)
+    A transformation allows obtaining a morphism from an object, which becomes
+    the source of the resulting morphism).
+    """
+    return _TransformationWrapper(func)
+
+# def get_cell[T: cells.Cell](
+#     cell_cls: type[T], theory: Theory, name: str,
+# ) -> T | None:
+#     if name in theory:
+#         value = theory[name]
+#         if isinstance(value, cell_cls):
+#             return value
+
+#         raise TypeError(
+#             "Found value of wrong type in base theory (expected "
+#             "`{cell_cls.__name__}`)",
+#         )
+#     return None
+
+# def get_sub(theory: Theory, name: str, ):
+#     if name in theory:
+#         value = theory[name]
+#         if isinstance(value, dict):
+#             return value
+
+#         raise TypeError(
+#             "Found value of wrong type in base theory (expected `Theory`).",
+#         )
+#     return None
+
+# def _make_mor(name: Name, source: Mor | Obj, target: Mor | Obj):
+#     if isinstance(source, Obj):
+#         if isinstance(target, Obj):
+#             res = PrimMor(source, target)
+#             hat = None
+#         else:
+#             res = PrimMor(source, target.source)
+#             hat = PrimEq(source.identity(), target.compose(res))
+#     else:
+#         if isinstance(target, Obj):
+#             # Object `target` is disallowed here, because it would have the same
+#             # effect as setting the value of the morphism being created to
+#             # `source`.
+#             raise TypeError(
+#                 "If `source` is morphism, then so must be `target`.",
+#             )
+#         else:
+#             res = PrimMor(source.source, target.source)
+#             hat = PrimEq(source, target.compose(res))
+
+#     res.name = name
+#     if hat:
+#         hat.name = (*name, _hat(name[-1]))
+
+#     return res, hat
+
+# def _make_eq(name: Name, ssource: MorLike, starget: MorLike):
+#     ssource, starget = (
+#         m.identity() if isinstance(m, Obj) else m
+#         for m in (ssource, starget)
+#     )
+
+#     if isinstance(ssource, Mor):
+#         if isinstance(starget, Mor):
+#             res = PrimEq(ssource, starget)
+#         else:
+#             res = PrimEq(ssource, starget(ssource.source))
+#     else:
+#         if isinstance(starget, Mor):
+#             res = PrimEq(ssource(starget.source), starget)
+#         else:
+#             raise TypeError(
+#                 "At least one of `ssource` and `starget` must be of type `Mor`."
+#             )
+
+#     res.name = name
+#     return res
 
 
-# def _split_mapped(
-#         mapped: dict[str, CellLike | CellMapping],
-#     ) -> tuple[
-#         dict[str, CellLike],
-#         dict[str, CellMapping],
-#     ]:
-#     # One must still distinguish a missing cell from a cell of the wrong
-#     # type in obj, mor, etc.
-#     # TODO: Check the type of cell in obj.
-#     mapped_cell: dict[str, CellLike] = dict()
-#     mapped_sub: dict[str, CellMapping] = dict()
-#     # TODO: Having mapped_sub names not in the codomain should raise a TypeError.
+def _fit_mor(source: Obj, target: Obj, cell: Mor):
+    # Subclasses of `Obj` can support specific type conversions. Handling of
+    # transformations occurs before this (in which case no fitting is
+    # needed).
+    try:
+        sconv = source.conversion(cell.source)
+    except cells.ObjUnfit as err:
+        raise cells.SourceUnfit("Can't convert", err.frm, err.to) from err
 
-#     for name, value in mapped.items():
-#         if isinstance(value, CellLike):
-#             ass
+    try:
+        tconv = cell.target.conversion(target)
+    except cells.ObjUnfit as err:
+        raise cells.TargetUnfit("Can't convert", err.frm, err.to) from err
 
+    # This will be just `cell` when `tconv` as `sconv` are identities.
+    return tconv.compose(cell).compose(sconv)
 
-# class Path(NamedTuple):
-#     f: Eq
-#     g: Eq
+def _signature_with_hat(source: Obj | Mor, target: Obj | Mor):
+    if isinstance(source, Obj):
+        if isinstance(target, Obj):
+            return (source, target), None
 
-# class Composable(NamedTuple):
-#     f: Mor
-#     g: Mor
-Path = tuple[Eq, Eq]
-Composable = tuple[Mor, Mor]
-ComposableEq = tuple[Eq, Eq]
-UniqueSource = tuple[Eq, Eq]
-AssociativitySource = tuple[Mor, Mor, Mor]
+        return (source, target.source), (source.identity(), target)
 
-# class ComposableEq(NamedTuple):
-#     d: Eq
-#     e: Eq
+    if isinstance(target, Obj):
+        # Object `target` is disallowed here, because it would have the same
+        # effect as setting the value of the morphism being created to
+        # `source`.
+        raise TypeError(
+            "If `source` is morphism, then so must be `target`.",
+        )
 
-# class UniqueSource(NamedTuple):
-#     d: Eq
-#     e: Eq
+    return (source.source, target.source), (source, target)
 
-# class AssociativitySource(NamedTuple):
-#     f: Mor
-#     g: Mor
-#     h: Mor
+def _fit_eq(ssource: 'Mor', starget: 'Mor', cell: Eq):
+    prev_err = None
+    for i in range(2):
+        try:
+            try:
+                sconv = ssource.conversion(cell.ssource)
+            except cells.MorUnfit as err:
+                raise cells.SSourceUnfit("Can't convert", err.frm, err.to) from err
 
-def variadic(m: Callable[[Any, Any, Any], Any]):
-    # This doesn't handle nullary.
-    @wraps(m)
-    def wrapper(self: Any, head: Any, *tail: Any):
-        if not tail:
-            return head
-        return m(self, head, wrapper(*tail))
-    return wrapper
+            try:
+                tconv = cell.starget.conversion(starget)
+            except cells.MorUnfit as err:
+                raise cells.STargetUnfit("Can't convert", err.frm, err.to) from err
+        except cells.MorUnfit as err:
+            if i == 0:
+                cell = cell.sym()
+                prev_err = err
+                continue
 
-#def unchecked_eval
-# Python static type checking handles all type checking up until Cart.
-# Actual checking is needed starting with backend Lex (as used by
-# Composable in Category.t_compose). This means that one should preserve
-# static type checking for the backend type checking, and make the latter
-# only handle checking beyond Cart (Lex, etc.).
-# One has to follow an all or nothing approach. It is too complicated
-# to use the backend only for certain type checking while keeping the
-# static type checking. One has a class PartiallyCheckedCategory,
-# where checked means dynamically checked.
-# Category, CheckedCategory, DynamicCategory.
-# If Cart type checking end up being handled ad hoc, then so does the
-# # remaining type checking.
+            raise err from prev_err
 
-# def _isinstance_Theory(value: object):
-#     if isinstance(value, dict):
-#         for k, v in value.items(): # type: ignore
-#             assert(isinstance(v, object))
-#             if isinstance(k, str) and _isinstance_CellsLike(v):
-#                 continue
-#             return False
-#         return True
-#     return False
+        return tconv.trans(cell).trans(sconv)
 
-# def _isinstance_CellsLike(value: object):
-#     return isinstance(value, CellLike) or _isinstance_Theory(value)
+    assert False
 
-class Category:
-    #id = UnsourcedId()
-    theory: Theory
-    _base: Theory
-    name: str
+def one[T](*args: T | None) -> T:
+    """Returns the unique argument that is not None"""
+    res: T | None = None
+    for a in args:
+        if a is not None:
+            if res is None:
+                res = a
+            elif res is not a:
+                raise ValueError("More than one value was provided.")
 
-    def __init__(
-            self, name: str = '',
-            base: Theory | None = None,
-            #submapped: dict[str, dict[str, object]] | None = None,
-            #_theory_clss: tuple[type, ...] | None = None,
-        ):
-        # The point of this would be to allow type checking on the overriding
-        # methods of CheckedCategory. This seems to not be needed.
-        # see e.g. f.source, g.target. Here type checking would be
-        # superfluous as one has already checked that (f, g) is Composable.
-        #self.hat_mor_cls = HatMor.cls_with_id_comp(self.identity, self.t_compose)
-        super().__setattr__('_base', base or dict())
-        super().__setattr__('name', name)
-        super().__setattr__('theory', dict())
+    if res is None:
+        raise ValueError("No value was provided.")
 
-    def __getattr__(self, name: str) -> CellsLike:
-        # Shorcut for accessing theory
-        return self.theory[name]
-    
-    def __setattr__(self, name: str, value: CellsLike):
-        #if _isinstance_CellsLike(value):
-        #    assert(isinstance(value, CellLike | dict))
-        self.theory[name] = value
-        #raise TypeError
-        
+    return res
 
-    # @classmethod
-    # def with_kw(
-    #         cls, theory: object, name: str,
-    #         kw: dict[str, object],
-    #         subkw: dict[str, dict[str, object]],
-    #         theory_clss: tuple[type, ...],
-    #     ):
-    #     # This needs to handle kw used by sub at lower levels.
-    #     # e.g. S.P.Q in line 35 of theory/category.py.
-    #     # TODO: An important goal is to be able to define monads,
-    #     # hence natural transformations. This requires making mor
-    #     # support self and self.T within the __init__ of the theory
-    #     # as if they were functors.
-    #     # Inheritance requires this to be a classmethod.
+class Theory(metaclass=ABCMeta):
+    """Base class for theories"""
 
-    #     return cls(theory, name, kw, subkw, theory_clss)
+    @abstractmethod
+    def with_base(self, base: Any) -> Self:
+        """Combine `self` and `base`"""
 
-    def obj(self, name: str):
-        theory = self.theory
-        if name in self._base:
-            value = self._base[name]
-            if isinstance(value, Obj):
-                theory[name] = value
-            else:
-                raise TypeError
-        else:
-            theory[name] = PrimObj(self.cell_name(name))
+    @abstractmethod
+    @classmethod
+    def from_prim(cls, ctx: 'Context', prim: Any) -> Self:
+        """Create theory from primitives"""
+        # Some rules must be followed in the implementation, which are not
+        # enforced through code. Attributes of `prim` must be used exactly once
+        # to define variables of the same name. These variables must then be
+        # used instead of accessing the attributes.
+
+# TODO: primitives can't be changed through conversion!
+
+class Context:
+    """Provides methods for naming cells of a theory"""
+    __slots__ = ('name_stack',)
+    name_stack: tuple[str, ...]
+
+    def __init__(self):
+        self.name_stack = ()
+
+    def with_name(self, name: str):
+        """Copy of `self` with name added to its `name_stack`"""
+        ctx = Context()
+        ctx.name_stack = (*self.name_stack, name)
+        return ctx
+
+    def sub[T: Theory](
+        self, name: str, theory: type[T], prim: T | None,
+        base: T | None = None,
+    ):
+        """Sets name on subtheory"""
+        if not prim:
+            raise ValueError(f"Missing primitives for {theory.__name__}")
+
+        if base:
+            prim = prim.with_base(base)
+
+        # There is checking for keeping attributes of `prim` from remaining
+        # unused. Also, checking that the resulting theory has no empty
+        # attributes.
+        return theory.from_prim(self.with_name(name), prim)
+
+    def _set_name(self, name: str, cell: cells.Cell):
+        if not hasattr(cell, 'name'):
+            cell.name = (*self.name_stack, name)
+
+    def obj(self, name: str, cell: Obj | None):
+        """Sets name on object"""
+        if not cell:
+            raise ValueError(f'Missing cell "{name}"')
+
+        self._set_name(name, cell)
+        return cell
 
     def mor(
-            self, name: str,
-            source: Mor | Obj,
-            target: Mor | Obj,
-            value: MorLike | None = None,
-            proof: EqLike | None = None
-        ):
-        # Morphisms with value can't be overridden by kw.
-        # sub corresponds to a functor, so saying f = g h
-        # and then F(f) = k is backwards, because F(f) is already
-        # defined as F(g) F(h).
-        # One checks the signature (source, target args).
-        # In the case of HatMor, one must also check the hat.
-        # This does not mean that one should also handle value and proof.
-        # The overridden mor keeps its name (this is different from Obj)
-        # it simply gets replaced by a DefMor or DefHatMor with the
-        # overriding mor as value.
-        theory = self.theory
-        #print(self, source, target, value, proof)
-        if name in self._base:
-            if value or proof:
-                raise ValueError
-            # The purpose of setting the value indirectly is to check signature.
-            _value = self._base[name]
-            if isinstance(_value, MorLike):
-                value = _value
-            else:
-                raise TypeError
+        self, name: str, cell: MorLike | None,
+        signature: tuple[Obj, Obj] | None = None,
+    ):
+        """Sets name on morphism and checks signature"""
+        if not cell:
+            raise ValueError(f'Missing cell "{name}"')
 
-        #print(value, self.kw)
-        if isinstance(source, Obj) and isinstance(target, Obj):
-            if proof:
-                raise ValueError
-            if value:
-                theory[name] = DefMor(
-                    self.cell_name(name),
-                    source, target, value,
-                )
-            else:
-                theory[name] = PrimMor(
-                    self.cell_name(name),
-                    source, target,
-                )
-        elif value:
-            #print(value)
-            if not proof:
-                if isinstance(value, Mor):
-                    proof = value.hat
-            if proof:
-                theory[name] = DefHatMor(
-                    self.cell_name(name),
-                    source, target, value, proof,
-                )
-        else:
-            if proof:
-                raise ValueError
+        if isinstance(cell, Obj):
+            cell = cell.identity()
 
-            # HatMor.unfold_source_target handles the remaining type checking.
-            theory[name] = HatMor(
-                self.cell_name(name),
-                source, target,
+        if not signature:
+            # Here `cell` can't be a transformation. A composition with
+            # transformation can only be checked after providing a source.
+            # For this and other reasons, it makes sense to not make
+            # transformation part of the theory the way morphisms are.
+            if isinstance(cell, Callable):
+                raise TypeError(
+                    "If `cell` is transformation, signature is needed.",
+                )
+
+            self._set_name(name, cell)
+            return cell
+
+        source, target = signature
+
+        if isinstance(cell, Callable):
+            cell = cell(source)
+
+        cell = _fit_mor(source, target, cell)
+        self._set_name(name, cell)
+        return cell
+
+    def hat_mor(
+        self, name: str, cell: MorLike | None,
+        signature: tuple[Obj | Mor, Obj | Mor],
+    ):
+        """Sets name on morphism and checks signature"""
+        if not cell:
+            raise ValueError(f'Missing cell "{name}"')
+
+        if isinstance(cell, Obj):
+            cell = cell.identity()
+
+        (source, target), hat_signature = _signature_with_hat(*signature)
+
+        if isinstance(cell, Callable):
+            cell = cell(source)
+
+        cell = _fit_mor(source, target, cell)
+
+        if not hat_signature:
+            raise TypeError("Signature must contain at least one morphism.")
+
+        hat_source, hat_target = hat_signature
+
+        def _hat(c: cells.Cell):
+            # We defer assigning hat, because we may end up needing cell in its
+            # definition.
+            return self.eq(
+                f'^{name}', c, (hat_source, hat_target.compose(cell)),
             )
 
+        self._set_name(name, cell)
+        return cell, _hat
+
     def eq(
-            self, name: str,
-            ssource: MorLike,
-            starget: MorLike,
-            proof: EqLike | None = None,
-        ):
-        theory = self.theory
-        if name in self._base:
-            if proof:
-                raise ValueError
-            _proof = self._base[name]
-            if isinstance(_proof, EqLike):
-                proof = _proof
-            else:
-                raise TypeError
+        self, name: str, cell: cells.Cell | None,
+        ssignature: tuple[MorLike, MorLike] | None = None,
+    ):
+        """Sets name on equality and checks signature"""
+        # There is no point in providing a `signature` besides the `ssignature`.
+        # Is `ssource` and `starget` have to be made to fit, then `cell` must
+        # also be modified. However, `cell.ssource` and `cell.starget` are
+        # already aligned, and making `ssource` and `starget` be aligned would
+        # be the main purpose of `signature`. One would be more interested in
+        # making `ssource` match `cell.ssource` and `starget` match
+        # `cell.starget`. Doing composition (besides transitivity) for
+        # accomplishing this is overkill.
+        if not cell:
+            raise ValueError(f'Missing cell "{name}"')
+
+        if isinstance(cell, Obj):
+            cell = cell.identity()
+
+        if isinstance(cell, Mor):
+            cell = cell.ref()
+
+        if not ssignature:
+            self._set_name(name, cell)
+            return cell
+
+        ssource, starget = ssignature
 
         ssource, starget = (
             m.identity() if isinstance(m, Obj) else m
             for m in (ssource, starget)
         )
-        
-        if isinstance(ssource, Unsourced):
-            if isinstance(starget, Unsourced):
-                raise Error
-            #if not isinstance(starget, Mor):
-            #    raise TypeError
-            ssource = ssource.with_source(starget.source)
-        elif isinstance(starget, Unsourced):
-            #if not isinstance(ssource, Mor):
-            #    raise TypeError
-            starget = starget.with_source(ssource.source)
-        #elif not (isinstance(ssource, Mor) and isinstance(starget, Mor)):
-        #    raise TypeError
 
-        if isinstance(proof, Obj):
-            proof = proof.identity()
-        if isinstance(proof, Mor):
-            proof = proof.ref()
-        
-        # Eq.__eq__ in Eq.__init__ checks that proof is of type Eq or None.
-        if proof:
-            theory[name] = ThesisEq(
-                self.cell_name(name),
-                ssource, starget,
-                proof
-            )
+        if isinstance(ssource, Mor):
+            if not isinstance(starget, Mor):
+                starget = starget(ssource.source)
+        elif isinstance(starget, Mor):
+            ssource = ssource(starget.source)
         else:
-            theory[name] = PrimEq(
-                self.cell_name(name),
-                ssource, starget,
+            raise TypeError(
+                "When no signature is provided, at least one of `ssource` "
+                "and `starget` must be a morphism.",
             )
 
-    def final(self):
-        theory = self.theory
-        for name in self._base:
-            if name not in theory:
-                raise ValueError
-        return theory
+        cell = _fit_eq(ssource, starget, cell)
+        self._set_name(name, cell)
+        return cell
 
-    def sub(
-            self, name: str,
-            mk_theory: Callable[['Category'], Theory],
-            **base: CellsLike,
-        ):
-        # If both self.subkw and kw override cells then an error
-        # occurs, because what should have happened is that the overriding
-        # cell got overridden. This applies to subkw as well.
-        # kw gets separated into kw and subkw.
-        # subkw is a dict with kw values used for the sub's
-        # within the sub.
-        # Only cells with no value (atomic cells) can be overridden.
-        # These cells are created and set using obj, mor, eq, sub,
-        # hence these methods handle the process of overriding.
-        # Is it possible to have values in base that don't override anything? No.
-        theory = self.theory
-        if name in self._base:
-            _base = self._base[name]
-            if isinstance(_base, dict):
-                # Only override missing components.
-                # This will handle overriding the whole theory with
-                # a theory instance, since theory instances are dict.
-                for _name, value in _base.items():
-                    if _name in base:
-                        raise ValueError
-                    base[_name] = value
-            else:
-                raise TypeError
-        
-        theory[name] = mk_theory(Category(self.cell_name(name), base))
+#class _HatAccessor
 
-        # Avoid circular class instantiation
-        # theory_clss: tuple[type, ...] = (*self._theory_clss, type(theory))
-        # for tc in theory_clss:
-        #     if mk_theory is tc:
-        #         raise Error
-        # subname = self.cell_name(name)
-        # setattr(
-        #     theory, name,
-        #     # TODO: Why not use Category instead of self.with_kw?
-        #     # TODO: Check if this should be simplified further since
-        #     # subs can be created without lazy instantiation. Probably not. 
-        #     theory_cls(lambda th: self.with_kw(th, subname, kw, subkw, theory_clss)),
-        # )
+# TODO: Just as one applies conversions for fitting morphisms,
+# one uses sym for fitting equalities.
+# TODO: When creating PrimEq conversions can be used for fitting
+# ssource and starget. In fact it seems object conversions can be
+# used everywhere transformations are used.
 
-    def cell_name(self, name: str):
-        if not self.name:
-            return name
-        return f'{self.name}.{name}'
+# class Category:
+#     theory: Theory
+#     _base: Theory
+#     name: Name
 
-    @staticmethod
-    def source(mor: Mor) -> Obj:
-        return mor.source
-    
-    @staticmethod
-    def target(mor: Mor) -> Obj:
-        return mor.target
+#     def __init__(self, name: Name = (), base: Theory | None = None):
+#         super().__setattr__('_base', base or {})
+#         super().__setattr__('name', name)
+#         super().__setattr__('theory', {})
 
-    @staticmethod
-    def t_compose(c: Composable) -> Mor:
-        # Theoretical compose
-        f, g = c
-        return f.compose(g)
-        
-    @staticmethod
-    def identity(obj: Obj) -> Mor:
-        return obj.identity()
-    
-    @staticmethod
-    def ssource(eq: Eq) -> Mor:
-        return eq.ssource
-    
-    @staticmethod
-    def starget(eq: Eq) -> Mor:
-        return eq.starget
-    
-    @staticmethod
-    def ref(mor: Mor) -> Eq:
-        return mor.ref()
-    
-    @staticmethod
-    def t_trans(p: Path) -> Eq:
-        f, g = p
-        return f.trans(g)
+#     def __getattr__(self, name: str) -> CellLike:
+#         return self.theory[name]
 
-    @staticmethod
-    def eq_unique(s: UniqueSource) -> Eq:
-        d, _ = s
-        return d
-    
-    @staticmethod
-    def sym(eq: Eq) -> Eq:
-        return eq
-    
-    @staticmethod
-    def associativity(s: AssociativitySource) -> Eq:
-        f, g, h = s
-        # Type checking s and return value is enough.
-        return f.compose(g).compose(h).ref()
-    
-    @staticmethod
-    def compose_eq(c: ComposableEq) -> Eq:
-        d, e = c
-        return d.compose_eq(e)
-        
-    def _compose(
-        self,
-        f: Mor | Unsourced | Eq | Obj,
-        g: Mor | Unsourced | Eq | Obj,
-    ) -> Mor | Unsourced | Eq:
-        # No further type checking is or should be needed here.
-        # Being Composable is the only requirement available for
-        # type checking at the lang level. Being Composable means
-        # having f, g of type Mor with the equality of source and target
-        # (as checked by the Lex backend).
-        # This should work like syntax sugar with respect to e.g.
-        # composing a Mor and an Obj, etc. Hence calls like
-        # ref, ssource, target identity, etc. should all support
-        # backend type checking. The would support backend type checking
-        # if t_compose, t_compose_eq where manually used.
-        # The question arrises here about the separation between
-        # type checking and evaluation (compilation time vs
-        # execution time). Composing f and g does not evaluate
-        # either funciton, but requires making sure (f, g) is
-        # Composable. In this sense one is doing type checking
-        # on f, but also on the metafunction `compose`,
-        # so that at the meta level one combines type checking
-        # and execution. Backend methods (source, target,
-        # compose, etc.) handle type checking during execution.
-        # They lack static type checking.
+#     def __setattr__(self, name: str, value: CellLike):
+#         if name in self.theory:
+#             old = self.theory[name]
+#             if isinstance(value, cells.Cell):
+#                 if not isinstance(old, PrimObj | PrimMor | PrimEq):
+#                     raise TypeError("Can't override")
 
-        def comp(u: Mor, v: Mor):
-            u = u.weaken(v.target)
-            return self.t_compose((u, v))
-        
-        def comp_eq(u: Eq, v: Eq):
-            u = u.weaken(v.ssource.target)
-            # This will type check g to be Eq.
-            return self.compose_eq((u, v))
+#                 # TODO: What about assigning prim to prim, etc.
+#                 value = old.fit_signature(value)
 
-        f, g = (
-            m.identity() if isinstance(m, Obj) else m
-            for m in (f, g)
-        )
+#                 if not hasattr(value, 'name'):
+#                     value.name = old.name
+#             else: # sub ...
+#                 pass
 
-        # Unsourced, Eq comp is allowed but not Eq, Unsourced. 
-        if isinstance(g, Unsourced):
-            if isinstance(f, Eq):
-                # For consistency, there is no UnsourcedCompEq.
-                # We'd have to compose with the ref of Unsourced,
-                # which is an equality of Unsourced and therefore
-                # not allowed.
-                raise Error
-            
-            # amb.t_compose backend type checking would ensure that
-            # f is Mor. We check that here for consistency with the
-            # next block and to fail earlier.
-            if not isinstance(f, Mor):
-                raise TypeError
-            return UnsourcedComp(f, g, comp)
+#         self.theory[name] = value
 
-        if isinstance(f, Unsourced):
-            if isinstance(g, Eq):
-                # No checking needed with ref
-                s = g.ssource.target
-                f = f.with_source(s).ref()
-                return self.compose_eq((f, g))
-            if not isinstance(g, Mor):
-                raise TypeError
-            f = f.with_source(g.target)
-            return self.t_compose((f, g))
+    #eq(<name>=<signature>)
 
-        if isinstance(f, Eq):
-            if isinstance(g, Mor):
-                g = g.ref()
-            return comp_eq(f, g)
-        
-        if isinstance(g, Eq):
-            f = f.ref()
-            return comp_eq(f, g)
-        
-        return comp(f, g)
-
-    def _trans(self, f: Eq | Mor | Obj, g: Eq | Mor | Obj) -> Eq:
-        # Handle identity
-        f, g = (
-            m.identity().ref() if isinstance(m, Obj) else
-            (m.ref() if isinstance(m, Mor) else m)
-            for m in (f, g)
-        )
-        return self.t_trans((f, g))
-        
-    compose = variadic(_compose)
-    trans = variadic(_trans)
-
-class CheckedCategory:
-    # TODO: Type annotate as Callable?
-    unchecked_cls = Category
-    backend: BCategory
-    unchecked: Category
-
-    @staticmethod
-    def check_obj(x: object) -> bool:
-        return isinstance(x, Obj)
-    
-    @staticmethod
-    def check_mor(x: object) -> bool:
-        return isinstance(x, Mor)
-    
-    @staticmethod
-    def check_eq(x: object) -> bool:
-        return isinstance(x, Eq)
-
-    def __init__(
-            self, theory: object,
-            backend: BCategory, 
-            kw: dict[str, object] | None = None,
-            subkw: dict[str, dict[str, object]] | None = None,
-            theory_clss: tuple[type, ...] | None = None,
-        ):
-        # Notice that type checking only needs to be done the first
-        # time theory_cls is instantiated when there is no sub overriding.
-        self.unchecked = self.unchecked_cls(
-            theory,
-            kw=kw, subkw=subkw,
-            theory_clss=theory_clss,
-        )
-        self.backend = backend
-        self.id = self.unchecked.id
-        self.weakened = self.unchecked.weakened
-
-    def set_semantics(self, backend: BCategory):
-        u = self.unchecked
-        # The backend provides only structure, no semantics.
-        # backend Category is based on ambient Lex.
-        # This means some of the set_check, set_eval and assume
-        # is already implemented, e.g. Composable, eq, etc.
-        # It makes sense then to disallow set_check, set_eval and
-        # assume from the non atomic cells.
-        #Obj().set_check(u.check_obj)
-        Mor(Obj(), Obj()).set_eval(
-            u.source # type: ignore
-        )
-        backend.Obj.set_check(u.check_obj)
-        backend.Mor.set_check(u.check_mor)
-        backend.Eq.set_check(u.check_eq)
-        backend.source.set_eval(u.source)
-        backend.target.set_eval(u.target)
-        backend.compose.set_eval(u.t_compose)
-        backend.identity.set_eval(u.identity)
-        backend.S.source.set_eval(u.ssource)
-        backend.S.target.set_eval(u.starget)
-        backend.Q.source_globular_cond.assume()
-        backend.Q.target_globular_cond.assume()
-        #backend.Composable.set_check(u.check_composable)
-        #backend.S.S.P.Path.set_check(u.check_path)
-        backend.S.S.P.ref.set_eval(u.ref)
-        backend.S.S.P.trans.set_eval(u.t_trans)
-        backend.left_identity_law.set_eval(u.ref)
-        backend.right_identity_law.set_eval(u.ref)
-        backend.associativity.set_eval(u.associativity)
-        backend.S.S.sym.set_eval(u.sym)
-        #backend.S.unique.source.set_check(u.check_eq_unique_source)
-        backend.S.unique.set_eval(u.eq_unique)
-        backend.compose_eq.set_eval(u.compose_eq)
-
-        # TODO: Should there be a way to check that the whole backend
-        # has semantics, i.e. set_check, set_eval and assume has been
-        # called on all atomic cells.
-
-    def with_kw(self, theory, name, kw, subkw, theory_clss):
-        return CheckedCategory(theory, self.backend, name, kw, subkw, theory_clss)
-
-    def source(self, x):
-        return self.backend.source.eval(x)
-    
-    def target(self, x):
-        return self.backend.target.eval(x)
-    
-    def t_compose(self, x):
-        return self.backend.compose.eval(x)
-        
-    def identity(self, x):
-        return self.backend.identity.eval(x)
-    
-    def ssource(self, x):
-        return self.backend.S.source.eval(x)
-    
-    def starget(self, x):
-        return self.backend.S.target.eval(x)
-    
-    def ref(self, x):
-        return self.backend.S.S.P.ref.eval(x)
-    
-    def t_trans(self, x):
-        return self.backend.S.S.P.trans.eval(x)
-    
-    def left_identity_law(self, x):
-        return self.backend.left_identity_law.eval(x)
-    
-    def right_identity_law(self, x):
-        return self.backend.right_identity_law.eval(x)
-    
-    def associativity(self, x):
-        return self.backend.associativity.eval(x)
-    
-    def sym(self, x):
-        return self.backend.S.S.sym.eval(x)
-    
-    def unique(self, x):
-        return self.backend.S.unique.eval(x)
-    
-    def compose_eq(self, x):
-        return self.backend.compose_eq.eval(x)
-        
-    #def with_kw(self, kw, subkw):
-    #    return self.unchecked.with_kw(kw, subkw)
-    
-    def obj(self, name):
-        self.unchecked.obj(name)
-    
-    def mor(
-            self, name,
-            source: Mor | Obj,
-            target: Mor | Obj,
-            value: Mor | Unsourced | Obj | None = None,
-            proof: Eq | Mor | Obj | None = None
-        ):
-        self.unchecked.mor(name, source, target, value, proof)
-        theory = self.unchecked.theory
-        _mor: Mor = getattr(theory, name)
-        # Checking needs to occur after, since the actual mor might come
-        # from kw.
-        BObj = self.backend.Obj
-        BMor = self.backend.Mor
-        source = _mor.source
-        target = _mor.target
-        # Redundant but consistent. This checks the signatures of source and target.
-        BMor.check(_mor)
-        BObj.check(source)
-        BObj.check(target)            
-
-    def eq(
-            self, name,
-            ssource: Mor | Unsourced | Obj,
-            starget: Mor | Unsourced | Obj,
-            proof: Eq | Mor | Obj | None = None,
-        ):
-        self.unchecked.eq(name, ssource, starget, proof)
-        theory = self.unchecked.theory
-        _eq: Eq = getattr(theory, name)
-        BMor = self.backend.Mor
-        BEq = self.backend.Eq
-        BEq.check(_eq)
-        BMor.check(_eq.ssource)
-        BMor.check(_eq.starget)
-        scond = self.backend.Q.source_globular_cond
-        tcond = self.backend.Q.target_globular_cond
-        scond.verify(_eq)
-        tcond.verify(_eq)
-
-    def sub(self, name, theory_cls, **kw):
-        # TODO: Does this work?!!
-        self.unchecked.sub(name, theory_cls, **kw)
-
-    compose = variadic(Category._compose)
-    trans = variadic(Category._trans)
-    
-# When checking e.g. Composable, it is often enough to just
-# verify the equality, as applying the morphisms will check
-# the source (so one does not need to check that the components
-# are actually of type Mor).
-
-# What about inductive type quiver?
-# Allow it implicitly. Recursive function is defined as copair.
-# This is especially required for monads.
-
-# class N(wlex.Quiver):
-#     Zero = _()
-#     Succ = _('N')
-
-# def Monad(C):
-#     class D(wlex.Quiver): # or wlex.WLex?
-#         T = _(C)
-#         unit = _(_ >> T)
-#         mul = _(T.T >> T)
-#         left_unit = _(mul @ unit.T == T)
-#         right_unit = _(mul @ T.unit == T)
-#         assoc = _(mul @ mul.T == mul @ T.mul)
-#     return D
-
-# class C(wlex.Quiver):
-#     M = own(Monad('C')) # so that M.T.T or _.T.T can be written instead of M.T.M.T
-
-# spec Nat;
-# type Zero;
-# type Succ <- Nat;
-
-# spec C;
-# type T <- C;
-# fn unit: C -> T;
-# fn mul: T.T -> T;
-# eq left_unit: mul @ unit.T == T;
-# eq right_unit: mul @ T.unit == T;
-# eq assoc: mul @ mul.T == mul @ T.mul;
-
-# Monads and functors may be handled through special composition,
-# e.g. by extending a string and by applying mul implicitly.
-# The latter is an implicit type conversion. This is implicit
-# at the language level but not at the theory level.
-# f (x1, x2) when f is unary is an example of extending the string,
-# namely the diagonal functor.
-
-# Remaining questions re functors
-# What's the use of natural transformations for inclusion functors.
-# Nat trans must be monoidal when functors are monoidal. It seems.
-# It seems the domain of an inclusion must be cartesian in order to
-# allow functions f: X x Y -> Z, etc.
-# Think of imports and interfaces.
-
-# spec Program;
-# type M <- Main with
-#   main = print "Hello World!";
-
-# face Main {
-#   fn main: IO[()];
-# }
-
-# type Program: Main {
-#   main = print "Hello World!";
-# }
-
-# type F: World -> World = (x: _, y: Y);
-
-# All functors must be defined (they can be treated as macros).
-# The builtin functors are the structure of World (including IO
-# and the builtin data types). The problem with these functors
-# (in contrast with the ones with limit domain) is that it's not
-# automatically clear what the action on morphisms would be.
-
-# Skip nat trans for inclusion functors!
-
-# Interface as type of argument.
-
-# face C {
-#   type X :> World;
-#   fn f: X -> String;
-# }
-
-# fn g: C$X -> String = C$f
-
-# type Y: C {
-#   X = String;
-#   f = String;
-# }
-
-# g[Y] # = C$f[Y]
-
-# Recall nat trans defs where X gets assigned a mor,
-# and f an eq, etc.
-
-# fn h: Y -> Z {
-#   X = p;
-#   f = e;
-# }
-
-# TODO: Canonical inclusion is a way to skip the `with` assignments.
-# All canonical inclusions (even indirect through non canonical)
-# coincide. The `with` assignments can only occur in the first
-# inclusion. Handle canonical inclusion at the syntax level?
-# Should inclusion of categories with ambient lex be canonical?
-
-# Notice that assignment on the whole inclusion is not supported,
-# except within the `with` block of an encompassing inclusion.
-
-# There are no endoinclusions, and endofunctors such as monads arise
-# from the structure of the category (even if axiomatically).
-# What sub should handle is not lazy attribute access but avoiding
-# self-reference by keeping a stack of classes.
+# Make all primitive cells function parameters.
+# Instead of PrimMor, implement classes with special eval, etc.
+# No lazy sub creation, so no need to explicitly avoid loops.
+# In wlex syntax signature is required to occur before invocation.
+# Definition can occur after invocation.
+# In python definition occurs along with signature.
+# Primitives get defined by assigning param.
+# Category operations (ambient) are defined globally (even if dynamic),
+# not as methods.
+# There can be a context class for cart which supports method el besides method mor.

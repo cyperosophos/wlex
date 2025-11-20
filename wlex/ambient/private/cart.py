@@ -105,24 +105,40 @@ def pairing_unique(pm: ProductMor) -> Eq:
     return mor.pairing_unique(p, q)
 
 def pairing_unique_hat(pm: ProductMor):
-    """Models hat equality for `cart.pairing_unique"""
+    """Models hat equality for `cart.pairing_unique`"""
     s, t = category.eq_signature(pairing_unique(pm))
     mor, p, q, _, _ = pm
     pmor, _, _, _, _ = pairing((p, q))
     return pmor.same(s) and mor.same(t)
 
-def pairing_eq(se: SpanEq) -> Eq:
-    """Private model of morphism `cart.pairing_eq`"""
+def _pmy(se: SpanEq) -> ProductMor:
     x, y, p_eq, q_eq = se
     pm_mor, _, _, pm_p_eq, pm_q_eq = pairing(x)
-    return category.sym(pairing_unique((
+    return (
         pm_mor, *y,
         category.trans((p_eq, pm_p_eq)),
         category.trans((q_eq, pm_q_eq)),
-    )))
+    )
+
+def pairing_eq(se: SpanEq) -> Eq:
+    """Private model of morphism `cart.pairing_eq`"""
+    return category.sym(pairing_unique(_pmy(se)))
 
 def pairing_eq_hat(se: SpanEq):
-    pass
-    # This equality has in fact a proof!
-    # This means that the implementation here consists solely
-    # of the equalities used in the proof.
+    """Models hat equality for `cart.pairing_eq`"""
+    # This equality has in fact a proof. This means that the implementation here
+    # consists solely of the equalities used in the proof. At this there is no
+    # concept of verifying the proof. One simply knows empirically that, if
+    # `pairing_eq_hat_proof` is True then so must be `pairing_eq_hat`.
+    s, t = category.eq_signature(pairing_eq(se))
+    x, y, _, _ = se
+    x_mor, _, _, _, _ = pairing(x)
+    y_mor, _, _, _, _ = pairing(y)
+    return x_mor.same(s) and y_mor.same(t)
+
+def pairing_eq_hat_proof(se: SpanEq):
+    """Models proof of hat equality for `cart.pairing_eq`"""
+    return (
+        pairing_unique_hat(_pmy(se))
+        and category.sym_hat(pairing_unique(_pmy(se)))
+    )

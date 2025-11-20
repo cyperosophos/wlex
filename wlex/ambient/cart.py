@@ -4,7 +4,7 @@ from collections.abc import Sequence, Mapping, Sized, Callable #, Iterator
 
 from ..theory.cart import Cart as BCart
 from .cells import Obj, Mor, Eq, ProvenEq
-from .category import Category, Unsourced, CheckedCategory, Composable, Comp as BaseComp
+from .category import Category, Polymor, CheckedCategory, Composable, Comp as BaseComp
 from .cells.cart import ProjKey
 
 class Error(Exception):
@@ -98,10 +98,10 @@ class ProductMor3(Mor):
             Eq(pt_q.compose(mor), q),
         )
 
-class UnsourcedTerminalMor(Unsourced):
+class UnsourcedTerminalMor(Polymor):
     __slots__ = ()
 
-    def with_source(self, source: Obj):
+    def to_mor(self, source: Obj):
         return source.terminal_mor()
 
     def __str__(self):
@@ -717,11 +717,11 @@ class ProductMor(Mor):
     ):
         [for name, mor in self.params.items()]
 
-class UnsourcedProj(Unsourced):
+class UnsourcedProj(Polymor):
     def __init__(self, name: ProductParamName):
         self.name = name
 
-    def with_source(self, source: Obj):
+    def to_mor(self, source: Obj):
         return Proj(self.name, source)
 
 class TProductMor(Mor, Mapping):
@@ -924,7 +924,7 @@ class SpanEq(NamedTuple):
     q_eq: Eq
 
 class UnsourcedPair:
-    def __init__(self, p: Unsourced, q: Unsourced):
+    def __init__(self, p: Polymor, q: Polymor):
         self.p = p
         self.q = q
 
@@ -938,30 +938,30 @@ class Pairer:
     @classmethod
     def pair(
         cls,
-        p: Mor | Unsourced | Eq | Obj,
-        q: Mor | Unsourced | Eq | Obj,
-    ) -> Mor | Unsourced | Eq:
+        p: Mor | Polymor | Eq | Obj,
+        q: Mor | Polymor | Eq | Obj,
+    ) -> Mor | Polymor | Eq:
         p, q = (
             Cart.identity(m) if isinstance(m, Obj) else m
             for m in (p, q)
         )
 
-        if isinstance(p, Unsourced):
-            if isinstance(q, Unsourced):
+        if isinstance(p, Polymor):
+            if isinstance(q, Polymor):
                 return UnsourcedPair(p, q)
 
             if isinstance(q, Eq):
                 s = Cart.source(Cart.ssource(q))
-                p = Cart.ref(p.with_source(s))
+                p = Cart.ref(p.to_mor(s))
                 return cls.pairing_eq((p, q))
 
-            p = p.with_source(Cart.source(q))
+            p = p.to_mor(Cart.source(q))
             return cls.pairing((p, q))
 
         if isinstance(p, Eq):
-            if isinstance(q, Unsourced):
+            if isinstance(q, Polymor):
                 s = Cart.source(Cart.ssource(p))
-                q = Cart.ref(q.with_source(s))
+                q = Cart.ref(q.to_mor(s))
                 return cls.pairing_eq((p, q))
 
             if isinstance(q, Eq):
@@ -970,8 +970,8 @@ class Pairer:
             q = Cart.ref(q)
             return cls.pairing_eq((p, q))
 
-        if isinstance(q, Unsourced):
-            q = q.with_source(Cart.source(p))
+        if isinstance(q, Polymor):
+            q = q.to_mor(Cart.source(p))
             return cls.pairing((p, q))
 
         if isinstance(q, Eq):
@@ -1122,7 +1122,7 @@ class Cart(Category):
     def el(
             self, name,
             target: Mor | Obj,
-            value: Mor | Unsourced | Obj | None = None,
+            value: Mor | Polymor | Obj | None = None,
             proof: Eq | Mor | Obj | None = None,
         ):
         # Supports HatMor but, since the source is the terminal
