@@ -3,7 +3,7 @@ from typing import TypeGuard, override
 from collections.abc import Sequence, MutableSequence
 from abc import ABCMeta
 
-from ..cells import Obj, Mor, Eq, PrimObj, PrimMor, PrimEq
+from ..cells import Obj, Mor, Eq, PrimMor, PrimEq
 from .category import CategoryObj, CategoryMor, CategoryEq, Composition
 
 class CartObj(CategoryObj, metaclass=ABCMeta):
@@ -23,10 +23,6 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
     def product(self, y: Obj):
         x = self
         return Product(('x', x), ('y', y))
-
-class CartPrimObj(PrimObj, CartObj):
-    """Models object `cart.Obj` as primitive"""
-    __slots__ = ()
 
 class CartMor(CategoryMor, metaclass=ABCMeta):
     """Models object `cart.Mor`"""

@@ -1,5 +1,4 @@
 """Base classes for cells and cell exceptions"""
-from functools import wraps
 from collections.abc import Callable, Sequence
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
@@ -156,13 +155,18 @@ class Defensive:
 
     def copy(self):
         """Create a copy of `self`"""
+        # No need to this when evaluating pairings, because the evaluation of
+        # the components occurs sequentially.
         res = Defensive(self.value)
         res.stack = [*self.stack]
         return res
 
-    def exit(self):
+    def exit(self, value: object):
         """Called when evaluation returns"""
         self.stack.pop()
+        res = type(self)(value)
+        res.stack = self.stack
+        return res
 
     @classmethod
     def enter(cls, x: object, mor: 'Mor'):
@@ -178,7 +182,6 @@ class Obj(metaclass=ABCMeta):
     """Base class for objects (0-cells)"""
     __slots__ = ('name',)
     name: Name
-    defined = True
     eqs: dict['Obj', list[tuple['Eq', bool]]] = defaultdict(list)
 
     def conversion(self, obj: 'Obj') -> 'Mor':
@@ -285,55 +288,18 @@ class Obj(metaclass=ABCMeta):
         """Projection, that is leg of product span"""
         raise TypeError("Requires Product")
 
-class PrimObj(Obj):
-    """Base of primitive objects
-
-    Primitive objects are the ones for which the `accepts` and `same` methods
-    must be defined after initialization, that is during execution of the
-    theory, to which the primitive objects belong.
-    """
-    __slots__ = '_accepts', '_same'
-    _accepts: Callable[[object], bool]
-    _same: Callable[[object, object], bool]
-
-    def accepts(self, x: object):
-        return self._accepts(x)
-
-    def same(self, x: object, y: object):
-        return self._same(x, y)
-
-    def define(self, accepts: Callable[[object], bool], same: Callable[[object, object], bool]):
-        """Set the `accepts` and `same` methods of the primitive object"""
-        if self.defined:
-            raise ValueError("Can't redefine primitive object")
-        self._accepts = accepts
-        self._same = same
-
-    @property
-    def defined(self):
-        """`accepts` and `same` have been set."""
-        if hasattr(self, '_accepts'):
-            assert hasattr(self, '_same')
-            return True
-        return False
-
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
     __slots__ = 'name', 'source', 'target'
     name: Name
     source: Obj
     target: Obj
-    defined = True
-    defensive = False
 
     def conversion(self, mor: 'Mor'):
         """Gives equality that converts `self` into `mor`"""
         if self.same(mor):
             return self.ref()
         raise MorUnfit("Can't be convert", self, mor)
-
-    def _defensive_enter(self, x: object):
-        return Defensive.enter(x, self)
 
     @abstractmethod
     def ev(self, x: object) -> object:
@@ -367,7 +333,7 @@ class Mor(metaclass=ABCMeta):
         """
         return id(self)
 
-    def same(self, x: 'Mor'):
+    def same(self, x: 'Mor') -> bool:
         """`x` is admitted instead of `self` as ssource or starget`.
 
         This is possible because `self.ev` is in this case the same function as
@@ -382,7 +348,10 @@ class Mor(metaclass=ABCMeta):
         # the same signature. This returns False when the signatures don't
         # coincide even if the sameness comparison is actually nonsensical in
         # such case.
-        return x is self
+        return (
+            x is self
+            or (bool(getattr(x, 'sameness_priority', False)) and x.same(self))
+        )
 
     def __str__(self):
         if hasattr(self, 'name'):
@@ -415,81 +384,59 @@ class PrimMor(Mor):
     after initialization, that is during execution of the theory, to which the
     primitive morphisms belong.
     """
-    __slots__ = ('_ev', '_defensive')
+    __slots__ = ('_ev',)
     _ev: Callable[[object], object]
-    _defensive: bool
+
+    @abstractmethod
+    def raw_ev(self, x: object) -> object:
+        """Raw evaluation (no type checking)"""
 
     def ev(self, x: object) -> object:
-        return self._ev(x)
+        # TargetInvalid can only get caught outside the call stack, so there is
+        # never a need to pop from the stack list when raising such exception.
+        # Defensiveness is set on the argument, not on specific morphisms. An
+        # untrusted part makes the whole system untrusted.
 
-    @property
-    def defensive(self) -> bool:
-        """`self` was defined with the `defensive` flag."""
-        return getattr(self, '_defensive', False)
+        # When argument is defensive, the value returned by `ev` is checked
+        # against the target of `self` and the equalities that have this target
+        # as source. This dynamic type-checking is analogous to the one done
+        # with respect to the source of `self`, which is only always required by
+        # the public interface (and also includes checking equalities).
+        if not isinstance(x, Defensive):
+            return self.raw_ev(x)
 
-    def define(self, ev: Callable[[object], object], defensive: bool = False):
-        """Set the `ev` method of the primitive morphism
+        target = self.target
 
-        When `defensive` is `True`, the value returned by `ev` is checked
-        against the target of `self` and the equalities that have this target as
-        source. This dynamic type-checking is analogous to the one done with
-        respect to the source of `self`, which is only always required by the
-        public interface (and also includes checking equalities).
-        """
-        if self.defined:
-            raise ValueError("Can't redefine primitive morphism")
+        try:
+            res = self.raw_ev(x.value)
+        except Exception as exc:
+            raise TargetMismatch(
+                "No result against which to accept target:", x,
+            ) from exc
 
-        self._defensive = defensive
-        if defensive:
-            target = self.target
+        try:
+            accepts = target.accepts(res)
+        except Exception as exc:
+            raise TargetMismatch(
+                "Unable to check if result is accepted:", x, res,
+            ) from exc
 
-            @wraps(ev)
-            def wrapper(x: object) -> object:
-                x = self._defensive_enter(x)
-                # TargetInvalid can only get caught outside the call stack, so
-                # there is never a need to pop from the stack list when raising
-                # such exception.
+        if accepts:
+            try:
+                failed = target.failed_eqs(res)
+            except Exception as exc:
+                raise TargetFailure(
+                    "Unable to check if there are unfulfilled equalities", x,
+                    res,
+                ) from exc
 
-                try:
-                    res = ev(x.value)
-                except Exception as exc:
-                    raise TargetMismatch(
-                        "No result against which to accept target:", x,
-                    ) from exc
+            if failed:
+                raise TargetFailure(
+                    "Unfulfilled equalities:", x, res, failed,
+                )
 
-                try:
-                    accepts = target.accepts(res)
-                except Exception as exc:
-                    raise TargetMismatch(
-                        "Unable to check if result is accepted:", x, res,
-                    ) from exc
-
-                if accepts:
-                    try:
-                        failed = target.failed_eqs(res)
-                    except Exception as exc:
-                        raise TargetFailure(
-                            "Unable to check if there are unfulfilled "
-                            "equalities", x, res,
-                        ) from exc
-
-                    if failed:
-                        raise TargetFailure(
-                            "Unfulfilled equalities:", x, res, failed,
-                        )
-
-                    x.exit()
-                    return res
-                raise TargetMismatch("Not accepted by target:", x, res)
-
-            self._ev = wrapper
-        else:
-            self._ev = ev
-
-    @property
-    def defined(self):
-        """`ev` has been set."""
-        return hasattr(self, '_ev')
+            return x.exit(res)
+        raise TargetMismatch("Not accepted by target:", x, res)
 
 class Eq:
     """Base class for equalities (2-cells)"""
@@ -497,7 +444,6 @@ class Eq:
     name: Name
     ssource: Mor
     starget: Mor
-    defined = True
 
     def __init__(self, ssource: Mor, starget: Mor):
         self.ssource = ssource
@@ -572,31 +518,15 @@ class Eq:
         raise TypeError("Requires CategoryEq")
 
 class PrimEq(Eq):
-    """Base of primitive equalities
+    """Base of primitive equalities"""
+    __slots__ = ()
+    public = False
 
-    Primitive equalities are the ones which must be assumed (by calling method
-    `define`) after initialization, that is during execution of the theory, to
-    which the primitive equalities belong.
-    """
-    __slots__ = ('_proven',)
-    _proven: bool
-
-    @property
-    def defined(self):
-        """Equality `self` has been assumed."""
-        if hasattr(self, '_proven'):
-            assert self._proven
-            return True
-        return False
-
-    def define(self, public: bool = False):
-        """Assume equality `self`"""
+    def __init__(self, ssource: Mor, starget: Mor):
         # Trusting the target of a primitive morphism is analogous to not
         # providing a proof when assuming a primitive equality (especially a non
         # public one).
-        if self.defined:
-            raise ValueError("Can't redefine primitive equality")
-        self._proven = True
-        self.ssource.source.require_eq(self, public)
+        super().__init__(ssource, starget)
+        self.ssource.source.require_eq(self, self.public)
 
 Cell = Obj | Mor | Eq

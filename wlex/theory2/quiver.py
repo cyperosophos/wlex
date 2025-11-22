@@ -1,12 +1,13 @@
+# pylint: disable=C0103
 from dataclasses import dataclass
 from typing import Self
-from ..ambient.cells import Obj, Mor, Eq
-from ..ambient.category import Context, one, Theory
+
+from wlex.ambient.category import Obj, Mor, Eq, Context, one, Theory, composer
 
 @dataclass
 class BasicQuiver(Theory):
-    node_: Obj | None = None
-    edge_: Obj | None = None
+    Node: Obj | None = None
+    Edge: Obj | None = None
 
     source: Mor | None = None
     target: Mor | None = None
@@ -14,39 +15,39 @@ class BasicQuiver(Theory):
     #hat: dict
     def with_base(self, base: Self):
         return type(self)(
-            node_=one(self.node_, base.node_),
-            edge_=one(self.edge_, base.edge_),
+            Node=one(self.Node, base.Node),
+            Edge=one(self.Edge, base.Edge),
             source=one(self.source, base.source),
             target=one(self.target, base.target),
         )
 
     @classmethod
     def from_prim(cls, ctx: Context, prim: Self):
-        node_ = ctx.obj('Node', prim.node_)
-        edge_ = ctx.obj('Edge', prim.edge_)
+        Node = ctx.obj('Node', prim.Node)
+        Edge = ctx.obj('Edge', prim.Edge)
 
-        source = ctx.mor('source', prim.source, (edge_, node_))
-        target = ctx.mor('target', prim.target, (edge_, node_))
+        source = ctx.mor('source', prim.source, (Edge, Node))
+        target = ctx.mor('target', prim.target, (Edge, Node))
 
         return cls(
-            node_=one(node_, prim.node_),
-            edge_=one(edge_, prim.edge_),
+            Node=one(Node, prim.Node),
+            Edge=one(Edge, prim.Edge),
             source=one(source, prim.source),
             target=one(target, prim.target),
         )
 
 @dataclass
 class Quiver(Theory):
-    q0_: BasicQuiver | None = None
-    q1_: BasicQuiver | None = None
+    Q0: BasicQuiver | None = None
+    Q1: BasicQuiver | None = None
 
     source_globular_cond: Eq | None = None
     target_globular_cond: Eq | None = None
 
     def with_base(self, base: Self):
         return type(self)(
-            q0_=one(self.q0_, base.q0_),
-            q1_=one(self.q1_, base.q1_),
+            Q0=one(self.Q0, base.Q0),
+            Q1=one(self.Q1, base.Q1),
             source_globular_cond=one(
                 self.source_globular_cond, base.source_globular_cond,
             ),
@@ -56,17 +57,36 @@ class Quiver(Theory):
         )
 
     @classmethod
-    def from_prim(cls, ctx: Context, prims: Self):
-        q0_ = ctx.sub('Q0', BasicQuiver, prims.q0_)
-        q1 = ctx.sub('Q1', BasicQuiver, prims.q1_, BasicQuiver(
-            node_ = q0_.edge_,
+    def from_prim(cls, ctx: Context, prim: Self):
+        c = composer(ctx)
+        Q0 = ctx.sub('Q0', BasicQuiver, prim.Q0)
+        Q1 = ctx.sub('Q1', BasicQuiver, prim.Q1, BasicQuiver(
+            Node=Q0.Edge,
         ))
 
         source_globular_cond = ctx.eq(
-            'source_globular_cond', prims.source_globular_cond,
-            ()
+            'source_globular_cond', prim.source_globular_cond,
+            (
+                c(Q0.source, Q1.source),
+                c(Q0.source, Q1.target),
+            ),
         )
 
+        target_globular_cond = ctx.eq(
+            'target_globular_cond', prim.target_globular_cond,
+            (
+                c(Q0.target, Q1.source),
+                c(Q0.target, Q1.target),
+            ),
+        )
 
-# This should work with just the public ambient interface.
-# ctx is for keepring track of names.
+        return cls(
+            Q0=one(Q0, prim.Q0),
+            Q1=one(Q1, prim.Q1),
+            source_globular_cond=one(
+                source_globular_cond, prim.source_globular_cond,
+            ),
+            target_globular_cond=one(
+                target_globular_cond, prim.target_globular_cond,
+            ),
+        )

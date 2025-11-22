@@ -3,7 +3,7 @@ from typing import override
 from abc import ABCMeta
 from collections.abc import Sequence
 
-from ..cells import Obj, PrimObj, Mor, PrimMor, Eq, PrimEq
+from ..cells import Obj, Mor, PrimMor, Eq, PrimEq
 
 class CategoryObj(Obj, metaclass=ABCMeta):
     """Models object `category.Obj`"""
@@ -12,10 +12,6 @@ class CategoryObj(Obj, metaclass=ABCMeta):
     @override
     def identity(self):
         return Composition.identity(self)
-
-class CategoryPrimObj(PrimObj, Obj):
-    """Models object `category.Obj` as primitive"""
-    __slots__ = ()
 
 class CategoryMor(Mor, metaclass=ABCMeta):
     """Models object `category.Mor`"""
@@ -28,9 +24,9 @@ class CategoryMor(Mor, metaclass=ABCMeta):
     @override
     def compose(self, g: Mor) -> Mor:
         f = self
-        return Composition.simplified(f, g)
+        return LazyComposition(f, g)
 
-class CategoryPrimMor(PrimMor, CategoryMor):
+class CategoryPrimMor(PrimMor, CategoryMor, metaclass=ABCMeta):
     """Models object `category.Mor` as primitive"""
     __slots__ = ()
 
@@ -66,25 +62,48 @@ class CategoryPrimEq(PrimEq, CategoryEq):
     """Models object `category.Eq` as primitive"""
     __slots__ = ()
 
+class LazyComposition(CategoryMor):
+    """Models lazy composition"""
+    __slots__ = 'f', 'g', '_expanded'
+    f: Mor
+    g: Mor
+    _expanded: Mor
+    sameness_priority = True
+
+    def __init__(self, f: Mor, g: Mor):
+        super().__init__(g.source, f.target)
+        self.f = f
+        self.g = g
+
+    def expanded(self):
+        """Underlying composition"""
+        if hasattr(self, '_expanded'):
+            return self._expanded
+
+        self._expanded = Composition.simplified(self.f, self.g)
+        return self._expanded
+
+    def ev(self, x: object):
+        return self.expanded().ev(x)
+
+    def hint(self):
+        return self.expanded().hint()
+
+    def same(self, x: Mor):
+        if isinstance(x, type(self)):
+            x = x.expanded()
+        return self.expanded().same(x)
+
 class Composition(CategoryMor):
     """Models the result of `category.compose`"""
-    __slots__ = 'factors', '_defensive'
+    __slots__ = ('factors',)
     factors: tuple[Mor, ...]
 
-    @property
-    def defensive(self) -> bool:
-        """Some morphism in the composition is defensive."""
-        return getattr(self, '_defensive', False)
-
-    def __init__(
-            self, source: Obj, target: Obj, factors: tuple[Mor, ...],
-            defensive: bool = False,
-        ):
+    def __init__(self, source: Obj, target: Obj, factors: tuple[Mor, ...]):
         # Do not directly call class for instantiation, use `identity` or
         # `simplified` instead.
         super().__init__(source, target)
         self.factors = factors
-        self._defensive = defensive
 
     @classmethod
     def simplified(cls, *factors: Mor):
@@ -98,10 +117,7 @@ class Composition(CategoryMor):
         if len(_factors) == 1:
             return _factors[0]
 
-        return cls(
-            factors[-1].source, factors[0].target, tuple(_factors),
-            defensive=any(f.defensive for f in _factors),
-        )
+        return cls(factors[-1].source, factors[0].target, tuple(_factors))
 
     @classmethod
     def identity(cls, obj: Obj):
@@ -113,6 +129,9 @@ class Composition(CategoryMor):
         """Simplifies factors"""
         _factors: list[Mor] = []
         for factor in factors:
+            if isinstance(factor, LazyComposition):
+                factor = factor.expanded()
+
             if isinstance(factor, Composition):
                 _factors.extend(factor.factors)
             else:
@@ -121,19 +140,6 @@ class Composition(CategoryMor):
 
     def ev(self, x: object):
         res = x
-
-        if self.defensive:
-            res = self._defensive_enter(res)
-
-            for factor in self.factors:
-                if factor.defensive:
-                    res.value = factor.ev(res)
-                else:
-                    res.value = factor.ev(res.value)
-
-            res.exit()
-            return res.value
-
         for factor in self.factors:
             res = factor.ev(res)
 

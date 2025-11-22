@@ -459,6 +459,7 @@ class Category:
         d, e = c
         return d.compose_eq(e)
 
+    # ALREADY REPLACED in category.py
     def _compose(
         self,
         f: Mor | Polymor | Eq | Obj,
