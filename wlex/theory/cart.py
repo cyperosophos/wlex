@@ -26,7 +26,7 @@ class Cart:
 
     SpanEq: MObj
     pairing_eq: MMor
-    
+
     def __init__(self, ambient):
         th = ambient.lex(self)
         c = th.compose
@@ -87,6 +87,10 @@ class Cart:
             (c(source, Mor), c(source, p_, Span)),
             (c(target, Mor), c(source, p_, pt)),
             (
+                # TODO: th.req(1): Obj -> Eq in `where` induces a callable Obj -> Mor
+                # (transformation). The Obj arg is the the `self` arg of requiring
+                # along with all previous requirements. This has to be taken into
+                # account when flattening during Subobject instantiation.
                 p(c(compose, p(c(p_, pt), Mor).where(th.req(1))), p_),
                 c(eq, p_eq),
             ),
@@ -109,7 +113,7 @@ class Cart:
         th.mor(
             'pairing_unique',
             c(p(c(Mor, pairing), Mor), ProductMor),
-            eq, 
+            eq,
         )
 
         # !0 is short for $0 @ !<prod>
@@ -120,7 +124,7 @@ class Cart:
         ).requiring(
             (c(source, p_, x), c(source, p_, y)),
             (c(target, p_, x), c(target, p_, y)),
-            (c(target, q, x), c(target, q, y)), 
+            (c(target, q, x), c(target, q, y)),
             (p(c(p_, x), c(p_, y)), c(eq, p_eq)),
             (p(c(q, x), c(q, y)), c(eq, q_eq)),
         )

@@ -1,10 +1,12 @@
 """Cart cell classes"""
-from typing import TypeGuard, override
+from typing import Self, TypeGuard, override
 from collections.abc import Sequence, MutableSequence
 from abc import ABCMeta
 
-from ..cells import Obj, Mor, Eq, PrimMor, PrimEq
-from .category import CategoryObj, CategoryMor, CategoryEq, Composition
+from ..cells import Obj, Mor, Eq, PrimMor
+from .category import (
+    CategoryObj, CategoryMor, CategoryEq, CategoryPrimEq, Composition,
+)
 
 class CartObj(CategoryObj, metaclass=ABCMeta):
     """Models object `cart.Obj`"""
@@ -13,7 +15,7 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
     @override
     @staticmethod
     def terminal():
-        return Product()
+        return Product(())
 
     @override
     def terminal_mor(self):
@@ -22,16 +24,16 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
     @override
     def product(self, y: Obj):
         x = self
-        return Product(('x', x), ('y', y))
+        return Product((('x', x), ('y', y)))
 
 class CartMor(CategoryMor, metaclass=ABCMeta):
     """Models object `cart.Mor`"""
     __slots__ = ()
 
     @override
-    def same(self, x: 'Mor'):
+    def same(self, x: Mor):
         # We handle sameness of terminal morphisms here.
-        terminal = Product()
+        terminal = Product(())
         return super().same(x) or (
             self.target.identical(terminal)
             and x.target.identical(terminal)
@@ -39,21 +41,23 @@ class CartMor(CategoryMor, metaclass=ABCMeta):
         )
 
     @override
-    def pairing(self, q: 'Mor'):
+    def pairing(self, q: Mor):
         p = self
         return ProductMor(p.source, (('p', p), ('q', q)))
 
     @override
     def pairing_unique(self, p: Mor, q: Mor):
         mor = self
-        return Eq(p.pairing(q), mor)
+        eq = Eq(p.pairing(q), mor)
+        eq.proven = True
+        return eq
 
-class CartPrimMor(PrimMor, CartMor):
-    """Models object `cdoneart.Mor` as primitive"""
+class CartPrimMor(PrimMor, CartMor, metaclass=ABCMeta):
+    """Models object `cart.Mor` as primitive"""
     __slots__ = ()
 
 CartEq = CategoryEq
-CartPrimEq = PrimEq
+CartPrimEq = CategoryPrimEq
 
 def _isinstance_sequence_object(x: object) -> TypeGuard[Sequence[object]]:
     return isinstance(x, Sequence)
@@ -63,13 +67,16 @@ def _isinstance_mutable_sequence_object(x: object) -> TypeGuard[MutableSequence[
 
 LabeledObj = tuple[str, Obj] | tuple[tuple[str, ...], 'Product']
 ComponentName = int | str | Obj
-LabeledMor = tuple[str | tuple[str, ...], Mor]
+Label = str | tuple[str, ...]
+LabeledMor = tuple[Label, Mor]
 
 class Product(CartObj):
     """Models object corresponding to source of span `cart.product`"""
     __slots__ = 'components', 'names'
     components: dict[ComponentName, tuple[int, Obj]]
     names: list[ComponentName]
+    # TODO: Wouldn't it be better if components was the list and names the dict?
+    #       (Same applies in ProductMor.) Compare with cells.lex.Subobject.
 
     @override
     def proj(self, name: object):
@@ -78,13 +85,13 @@ class Product(CartObj):
             return Projection.from_path(self, name)
 
         if isinstance(name, int):
-            if name >= len(self.components):
+            if name >= len(self.components) or name < 0:
                 raise ValueError("`name` of type `int` is out of range.")
             return Projection.from_path(self, self.pos_to_name(name))
 
         raise ValueError("`name` does not correspond to any component.")
 
-    def __new__(cls, *params: LabeledObj):
+    def __new__(cls, params: Sequence[LabeledObj], flattened: bool = True):
         if not params:
             if not hasattr(cls, '_terminal'):
                 cls._terminal = super().__new__(cls)
@@ -167,7 +174,7 @@ class Product(CartObj):
                 # unpacking will occur, it will remain as a product param.
                 self._add_name(*obj.pos_to_name_and_obj(i))
 
-    def __init__(self, *params: LabeledObj):
+    def __init__(self, params: Sequence[LabeledObj], flattened: bool = True):
         # Repeated component names are allowed. This is based on the fact that
         # AxBxC is the pullback of the projections AxB->B and BxC->B.
         if (
@@ -201,7 +208,7 @@ class Product(CartObj):
                 self._add_names(name, obj)
             elif name:
                 self._add_name(name, obj)
-            elif isinstance(obj, Product):
+            elif isinstance(obj, Product) and flattened:
                 for subname, (_, t) in obj.components.items():
                     self._add_name(subname, t)
             else:
@@ -213,6 +220,7 @@ class Product(CartObj):
     def identical(self, x: Obj):
         return super().identical(x) or (
             isinstance(x, Product)
+            and len(self.components) == len(x.components)
             and all(
                 n == m and s.identical(t)
                 for (n, (_, s)), (m, (_, t))
@@ -304,8 +312,8 @@ class Projection(CartMor):
 
         return cls(source, target, path)
 
-    def proj_compose(self, mor: 'Projection'):
-        """Compose with projection of the given component name"""
+    def proj_compose(self, mor: Self):
+        """Compose with projections into a single projection"""
         source = mor.source
         target = self.target
         assert isinstance(source, Product)
@@ -353,7 +361,7 @@ class Projection(CartMor):
         return f'`proj {self!s}[{self.source}]`'
 
 class ProductMor(CartMor):
-    """Models object corresponding to source of span `cart.product`"""
+    """Models object corresponding to `cart.ProductMor`"""
     __slots__ = ('components',)
 
     # The names are in the target. The bool is the unpack flag.
@@ -363,10 +371,10 @@ class ProductMor(CartMor):
         """Get the morphism associated to projection in the pairing
 
         The composition of `self` and `mor` may sometimes not reduce to a single
-        morphism. This is the case the target of the resulting morphism does not
-        coincide with the target of the projection. When this occurs, a tuple of
-        two morphisms is returned, the first one being the adapted projection
-        and the second one being the resulting morphism.
+        morphism. This is the case when the target of the resulting morphism
+        does not coincide with the target of the projection. When this occurs, a
+        tuple of two morphisms is returned, the first one being the adapted
+        projection and the second one being the resulting morphism.
         """
         res = self
 
@@ -389,7 +397,6 @@ class ProductMor(CartMor):
             return Projection.from_path(t, *mor.path[:-i or None]), res
 
         return res
-
 
     def after_component_name(self, name: ComponentName) -> tuple[Mor, bool]:
         """Like `after_proj` but using component name instead of projection
@@ -524,6 +531,7 @@ class ProductMor(CartMor):
                 "Tuple of names must have same length as product (target of "
                 "morphism).",
             )
+
         # Make a renaming pairing to compose with morphism. The pairing
         # may end up not including all components of the target of
         # morphism. Consistency equality applies to the morphism
@@ -560,31 +568,11 @@ class ProductMor(CartMor):
         name: str, mor: Mor,
     ):
         obj = mor.target
-        # No renaming here, only deletions of repeated morphisms.
         if name:
             if self._add_name(name_to_mor, mor_to_eq, name, mor):
                 component = False, mor
             else:
                 component = True, ProductMor(mor.source, ())
-        elif isinstance(obj, Product):
-            segment: list[str] = []
-            for subname in obj.names:
-                pmor = obj.proj(subname).compose(mor)
-                if self._add_name(
-                    name_to_mor, mor_to_eq, subname, pmor,
-                ):
-                    segment.append(
-                        subname if isinstance(subname, str) else '',
-                    )
-
-            if len(segment) == len(obj.components):
-                # Register the whole morphism, no need for deletions
-                component = True, mor
-            else:
-                # ProductMor instance here may be terminal morphism.
-                component = True, ProductMor(obj, [
-                    (m, obj.proj(m)) for m in segment
-                ]).compose(mor)
         else:
             if self._add_name(name_to_mor, mor_to_eq, obj, mor):
                 component = False, mor
@@ -593,14 +581,45 @@ class ProductMor(CartMor):
 
         return (name, obj), component
 
+    def _add_str_name_flattening(
+        self, name_to_mor: dict[ComponentName, Mor], mor_to_eq: dict[Mor, Eq],
+        name: str, mor: Mor,
+    ):
+        obj = mor.target
+        # No renaming here, only deletions of repeated morphisms.
+        if name or not isinstance(obj, Product):
+            return self._add_str_name(name_to_mor, mor_to_eq, name, mor)
+
+        segment: list[str] = []
+        for subname in obj.names:
+            pmor = obj.proj(subname).compose(mor)
+            if self._add_name(
+                name_to_mor, mor_to_eq, subname, pmor,
+            ):
+                segment.append(
+                    subname if isinstance(subname, str) else '',
+                )
+
+        if len(segment) == len(obj.components):
+            # Register the whole morphism, no need for deletions
+            component = True, mor
+        else:
+            # ProductMor instance here may be terminal morphism.
+            component = True, ProductMor(obj, [
+                (m, obj.proj(m)) for m in segment
+            ]).compose(mor)
+
+        return (name, obj), component
+
     def _update_components(
         self, target_params: list[LabeledObj], param: LabeledObj,
-        component: tuple[bool, Mor], _terminal: Obj = Product(),
+        component: tuple[bool, Mor], _terminal: Obj = Product(()),
     ):
         # Based on having no assumptions about implementation and functions
         # being pure it makes sense to discard functions whose return values
         # would be discarded. The repeated functions are not fallbacks.
         target_params.append(param)
+
         # Terminal morphisms get exluded in order to facilitate comparison
         # through `same`.
         if not component[1].target.identical(_terminal):
@@ -608,7 +627,7 @@ class ProductMor(CartMor):
 
     def __init__(
         self, source: Obj, params: Sequence[LabeledMor],
-        consistency: Sequence[Eq] = (),
+        consistency: Sequence[Eq] = (), flattened: bool = True,
     ):
         # A pairing of all the projection of a product is the identity of the
         # product. We let this equality be handled intensionally, especifically
@@ -660,12 +679,18 @@ class ProductMor(CartMor):
                 self._update_components(target_params, *self._add_names(
                     name_to_mor, mor_to_eq, name, mor,
                 ))
+            elif flattened:
+                self._update_components(
+                    target_params, *self._add_str_name_flattening(
+                        name_to_mor, mor_to_eq, name, mor,
+                    ),
+                )
             else:
                 self._update_components(target_params, *self._add_str_name(
                     name_to_mor, mor_to_eq, name, mor,
                 ))
 
-        target = Product(*target_params)
+        target = Product(target_params, flattened=flattened)
         assert len(name_to_mor) == len(target.components)
         assert all(j == k for j, k in zip(name_to_mor, target.components))
         super().__init__(source, target)
@@ -674,6 +699,7 @@ class ProductMor(CartMor):
         return super().same(x) or (
             isinstance(x, ProductMor)
             and self.target.identical(x.target)
+            and len(self.components) == len(x.components)
             and all(
                 u == v and s.same(t)
                 for (u, s), (v, t)
@@ -682,7 +708,7 @@ class ProductMor(CartMor):
         )
 
     def hint(self):
-        return self.source, self.target, self.components
+        return self.target, self.components
 
     def ev(self, x: object):
         # In the case of the local namespace (regarded as Product instance)
@@ -746,10 +772,24 @@ class CartComposition(Composition, CartMor):
 
         if isinstance(pmor, Composition):
             if pmor.factors:
-                return cls._simplify_proj(pmor.factors[-1], mor)
+                # This assumes tail will never be an identity.
+                tail, head = pmor.split()
+                mm = cls._simplify_proj(head, mor)
+
+                if isinstance(mm, tuple):
+                    p, m = mm
+                    return tail.compose(p), m
+
+                return tail, mm
 
             return mor
 
+        return cls._simplify_proj_single_factor(pmor, mor)
+
+    @classmethod
+    def _simplify_proj_single_factor(
+        cls, pmor: Mor, mor: Mor,
+    ) -> Mor | tuple[Mor, Mor]:
         if isinstance(pmor, Projection):
             if isinstance(mor, Projection):
                 return pmor.proj_compose(mor)
@@ -814,3 +854,5 @@ class CartComposition(Composition, CartMor):
         _factors.append(prev)
 
         return _factors
+
+CartMor.comp_cls = CartComposition

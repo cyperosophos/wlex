@@ -17,14 +17,18 @@ class CategoryMor(Mor, metaclass=ABCMeta):
     """Models object `category.Mor`"""
     __slots__ = ()
 
+    comp_cls: type['Composition']
+
     @override
     def ref(self):
-        return Eq(self, self)
+        eq = Eq(self, self)
+        eq.proven = True
+        return eq
 
     @override
     def compose(self, g: Mor) -> Mor:
         f = self
-        return LazyComposition(f, g)
+        return LazyComposition(f, g, self.comp_cls)
 
 class CategoryPrimMor(PrimMor, CategoryMor, metaclass=ABCMeta):
     """Models object `category.Mor` as primitive"""
@@ -36,7 +40,9 @@ class CategoryEq(Eq):
 
     @override
     def sym(self):
-        return Eq(self.starget, self.ssource)
+        eq = Eq(self.starget, self.ssource)
+        eq.proven = True
+        return eq
 
     @override
     def trans(self, g: Eq):
@@ -48,15 +54,19 @@ class CategoryEq(Eq):
         if g.ssource.same(g.starget):
             return f
 
-        return Eq(g.ssource, f.starget)
+        eq = Eq(g.ssource, f.starget)
+        eq.proven = f.proven and g.proven
+        return eq
 
     @override
     def compose_eq(self, e: Eq):
         d = self
-        return Eq(
+        eq = Eq(
             d.ssource.compose(e.ssource),
             d.starget.compose(e.starget),
         )
+        eq.proven = d.proven and e.proven
+        return eq
 
 class CategoryPrimEq(PrimEq, CategoryEq):
     """Models object `category.Eq` as primitive"""
@@ -64,23 +74,31 @@ class CategoryPrimEq(PrimEq, CategoryEq):
 
 class LazyComposition(CategoryMor):
     """Models lazy composition"""
-    __slots__ = 'f', 'g', '_expanded'
+    __slots__ = 'f', 'g', '_expanded', '_depth', 'comp_cls'
     f: Mor
     g: Mor
+    comp_cls: type['Composition']
     _expanded: Mor
+    _depth: int
     sameness_priority = True
 
-    def __init__(self, f: Mor, g: Mor):
+    @property
+    def depth(self):
+        """Depth of composition"""
+        return self._depth
+
+    def __init__(self, f: Mor, g: Mor, comp_cls: type['Composition']):
         super().__init__(g.source, f.target)
         self.f = f
         self.g = g
+        self.comp_cls = comp_cls
+        self._depth = max(f.depth, g.depth) + 1
 
     def expanded(self):
-        """Underlying composition"""
         if hasattr(self, '_expanded'):
             return self._expanded
 
-        self._expanded = Composition.simplified(self.f, self.g)
+        self._expanded = self.comp_cls.simplified(self.f, self.g)
         return self._expanded
 
     def ev(self, x: object):
@@ -104,6 +122,12 @@ class Composition(CategoryMor):
         # `simplified` instead.
         super().__init__(source, target)
         self.factors = factors
+
+    def split(self) -> tuple[Mor, Mor]:
+        """Separate comoposition into the first factors and last factor"""
+        if len(self.factors) <= 1:
+            raise ValueError("Requires at least two factors")
+        return self.simplified(*self.factors[:-1]), self.factors[-1]
 
     @classmethod
     def simplified(cls, *factors: Mor):
@@ -151,6 +175,7 @@ class Composition(CategoryMor):
     def same(self, x: Mor):
         return super().same(x) or (
             isinstance(x, Composition)
+            and len(self.factors) == len(x.factors)
             and all(f.same(g) for f, g in zip(self.factors, x.factors))
             # This is required for comparing identities.
             and self.source.identical(x.source)
@@ -164,3 +189,5 @@ class Composition(CategoryMor):
 
     def __repr__(self):
         return f'`comp {self!s}`'
+
+CategoryMor.comp_cls = Composition

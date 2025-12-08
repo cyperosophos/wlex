@@ -2,6 +2,7 @@
 from collections.abc import Callable, Sequence
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
+from typing import Optional
 
 class Error(Exception):
     """Base class for cell exceptions"""
@@ -184,12 +185,14 @@ class Obj(metaclass=ABCMeta):
     name: Name
     eqs: dict['Obj', list[tuple['Eq', bool]]] = defaultdict(list)
 
-    def conversion(self, obj: 'Obj') -> 'Mor':
+    def conversion(self, obj: 'Obj') -> Optional['Mor']:
         """Gives morphism that converts `self` into `obj`"""
+        # Inclusion conversions always make sense.
+        # TODO: Is there any case where implicit weakening conversion is useful?
         if self.identical(obj):
             return self.identity()
 
-        raise ObjUnfit("Can't convert", self, obj)
+        return None
 
     @abstractmethod
     def accepts(self, x: object) -> bool:
@@ -214,6 +217,10 @@ class Obj(metaclass=ABCMeta):
         Notice that this may raise a `TargetInvalid` error due to defensive type
         checking.
         """
+        # This is different from `accepts`, `same`, etc., because it returns the
+        # reasons for failing rather than just indicating that failure occurred.
+        # Perhaps the fact the these equalities are not tied to the object and
+        # may therefore be more cumbersome to track justifies said difference.
         return [
             eq for eq, _ in self.eqs[self]
             if not eq.verify(x)
@@ -288,18 +295,28 @@ class Obj(metaclass=ABCMeta):
         """Projection, that is leg of product span"""
         raise TypeError("Requires Product")
 
+    def req(self, name: str | int = 0) -> 'Eq':
+        """Requirement of subobject"""
+        raise TypeError("Requires Subobject")
+
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
     __slots__ = 'name', 'source', 'target'
     name: Name
     source: Obj
     target: Obj
+    depth = 0 # Used in LazyComposition
 
-    def conversion(self, mor: 'Mor'):
+    def expanded(self):
+        """Underlying composition in the case of LazyComposition"""
+        return self
+
+    def conversion(self, mor: 'Mor') -> Optional['Eq']:
         """Gives equality that converts `self` into `mor`"""
         if self.same(mor):
             return self.ref()
-        raise MorUnfit("Can't be convert", self, mor)
+
+        return None
 
     @abstractmethod
     def ev(self, x: object) -> object:
@@ -308,11 +325,15 @@ class Mor(metaclass=ABCMeta):
     def public_ev(self, x: object):
         """Checks `x` against source before evaluation"""
         source = self.source
+
         if source.accepts(x):
             failed = source.failed_public_eqs(x)
+
             if failed:
                 raise SourceFailure("Unfulfilled equalities:", x, failed)
+
             return self.ev(x)
+
         raise SourceMismatch("Not accepted by source:", x)
 
     def __init__(self, source: Obj, target: Obj):
@@ -440,14 +461,29 @@ class PrimMor(Mor):
 
 class Eq:
     """Base class for equalities (2-cells)"""
-    __slots__ = 'name', 'ssource', 'starget'
+    # There is no distinction between proven and unproven equalities. All that
+    # matters is that the equality constructed through the operations provided
+    # by the theory. Something similar would happen with morphisms if no `ev`
+    # was needed. In this case we would forget the construction and just retain
+    # the signature. `Mor` would have no need to be abstract. An unproven
+    # equality is useful when it gets interpreted as `lex.Parallel`. In the
+    # theory all equalities are proven, since all equalities have to be
+    # constructed not just instantiated. An unproven equality gets composed with
+    # a morphism and produces a proven equality, this is the case of equializer
+    # requirements. Instances of this class are then better interpreted as
+    # equality signatures, even loose ones, since globular conditions are not
+    # yet checked at this stage. Recall that setoids are categories enriched
+    # over TV.
+    __slots__ = 'name', 'ssource', 'starget', 'proven'
     name: Name
     ssource: Mor
     starget: Mor
+    proven: bool
 
     def __init__(self, ssource: Mor, starget: Mor):
         self.ssource = ssource
         self.starget = starget
+        self.proven = False
 
     def verify(self, x: object):
         """Verify that `x` satisfies equality `self`"""
@@ -516,6 +552,18 @@ class Eq:
     def compose_eq(self, e: 'Eq') -> 'Eq':
         """Models morphism `category.compose_eq`"""
         raise TypeError("Requires CategoryEq")
+
+    def equalizer(self) -> Mor:
+        """Models morphism `lex.equalizer`"""
+        raise TypeError("Requires LexEq")
+
+    def equalizer_pairing(self, mor: Mor) -> Mor:
+        """Models morphism `lex.equalizer_pairing`"""
+        raise TypeError("Requires LexEq")
+
+    def equalizer_pairing_unique(self, mor: Mor, fmor: Mor) -> 'Eq':
+        """Models morphism `lex.equalizer_pairing_unique`"""
+        raise TypeError("Requires LexEq")
 
 class PrimEq(Eq):
     """Base of primitive equalities"""

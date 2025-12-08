@@ -1,4 +1,4 @@
-# pylint: disable=C0103
+# pylint: disable=C0103, R0902, C0115, c0114
 from dataclasses import dataclass
 from typing import Self
 
@@ -12,7 +12,6 @@ class BasicQuiver(Theory):
     source: Mor | None = None
     target: Mor | None = None
 
-    #hat: dict
     def with_base(self, base: Self):
         return type(self)(
             Node=one(self.Node, base.Node),

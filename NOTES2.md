@@ -138,3 +138,55 @@ What about the rest of the body of such complicated functions? Just assume the r
 No point in doing defensive type checking. The instantiation functions (obj, mor, eq) are also not part of the theory.
 
 private > public > dynamic > defensive
+
+# Last `cell` of composition can't be a transformation. A composition with
+# transformations can only be checked after providing a source.
+# For this and other reasons, it makes sense to not make
+# transformation part of the theory the way morphisms are.
+# However, the theory can have attributes that act as macros. These
+# can only run at compilation time. Functoriality and naturality
+# are properties of macros (e.g. a functor consists of three
+# macros). These properties cannot be certified. Other properties
+# could also be proven, such as extranaturality and contravariant
+# functoriality. Sometimes a functor is such that the syntax for the
+# macro on objects is the same as the other macros. This seems to be
+# the case for functors involving 2-(co)limits. Macros taking cells
+# as arguments could have been defined in the ambient theory. This
+# is the requirement that allows having sensible macros, for example
+# the types of the parameters of a macro correspond to objects of
+# the ambient theory (e.g. cells). Hence, (general) certification is
+# possible in the ambient theory. Functors, etc. that involve two
+# categories occur in ambient theories defining more than one family
+# of cells (one for each category). Such a theory would include one
+# of the usual theories and simply extend it to support somethign
+# like 2-(co)limits.
+
+# A macro is just a morphism in the ambient theory (even a primitive morphism).
+# All such morphisms (even compose) can be called with a common syntax
+# f(...). Variadic compose, named projections, etc. are not supported because
+# they are not part of the theory but more akin to syntactic sugar.
+# Notice however that with such syntantic sugar one is able to produce
+# non-identical isomorphic products. One can use the special syntax (@ for compose)
+# when defining a macro?
+To get the pairing morphism one composes Mor with pairing.
+To get the projection one composes p$ with pairing, and so on.
+Purity makes this not problematic.
+
+meta fn macro: (f: Mor, g: Mor) -> Mor
+macro = compose(f, g)
+macro = `f @ g` # This would be a more advanced feature
+
+Postpone macros in the roadmap.
+
+# Naturality laws can be composed thus: l2@t1 & t2@l1 & t2@t1@F(f).
+# Explicit l2(f)@t1 t2@l1(f) & t2@t1@F(f)
+# Having implicit evaluation of laws seems too complicated.
+# The argument of l1 would have to be t1@F(f), so the composition
+# would have to be separated into factors.
+# The difficulties outweigh the benefits!
+
+# In wlex syntax signature is required to occur before invocation.
+# Definition can occur after invocation.
+# In python definition occurs along with signature.
+
+

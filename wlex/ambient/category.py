@@ -1,7 +1,9 @@
 """High level interface to category ambient"""
 from collections.abc import Callable, Iterator, Sequence
 from abc import ABCMeta, abstractmethod
-from typing import Any, Self, TypeGuard, TypeVar, overload
+from typing import Any, Self, TypeGuard, TypeVar, overload, NoReturn
+from itertools import chain
+from operator import attrgetter
 
 from .cells import Obj, Mor, Eq
 from .cells.category import Composition
@@ -10,63 +12,74 @@ from .public import category as public
 
 Transformation = Callable[[Obj], Mor]
 MorLike = Mor | Obj | Transformation
+EqLike = MorLike | Eq
 
 def _fit_mor(source: Obj, target: Obj, cell: Mor):
     # Subclasses of `Obj` can support specific type conversions. Handling of
     # transformations occurs before this (in which case no fitting is
     # needed).
-    try:
-        sconv = source.conversion(cell.source)
-    except cells.ObjUnfit as err:
-        raise cells.SourceUnfit("Can't convert", err.frm, err.to) from err
+    sconv = source.conversion(cell.source)
+    if not sconv:
+        raise cells.SourceUnfit("Can't convert", source, cell.source)
 
-    try:
-        tconv = cell.target.conversion(target)
-    except cells.ObjUnfit as err:
-        raise cells.TargetUnfit("Can't convert", err.frm, err.to) from err
+    tconv = cell.target.conversion(target)
+    if not tconv:
+        raise cells.TargetUnfit("Can't convert", cell.target, target)
 
     # This will be just `cell` when `tconv` as `sconv` are identities.
     return tconv.compose(cell).compose(sconv)
 
-def _source_fit_mor_like(source: Obj, cell: MorLike):
+def _mor_like_to_mor(source: Obj, cell: MorLike):
     if isinstance(cell, Callable):
         return cell(source)
 
     if isinstance(cell, Obj):
-        cell = cell.identity()
+        return cell.identity()
 
-    try:
-        sconv = source.conversion(cell.source)
-    except cells.ObjUnfit as err:
+    return cell
+
+def _source_fit_mor_like(source: Obj, cell: MorLike):
+    cell = _mor_like_to_mor(source, cell)
+
+    sconv = source.conversion(cell.source)
+    if not sconv:
         raise cells.SourceUnfit(
-            "Can't convert for fitting source", err.frm, err.to,
-        ) from err
+            "Can't convert for fitting source", source, cell.source,
+        )
 
     return cell.compose(sconv)
 
 def _source_fit_eq(source: Obj, cell: Eq):
-    try:
-        sconv = source.conversion(cell.ssource.source)
-    except cells.ObjUnfit as err:
+    sconv = source.conversion(cell.ssource.source)
+    if not sconv:
         raise cells.SourceUnfit(
-            "Can't convert for fitting source", err.frm, err.to,
-        ) from err
+            "Can't convert for fitting source", source, cell.ssource.source,
+        )
 
     return cell.compose_eq(sconv.ref())
+
+def _ssource_fit_eq(ssource: Mor, cell: Eq):
+    cell = _source_fit_eq(ssource.source, cell)
+
+    sconv = ssource.conversion(cell.ssource)
+    if not sconv:
+        raise cells.SSourceUnfit(
+            "Can't convert for fitting setoid source", ssource, cell.ssource,
+        )
+
+    return cell.trans(sconv)
 
 def _fit_eq(ssource: 'Mor', starget: 'Mor', cell: Eq):
     prev_err = None
     for i in range(2):
         try:
-            try:
-                sconv = ssource.conversion(cell.ssource)
-            except cells.MorUnfit as err:
-                raise cells.SSourceUnfit("Can't convert", err.frm, err.to) from err
+            sconv = ssource.conversion(cell.ssource)
+            if not sconv:
+                raise cells.SSourceUnfit("Can't convert", ssource, cell.ssource)
 
-            try:
-                tconv = cell.starget.conversion(starget)
-            except cells.MorUnfit as err:
-                raise cells.STargetUnfit("Can't convert", err.frm, err.to) from err
+            tconv = cell.starget.conversion(starget)
+            if not tconv:
+                raise cells.STargetUnfit("Can't convert", cell.starget, starget)
         except cells.MorUnfit as err:
             if i == 0:
                 cell = cell.sym()
@@ -118,14 +131,16 @@ class Theory(metaclass=ABCMeta):
         #       before being named.
 
 class Context:
-    """Provides methods for naming cells of a theory"""
+    """Handles cells of a theory with ambient category"""
     __slots__ = ('name_stack',)
     name_stack: tuple[str, ...]
 
     compose = staticmethod(public.compose)
     compose_eq = staticmethod(public.compose_eq)
     trans = staticmethod(public.trans)
+    sym = staticmethod(public.sym)
     identity = staticmethod(public.identity)
+    ref = staticmethod(public.ref)
     #from wlex.ambient.public import category # TODO: This should be variable!
     # Have a Category class with all the backend functions, etc.?
     # ABC interface would be overkill, just use a dataclass with Callable attributes, etc.
@@ -180,32 +195,33 @@ class Context:
     def mor(
         self, name: str, cell: MorLike | None,
         signature: tuple[Obj, Mor],
-    ) -> tuple[Mor, Callable[[cells.Cell], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | None], Eq]]: ...
     @overload
     def mor(
         self, name: str, cell: MorLike | None,
         signature: tuple[Mor, Obj],
-    ) -> tuple[Mor, Callable[[cells.Cell], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | None], Eq]]: ...
     @overload
     def mor(
         self, name: str, cell: MorLike | None,
         signature: tuple[Mor, Mor],
-    ) -> tuple[Mor, Callable[[cells.Cell], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | None], Eq]]: ...
 
     def mor(
         self, name: str, cell: MorLike | None,
         signature: tuple[Obj | Mor, Obj | Mor] | None = None,
     ):
         """Sets name on morphism and checks signature"""
+        # TODO: Check that there is no assumption about Transformation and Law preserving the (s)source.
         if not cell:
             raise ValueError(f'Missing cell "{name}"')
 
         if isinstance(cell, Obj):
             cell = cell.identity()
 
-        if signature is None:
+        if not signature:
             # Here `cell` can't be a transformation. A composition with
-            # transformation can only be checked after providing a source.
+            # transformations can only be checked after providing a source.
             # For this and other reasons, it makes sense to not make
             # transformation part of the theory the way morphisms are.
             if isinstance(cell, Callable):
@@ -219,6 +235,7 @@ class Context:
         source, target = signature
         if isinstance(source, Obj):
             if isinstance(cell, Callable):
+                # There is no assumption about source being preserved here.
                 cell = cell(source)
 
             if isinstance(target, Obj):
@@ -234,7 +251,7 @@ class Context:
         if isinstance(target, Obj):
             # Object `target` is disallowed here, because it would have the same
             # effect as setting the value of the morphism being created to
-            # `source`.
+            # `source`. There must preferably be only one way to do things.
             raise TypeError(
                 "If `source` is morphism, then so must be `target`.",
             )
@@ -249,15 +266,13 @@ class Context:
     def _hat_mor(
         self, name: str, cell: Mor,
         signature: tuple[Obj, Obj], hat_signature: tuple[Mor, Mor],
-    ) -> tuple[Mor, Callable[[cells.Cell], Eq]]:
+    ) -> tuple[Mor, Callable[[EqLike | None], Eq]]:
         """Sets name on morphism and checks signature"""
         source, target = signature
-
         cell = _fit_mor(source, target, cell)
-
         hat_source, hat_target = hat_signature
 
-        def _hat(c: cells.Cell):
+        def _hat(c: EqLike | None):
             # We defer assigning hat, because we may end up needing cell in its
             # definition.
             return self.eq(
@@ -268,7 +283,7 @@ class Context:
         return cell, _hat
 
     def eq(
-        self, name: str, cell: cells.Cell | None,
+        self, name: str, cell: EqLike | None,
         ssignature: tuple[MorLike, MorLike] | None = None,
     ):
         """Sets name on equality and checks signature"""
@@ -290,6 +305,11 @@ class Context:
             cell = cell.ref()
 
         if not ssignature:
+            if isinstance(cell, Callable):
+                raise TypeError(
+                    "If `cell` is transformation, setoid signature is needed.",
+                )
+
             self._set_name(name, cell)
             return cell
 
@@ -307,26 +327,22 @@ class Context:
             ssource = ssource(starget.source)
         else:
             raise TypeError(
-                "When no signature is provided, at least one of `ssource` "
-                "and `starget` must be a morphism.",
+                "At least one of `ssource` and `starget` must be a morphism.",
             )
+
+        if isinstance(cell, Callable):
+            # There is no assumption about ssource being preserved here.
+            cell = cell(ssource.source).ref()
 
         cell = _fit_eq(ssource, starget, cell)
         self._set_name(name, cell)
         return cell
 
-# In wlex syntax signature is required to occur before invocation.
-# Definition can occur after invocation.
-# In python definition occurs along with signature.
-# Primitives get defined by assigning param.
-# Category operations (ambient) are defined globally (even if dynamic),
-# not as methods.
-# There can be a context class for cart which supports method el besides method mor.
-
 ComposableT = TypeVar('ComposableT')
 Composer = Callable[[tuple[ComposableT, ComposableT]], ComposableT]
 
-def _cell_compose[T](comp: Composer[T], factors: Iterator[T]) -> T:
+def reduce[T](comp: Composer[T], factors: Iterator[T]) -> T:
+    """Variadic composition"""
     acc: T | None = None
     for f in factors:
         acc = f
@@ -339,97 +355,171 @@ def _cell_compose[T](comp: Composer[T], factors: Iterator[T]) -> T:
 
     return acc
 
-def _gen_fit_mors(source: Obj, factors: Sequence[MorLike]):
-    for f in reversed(factors):
+def gen_fit_mors(
+    source: Obj, factors: Iterator[MorLike], next_source: Callable[[Mor], Obj],
+):
+    """Adapt the sources of morphisms"""
+    for f in factors:
         f = _source_fit_mor_like(source, f)
-        source = f.source
+        source = next_source(f)
         yield f
 
-def _gen_fit_eqs(source: Obj, factors: Sequence[MorLike | Eq]):
-    for f in reversed(factors):
+def gen_fit_eqs(
+    source: Obj, factors: Iterator[EqLike], next_source: Callable[[Mor], Obj],
+):
+    """Adapt the sources of equalities"""
+    for f in factors:
         if isinstance(f, Eq):
             f = _source_fit_eq(source, f)
-            source = f.ssource.target
+            source = next_source(f.ssource)
             yield f
         else:
             f = _source_fit_mor_like(source, f)
-            source = f.source
-            f = f.ref()
+            source = next_source(f)
+            yield f.ref()
+
+def _gen_fit_eqs_for_trans(ssource: Mor, factors: Iterator[EqLike]):
+    # Conversion is done adapting the source and target from right to left.
+    for f in factors:
+        if isinstance(f, Eq):
+            f = _ssource_fit_eq(ssource, f)
+            ssource = f.starget
             yield f
+        else:
+            source = ssource.source
+            f = _fit_mor(source, ssource.target, _mor_like_to_mor(source, f))
+            ssource = f
+            yield f.ref()
 
 def _mor_compose(comp: Composer[Mor], factors: Iterator[Mor]):
     args = list(factors)
-    # Discard the LazyComposition, it is just for type checking.
-    _cell_compose(comp, iter(args))
-    return Composition.simplified(*args)
+    # Discard LazyComposition, it is just for type checking.
+    res = reduce(comp, iter(args))
+    if res.depth > 5:
+        return Composition.simplified(*list(reversed(args)))
+    return res.expanded()
 
-def all_morlike(
-    factors: Sequence[MorLike | Eq],
+def _all_eq_like(
+    factors: Sequence[EqLike | None],
+) -> TypeGuard[Sequence[EqLike]]:
+    return all(factors)
+
+def _all_eq(
+    factors: Sequence[EqLike | None],
+) -> TypeGuard[Sequence[Eq]]:
+    return all(isinstance(f, Eq) for f in factors)
+
+def _all_mor_like(
+    factors: Sequence[EqLike | None],
 ) -> TypeGuard[Sequence[MorLike]]:
-    return all(not isinstance(f, Eq) for f in factors)
+    return all(f and not isinstance(f, Eq) for f in factors)
+
+_get_target = attrgetter('target')
 
 def _compose(
-    comp: Composer[Mor], comp_eq: Composer[Eq],
-    factors: Sequence[MorLike | Eq],
-) -> Mor | Transformation | Eq:
-    if not factors:
-        raise ValueError("Empty composition is not allowed.")
+    comp: Composer[Mor],
+    first: MorLike,
+    factors: Sequence[MorLike]
+) -> Mor | Transformation:
+    factor_it = chain(reversed(factors), (first,))
 
-    # TODO: First convert all obj to mor
-
-    if all_morlike(factors):
+    if factors:
         last = factors[-1]
+    else:
+        last = first
 
-        if isinstance(last, Callable):
-            def _comp(source: Obj):
-                # This allows having more than one transformation in factors.
-                return _mor_compose(comp, _gen_fit_mors(source, factors))
-
-            return _comp
-
-        if isinstance(last, Obj):
-            last = last.identity()
-
-        return _mor_compose(comp, _gen_fit_mors(last.source, factors))
-
-    last = factors[-1]
     if isinstance(last, Callable):
-        # Transformation has no `ref`.
+        def _comp(source: Obj):
+            # This allows having more than one transformation in
+            # factors.
+            return _mor_compose(
+                comp, gen_fit_mors(source, factor_it, _get_target),
+            )
+
+        return _comp
+
+    if isinstance(last, Obj):
+        source = last
+    else:
+        source = last.source
+
+    return _mor_compose(comp, gen_fit_mors(source, factor_it, _get_target))
+
+def _compose_eq(
+    comp: Composer[Eq],
+    first: EqLike,
+    factors: Sequence[EqLike],
+) -> Eq:
+    if factors:
+        last = factors[-1]
+    else:
+        last = first
+
+    if isinstance(last, Callable):
+        # The result here would be a callable, which is not a transformation, so
+        # that it would only admit an explicit argument.
         raise TypeError(
             "Transformation is not allowed as the last factor of a composition "
             "containing equalities."
         )
 
     if isinstance(last, Obj):
-        last = last.identity()
+        source = last
+    elif isinstance(last, Mor):
+        source = last.source
+    else:
+        source = last.ssource.source
 
-    if isinstance(last, Mor):
-        last = last.ref()
+    factor_it = chain(reversed(factors), (first,))
+    return reduce(comp, gen_fit_eqs(source, factor_it, _get_target))
 
-    return _cell_compose(comp_eq, _gen_fit_eqs(last.ssource.source, factors))
+def operate_mor_or_eq(
+    op_mor: Callable[[MorLike, Sequence[MorLike]], Mor | Transformation],
+    op_eq: Callable[[EqLike, Sequence[EqLike]], Eq],
+    first: EqLike | None, factors: Sequence[EqLike | None],
+):
+    """Handles variadic operation for morphisms and equalities"""
+    if isinstance(first, Eq):
+        assert _all_eq_like(factors)
+        return op_eq(first, factors)
+
+    if first:
+        if _all_eq(factors):
+            return op_eq(first, factors)
+
+        assert _all_mor_like(factors)
+        return op_mor(first, factors)
+
+    raise ValueError("Missing factor")
 
 def composer(ctx: Context):
-    """Creates function for variadic high-level composition"""
-    def _all_morlike_or_eq(
-        factors: Sequence[MorLike | Eq | None],
-    ) -> TypeGuard[Sequence[MorLike | Eq]]:
-        return all(factors)
-
+    """Create function for variadic high-level composition"""
     comp = ctx.compose
     comp_eq = ctx.compose_eq
 
-    @overload
-    def compose(*factors: MorLike) -> Mor | Transformation: ...
-    @overload
-    def compose(*factors: Eq) -> Eq: ...
-    @overload
-    def compose(*factors: MorLike | Eq | None) -> Any: ...
+    def op_mor(
+        first: MorLike, factors: Sequence[MorLike],
+    ) -> Mor | Transformation:
+        return _compose(comp, first, factors)
 
-    def compose(*factors: MorLike | Eq | None):
-        if _all_morlike_or_eq(factors):
-            return _compose(comp, comp_eq, factors)
+    def op_eq(
+        first: EqLike, factors: Sequence[EqLike],
+    ) -> Eq:
+        return _compose_eq(comp_eq, first, factors)
 
-        raise ValueError("Missing factor")
+    @overload
+    def compose(first: MorLike | None, *factors: MorLike | None) -> Mor | Transformation: ...
+    @overload
+    def compose(first: Eq, *factors: EqLike | None) -> Eq: ...
+    @overload
+    def compose(first: MorLike, *factors: Eq) -> Eq: ...
+    @overload
+    def compose(first: None, *factors: EqLike | None) -> NoReturn: ...
+
+    def compose(
+        first: EqLike | None, *factors: EqLike | None,
+    ) -> Mor | Transformation | Eq:
+        return operate_mor_or_eq(op_mor, op_eq, first, factors)
 
     return compose
 
@@ -447,28 +537,36 @@ def composer(ctx: Context):
 # Variadic compose being outside the theory doesn't have a way to handle type checking
 # beyond the binary compose functions that underlie it.
 
-def _trans(trans_: Composer[Eq], factors: Sequence[cells.Cell]) -> Eq:
-    args = (
-        m.identity().ref() if isinstance(m, Obj) else (
-            m.ref() if isinstance(m, Mor) else m
-        ) for m in factors
-    )
-    # TODO: Use ssource conversion?
-    return _cell_compose(trans_, args)
+def _trans(trans_: Composer[Eq], first: EqLike, factors: Sequence[EqLike]) -> Eq:
+    if factors:
+        last = factors[-1]
+    else:
+        last = first
+
+    if isinstance(last, Callable):
+        raise TypeError(
+            "Transformation is not allowed as last factor when applying "
+            "transitivity."
+        )
+
+    if isinstance(last, Obj):
+        ssource = last.identity()
+    elif isinstance(last, Mor):
+        ssource = last
+    else:
+        ssource = last.ssource
+
+    factor_it = chain(reversed(factors), (first,))
+    return reduce(trans_, _gen_fit_eqs_for_trans(ssource, factor_it))
 
 def transitivity(ctx: Context):
     """Creates function for variadic high-level composition"""
-    def _all_cell(
-        factors: Sequence[cells.Cell | None],
-    ) -> TypeGuard[Sequence[cells.Cell]]:
-        return all(factors)
-
     trans_ = ctx.trans
 
-    def trans(*factors: cells.Cell | None):
-        if _all_cell(factors):
-            return _trans(trans_, factors)
+    def trans(first: EqLike | None, *factors: EqLike | None):
+        if first and _all_eq_like(factors):
+            return _trans(trans_, first, factors)
 
-        raise ValueError("Missing Factor")
+        raise ValueError("Missing factor")
 
     return trans

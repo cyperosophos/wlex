@@ -1,8 +1,9 @@
-# pylint: disable=C0103
+# pylint: disable=C0103, R0902, C0115, c0114
 from dataclasses import dataclass
 from typing import Self
 
-from wlex.ambient.category import Obj, Mor, Eq, Context, one, Theory, composer
+from wlex.ambient.category import Obj, Mor, one, Theory, composer
+from wlex.ambient.cart import Context, pairer
 from .quiver import BasicQuiver
 
 @dataclass
@@ -41,3 +42,4 @@ class Posetoid(Theory):
     @classmethod
     def from_prim(cls, ctx: Context, prim: Self):
         c = composer(ctx)
+        p = pairer(ctx)

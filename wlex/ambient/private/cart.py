@@ -91,9 +91,9 @@ def pairing(s: Span) -> ProductMor:
 
 def pairing_hat(s: Span):
     """Models hat equality for `cart.pairing`"""
-    _, _p, _q, _, _ = pairing(s)
+    _, p_, q_, _, _ = pairing(s)
     p, q = s
-    return p.same(_q) and q.same(_q)
+    return p.same(p_) and q.same(q_)
 
 def pairing_unique(pm: ProductMor) -> Eq:
     """Private model of morphism `cart.pairing_unique`"""
@@ -122,6 +122,17 @@ def _pmy(se: SpanEq) -> ProductMor:
 
 def pairing_eq(se: SpanEq) -> Eq:
     """Private model of morphism `cart.pairing_eq`"""
+    # This does not directly support the full variadic `pairing_eq` with labeled
+    # components. One produces the equality associatively, then composes with a
+    # "renamer" morphism (which allows repeated names if consistency proofs are
+    # provided). The result of composing a pairing with a renamer must be a
+    # pairing (in the sense of being an instance of the relevant class and not
+    # of `Composition`). The problem with this approach is that the labelless
+    # pairing would still need to be modified according to the consistency
+    # proofs before being composed with the renamer. An alternative to this is
+    # to just directly produce the pairing and pairing equality using the
+    # labels, and just use the corresponding binary operations for type
+    # checking.
     return category.sym(pairing_unique(_pmy(se)))
 
 def pairing_eq_hat(se: SpanEq):
