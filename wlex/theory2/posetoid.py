@@ -1,4 +1,4 @@
-# pylint: disable=C0103, R0902, C0115, c0114
+# pylint: disable=C0103, R0902, C0115, C0114
 from dataclasses import dataclass
 from typing import Self
 

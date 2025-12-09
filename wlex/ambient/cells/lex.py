@@ -25,7 +25,7 @@ LexMor = CartMor
 LexPrimMor = CartPrimMor
 
 class LexEq(CartEq, metaclass=ABCMeta):
-    """Models morphism `lex.Mor`"""
+    """Models object `lex.Mor`"""
     __slots__ = ()
 
     @override

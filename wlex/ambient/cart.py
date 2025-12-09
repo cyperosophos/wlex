@@ -1,16 +1,13 @@
 """High level interface for cartesian ambient"""
-from collections.abc import Sequence, Callable, Iterator
-from typing import TypeGuard, overload, NoReturn
+from collections.abc import Sequence, Iterator
+from typing import TypeGuard, overload
 from itertools import chain
-from operator import attrgetter
 
 from .cells import Obj, Mor, Eq
 from . import category
-from .category import EqLike, MorLike, Transformation, operate_mor_or_eq, reduce
+from .category import EqLike, MorLike, Transformation, Law, reduce
 from .public import cart as public
 from .cells.cart import Product, ProductMor, LabeledObj, Label
-
-LabeledOptionalObj = tuple[str, Obj | None] | tuple[tuple[str, ...], Product]
 
 class Context(category.Context):
     """Handles cells of a theory with ambient cart"""
@@ -29,14 +26,12 @@ class Context(category.Context):
 
         return _proj
 
-    def el(self, name: str, cell: MorLike | None, target: Obj | None = None):
+    def el(self, name: str, cell: MorLike, target: Obj | None = None):
         """Sets name on element and checks its type
 
         An element is a morphism from the terminal object.
         """
         return self.mor(name, cell, target and (self.terminal, target))
-
-_get_source = attrgetter('source')
 
 def _unlabeled[T](factors: Iterator[T]) -> Sequence[tuple[Label, T]]:
     return [('', f) for f in factors]
@@ -46,50 +41,20 @@ def _pairing(
     first: MorLike,
     factors: Sequence[MorLike],
 ) -> Mor | Transformation:
-    factor_it = chain((first,), factors)
+    def op(it: Iterator[Mor]):
+        return _mor_pairing(comp, it)
 
-    # Conversion is done adapting the source from left to right.
-    # See: `category._gen_fit_eqs_for_trans` which adapts in the opposite
-    # direction.
-    if isinstance(first, Callable):
-        def _pair(source: Obj):
-            return _mor_pairing(
-                comp, category.gen_fit_mors(source, factor_it, _get_source),
-            )
-
-        return _pair
-
-    if isinstance(first, Obj):
-        source = first
-    else:
-        source = first.source
-
-    return _mor_pairing(
-        comp, category.gen_fit_mors(source, factor_it, _get_source),
-    )
+    return category.operate_mor_common_source(op, first, factors)
 
 def _pairing_eq(
     comp: category.Composer[Eq],
     first: EqLike,
     factors: Sequence[EqLike],
-) -> Eq:
-    if isinstance(first, Callable):
-        raise TypeError(
-            "Transformation is not allowed as the first factor of a pairing "
-            "containing equalities."
-        )
+) -> Eq | Law:
+    def op(it: Iterator[Eq]):
+        return _eq_pairing(comp, it)
 
-    if isinstance(first, Obj):
-        source = first
-    elif isinstance(first, Mor):
-        source = first.source
-    else:
-        source = first.ssource.source
-
-    factor_it = chain((first,), factors)
-    return _eq_pairing(
-        comp, category.gen_fit_eqs(source, factor_it, _get_source),
-    )
+    return category.operate_eq_common_source(op, first, factors)
 
 def _mor_pairing(comp: category.Composer[Mor], factors: Iterator[Mor]):
     args = list(factors)
@@ -136,75 +101,77 @@ def pairer(ctx: Context):
 
     def op_eq(
         first: EqLike, factors: Sequence[EqLike],
-    ) -> Eq:
+    ) -> Eq | Law:
         return _pairing_eq(pair_eq, first, factors)
 
     @overload
     def pairing(
         consistency: Sequence[Eq],
-        first: tuple[Label, MorLike | None],
-        *factors: tuple[Label, MorLike | None],
+        first: tuple[Label, MorLike],
+        *factors: tuple[Label, MorLike],
     ) -> Mor | Transformation: ...
     @overload
     def pairing(
         consistency: Sequence[Eq],
-        first: tuple[Label, Eq],
-        *factors: tuple[Label, EqLike | None],
-    ) -> Eq: ...
+        first: tuple[Label, Eq | Law],
+        *factors: tuple[Label, EqLike],
+    ) -> Eq | Law: ...
     @overload
     def pairing(
         consistency: Sequence[Eq],
         first: tuple[Label, MorLike],
-        *factors: tuple[Label, Eq],
-    ) -> Eq: ...
-    @overload
-    def pairing(
-        consistency: Sequence[Eq],
-        first: tuple[Label, None],
-        *factors: tuple[Label, EqLike | None],
-    ) -> NoReturn: ...
+        *factors: tuple[Label, Eq | Law],
+    ) -> Eq | Law: ...
 
     def pairing(
         consistency: Sequence[Eq],
-        first: tuple[Label, EqLike | None],
-        *factors: tuple[Label, EqLike | None],
-    ) -> Mor | Transformation | Eq:
+        first: tuple[Label, EqLike],
+        *factors: tuple[Label, EqLike],
+    ) -> Mor | Transformation | Eq | Law:
         # A uniform even if somewhat cumbersome way of providing factors (namely
         # as tuples containing the label and the factor) makes sense, since
         # theories written in python are just transpilations of wlex.
         if not factors:
             raise ValueError("At least two components must be provided.")
 
-        res = operate_mor_or_eq(
+        res = category.operate_mor_or_eq(
             op_mor, op_eq, first[1], [f for _, f in factors],
         )
 
         if isinstance(res, Mor):
             return _labeled_product_mor(res, factors, consistency)
 
-        if isinstance(res, Callable):
+        if isinstance(res, Transformation):
+            @Transformation
             def _pair(source: Obj):
                 return _labeled_product_mor(res(source), factors, consistency)
 
             return _pair
 
-        return Eq(
+        if isinstance(res, Law):
+            @Law
+            def _pair_eq(source: Obj):
+                e = res(source)
+                eq = Eq(
+                    _labeled_product_mor(e.ssource, factors, consistency),
+                    _labeled_product_mor(e.starget, factors, consistency),
+                )
+                eq.proven = e.proven
+                return eq
+
+            return _pair_eq
+
+        eq = Eq(
             _labeled_product_mor(res.ssource, factors, consistency),
             _labeled_product_mor(res.starget, factors, consistency),
         )
+        eq.proven = res.proven
+        return eq
 
     return pairing
 
 def _all_eq(factors: Sequence[EqLike]) -> TypeGuard[Sequence[Eq]]:
     return all(isinstance(f, Eq) for f in factors)
-
-def _all_labeled_obj(
-    params: Sequence[LabeledOptionalObj],
-) -> TypeGuard[Sequence[LabeledObj]]:
-    return all(f is not None for _, f in params)
-
-def _is_labeled_obj(lo: LabeledOptionalObj) -> TypeGuard[LabeledObj]:
-    return lo[1] is not None
 
 def pairer0(ctx: Context):
     "Same as `pairer` but without `consistency` argument"
@@ -212,29 +179,24 @@ def pairer0(ctx: Context):
 
     @overload
     def pairing(
-        first: tuple[Label, MorLike | None],
-        *factors: tuple[Label, MorLike | None],
+        first: tuple[Label, MorLike],
+        *factors: tuple[Label, MorLike],
     ) -> Mor | Transformation: ...
     @overload
     def pairing(
-        first: tuple[Label, Eq],
-        *factors: tuple[Label, EqLike | None],
-    ) -> Eq: ...
+        first: tuple[Label, Eq | Law],
+        *factors: tuple[Label, EqLike],
+    ) -> Eq | Law: ...
     @overload
     def pairing(
         first: tuple[Label, MorLike],
-        *factors: tuple[Label, Eq],
-    ) -> Eq: ...
-    @overload
-    def pairing(
-        first: tuple[Label, None],
-        *factors: tuple[Label, EqLike | None],
-    ) -> NoReturn: ...
+        *factors: tuple[Label, Eq | Law],
+    ) -> Eq | Law: ...
 
     def pairing(
-        first: tuple[Label, EqLike | None],
-        *factors: tuple[Label, EqLike | None],
-    ) -> Mor | Transformation | Eq:
+        first: tuple[Label, EqLike],
+        *factors: tuple[Label, EqLike],
+    ) -> Mor | Transformation | Eq | Law:
         first_label = first[0]
         factor_labels = [label for label, _ in factors]
 
@@ -247,17 +209,18 @@ def pairer0(ctx: Context):
 
         def op_eq(
             first: EqLike, factors: Sequence[EqLike],
-        ) -> Eq:
+        ) -> Eq | Law:
             if isinstance(first, Eq):
                 return orig_pairing(
                     (), (first_label, first), *list(zip(factor_labels, factors)),
                 )
+
             assert _all_eq(factors)
             return orig_pairing(
                 (), (first_label, first), *list(zip(factor_labels, factors)),
             )
 
-        return operate_mor_or_eq(
+        return category.operate_mor_or_eq(
             op_mor, op_eq,
             first[1], [f for _, f in factors],
         )
@@ -270,11 +233,8 @@ def producer(ctx: Context):
     def produce(objs: tuple[Obj, Obj]):
         return ctx.product(objs)[0].source
 
-    def product(first: LabeledOptionalObj, *params: LabeledOptionalObj) -> Product:
-        if _is_labeled_obj(first) and _all_labeled_obj(params):
-            reduce(produce, chain((first[1],), (f for _, f in params)))
-            return Product(list(chain((first,), params)))
-
-        raise ValueError("Missing param")
+    def product(first: LabeledObj, *params: LabeledObj) -> Product:
+        reduce(produce, chain((first[1],), (f for _, f in params)))
+        return Product(list(chain((first,), params)))
 
     return product
