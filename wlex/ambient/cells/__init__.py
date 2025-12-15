@@ -1,5 +1,5 @@
 """Base classes for cells and cell exceptions"""
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import Optional
@@ -365,7 +365,7 @@ class Mor(metaclass=ABCMeta):
         same source (resp. target), and their equality is given by reflexivity.
         """
         # There are a few cases where one should (partially) verify the
-        # signature, e.g. identity to ensure that being the same implies having
+        # signature, e.g. identity, to ensure that being the same implies having
         # the same signature. This returns False when the signatures don't
         # coincide even if the sameness comparison is actually nonsensical in
         # such case.

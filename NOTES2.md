@@ -189,4 +189,30 @@ Postpone macros in the roadmap.
 # Definition can occur after invocation.
 # In python definition occurs along with signature.
 
+Products
+# TODO: Should the pairing for the composition mentioned here have names
+# f and g? Probably not since e.g. args in python don't have to be named.
+# Check Product methods accepts, same, identical, etc.
+# TODO: Two product types are equal when they have the same
+# types as components with the same names in the same order,
+# i.e. same params. Otherwise, they may still be isomorphic.
+# It makes sense then that equality for instances of sequence
+# classes that are treated as instance of products should be
+# true even when the classes don't coincide. Such equality
+# may have to be intensionally proven (as equality of morphisms
+# from the point). For equalizers one has inclusions, which
+# the equalities would still follow. Notice however that in the
+# case of intensional equalities, the morphisms must have the
+# same signature. So this would not work with inclusion.
+# Nothing needs to be done with NamedTuple.
+Perhaps allow renaming conversions when the source has no str name for the component (follow rules based on python args kwargs).
+A converting to B means that everything that works on B must work
+the same way on A (accept, same, laws, transformation).
+Having conversion is specially important when having a pairing of
+args with the required names but order distinct from the target
+product of parameters. This case is currently not handled since
+ev and accept work with tuples not dictionaries. The way to handle
+this is with a conversion.
+
+TODO: In high-level composition convert Obj to projection?
 

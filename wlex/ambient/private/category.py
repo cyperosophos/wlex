@@ -70,7 +70,7 @@ def target(mor: Mor) -> Obj:
     return mor.target
 
 def compose(c: Composable) -> Mor:
-    """Private model of morphism `category.compose`"""
+    """Model of morphism `category.compose`"""
     f, g = c
     return f.compose(g)
 
@@ -90,11 +90,11 @@ def identity_hat(obj: Obj):
     return obj.identical(source(id_)) and obj.identical(target(id_))
 
 def ssource(eq: Eq) -> Mor:
-    """Private model of morphism `category.S.source`"""
+    """Model of morphism `category.S.source`"""
     return eq.ssource
 
 def starget(eq: Eq) -> Mor:
-    """Private model of morphism `category.S.target`"""
+    """Model of morphism `category.S.target`"""
     return eq.starget
 
 def ref(mor: Mor) -> Eq:
@@ -107,7 +107,7 @@ def ref_hat(mor: Mor):
     return mor.same(ssource(r)) and mor.same(starget(r))
 
 def trans(p: Path) -> Eq:
-    """Private model of morphism `category.S.S.P.trans`"""
+    """Model of morphism `category.S.S.P.trans`"""
     f, g = p
     return f.trans(g)
 
@@ -118,7 +118,7 @@ def trans_hat(p: Path):
     return ssource(g).same(ssource(h)) and starget(f).same(starget(h))
 
 def left_identity_law(mor: Mor) -> Eq:
-    """Private model of morphism `category.left_identity_law`"""
+    """Model of morphism `category.left_identity_law`"""
     return mor.ref()
 
 def left_identity_law_hat(mor: Mor):
@@ -130,7 +130,7 @@ def left_identity_law_hat(mor: Mor):
     )
 
 def right_identity_law(mor: Mor) -> Eq:
-    """Private model of morphism `category.right_identity_law`"""
+    """Model of morphism `category.right_identity_law`"""
     return mor.ref()
 
 def right_identity_law_hat(mor: Mor):
@@ -142,7 +142,7 @@ def right_identity_law_hat(mor: Mor):
     )
 
 def associativity(s: AssociativitySource) -> Eq:
-    """Private model of morphism `category.associativity`"""
+    """Model of morphism `category.associativity`"""
     f, g, h = s
     return f.compose(g).compose(h).ref()
 
@@ -156,11 +156,11 @@ def associativity_hat(src: AssociativitySource):
     )
 
 def eq_signature(eq: Eq):
-    """Private model of morphism `category.S.eq`"""
+    """Model of morphism `category.S.eq`"""
     return ssource(eq), starget(eq)
 
 def eq_unique(s: EqUniqueSource) -> Eq:
-    """Private model of morphism `category.S.unique`"""
+    """Model of morphism `category.S.unique`"""
     d, _ = s
     return d
 
@@ -171,7 +171,7 @@ def eq_unique_hat(s: EqUniqueSource):
     return d.parallel(r) and e.parallel(r)
 
 def sym(eq: Eq) -> Eq:
-    """Private model of morphism `category.S.S.sym`"""
+    """Model of morphism `category.S.S.sym`"""
     return eq.sym()
 
 def sym_hat(eq: Eq):
@@ -180,7 +180,7 @@ def sym_hat(eq: Eq):
     return ssource(eq).same(starget(r)) and starget(eq).same(ssource(r))
 
 def compose_eq(c: ComposableEq) -> Eq:
-    """Private model of morphism `category.compose_eq`"""
+    """Model of morphism `category.compose_eq`"""
     d, e = c
     return d.compose_eq(e)
 

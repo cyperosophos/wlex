@@ -4,60 +4,23 @@ Here public means that there is dynamic validation (type checking) of arguments
 besides the static type checking supported through type annotations.
 """
 from ..private import category
-from ..cells import Mor, Eq
-from . import validate
+from . import validated
 
 source = category.source
 target = category.target
 
-def compose(c: category.Composable) -> Mor:
-    """Public model of morphism `category.compose`"""
-    validate(c, category.is_composable)
-    return category.compose(c)
-
+compose = validated(category.compose, category.is_composable)
 identity = category.identity
-
-def ssource(eq: Eq) -> Mor:
-    """Public model of morphism `category.S.source`"""
-    validate(eq, category.is_eq)
-    return category.ssource(eq)
-
-def starget(eq: Eq) -> Mor:
-    """Public model of morphism `category.S.target`"""
-    validate(eq, category.is_eq)
-    return category.starget(eq)
-
+ssource = validated(category.ssource, category.is_eq)
+starget = validated(category.starget, category.is_eq)
 ref = category.ref
-
-def trans(p: category.Path) -> Eq:
-    """Public model of morphism `category.trans`"""
-    validate(p, category.is_path)
-    return category.trans(p)
-
+trans = validated(category.trans, category.is_path)
 left_identity_law = category.left_identity_law
 right_identity_law = category.right_identity_law
-
-def associativity(s: category.AssociativitySource) -> Eq:
-    """Public model of morphism `category.associativity`"""
-    validate(s, category.is_associativity_source)
-    return category.associativity(s)
-
-def eq_signature(eq: Eq):
-    """Public model of morphism `category.S.eq`"""
-    validate(eq, category.is_eq)
-    return category.eq_signature(eq)
-
-def eq_unique(s: category.EqUniqueSource):
-    """Public model of morphism `category.S.unique`"""
-    validate(s, category.is_path)
-    return category.eq_unique(s)
-
-def sym(eq: Eq):
-    """Public model of morphism `category.S.S.sym`"""
-    validate(eq, category.is_eq)
-    return category.sym(eq)
-
-def compose_eq(c: category.ComposableEq):
-    """Public model of morphism `category.compose_eq`"""
-    validate(c, category.is_composable_eq)
-    return category.compose_eq(c)
+associativity = validated(
+    category.associativity, category.is_associativity_source,
+)
+eq_signature = validated(category.eq_signature, category.is_eq)
+eq_unique = validated(category.eq_unique, category.is_eq_unique_source)
+sym = validated(category.sym, category.is_eq)
+compose_eq = validated(category.compose_eq, category.is_composable_eq)
