@@ -1,11 +1,13 @@
 """Lex cell classes"""
 from typing import Self, override
 from abc import ABCMeta
-from collections.abc import Iterable, Iterator, Sequence
-from itertools import chain
+from collections.abc import Iterable, Sequence
+from bisect import bisect_left as bisect
 
 from ..cells import Obj, Mor, Eq, PrimEq
-from .cart import CartObj, CartMor, CartPrimMor, CartEq, CartComposition
+from .cart import (
+    CartObj, CartMor, CartPrimMor, CartEq, CartComposition, Product, LabeledObj,
+)
 
 # TODO: This method must be instead in a LexObj subclass in ambient.lex
 # where Eq | None is the arg type, there is at least one equality
@@ -31,11 +33,11 @@ class LexEq(CartEq, metaclass=ABCMeta):
     @override
     def equalizer(self):
         source = self.ssource.source
-        return Inclusion(Equalizer(source, self), source)
+        return Inclusion(Subobject(source, (('', self),)), source)
 
     @override
     def equalizer_pairing(self, mor: Mor):
-        return EqualizerMor(mor, (('', self),), flattened=False)
+        return EqualizerMor(mor, Subobject(mor.target, (('', self),)))
 
     @override
     def equalizer_pairing_unique(self, mor: Mor, fmor: Mor) -> Eq:
@@ -49,72 +51,66 @@ class LexPrimEq(PrimEq, LexEq, metaclass=ABCMeta):
 
 LabeledParallel = tuple[str, Eq]
 
-class Equalizer(CartObj):
-    """Minimal model of equalizer"""
-    __slots__ = 'sup', 'requirement'
-    sup: Obj
-    requirement: Eq
-
-    def __init__(self, sup: Obj, requirement: Eq):
-        self.sup = sup
-        self.requirement = requirement
-
-    def accepts(self, x: object) -> bool:
-        return self.sup.accepts(x) and self.requirement.verify(x)
-
-    def same(self, x: object, y: object) -> bool:
-        return self.sup.same(x, y)
-
-    def to_partial_subobject(self, name: str):
-        """Convert to subobject"""
-        return PartialSubobject(self.sup, name, self.requirement)
-
-class BaseSubobject:
+class BaseSubobject(LexObj):
     __slots__ = ()
-    sup: Obj
-    requirements: list[Eq]
-    names: dict[str, int]
 
-    def labeled_requirements(self) -> list[LabeledParallel]:
-        """Requirements with labels"""
-        reqs = [('', r) for r in self.requirements]
+    def conversion(self, obj: Obj):
+        return super().conversion(obj) or (
+            self.diff(obj) > 0 and Inclusion(self, obj)
+        ) or None
 
-        for name, idx in self.names.items():
-            reqs[idx] = (name, reqs[idx][1])
-
-        return reqs
-
-
-class Subobject(CartObj, BaseSubobject):
+class Subobject(BaseSubobject):
     """Models subobject
 
     A subobject is an object to which requirements have been associated.
     """
-    __slots__ = 'sup', 'requirements', 'names'
+    __slots__ = 'sup', 'requirements', 'names', 'sup_len'
+    sup: Obj
+    requirements: list[Eq]
+    names: dict[str, int]
+    sup_len: int
 
-    def __init__(self, sup: Obj, requirements: Sequence[LabeledParallel]):
-        if not requirements:
-            raise ValueError('No requirements for subobject')
+    # def labeled_requirements(self) -> list[LabeledParallel]:
+    #     """Requirements with labels"""
+    #     reqs = [('', r) for r in self.requirements]
 
-        if isinstance(sup, (Subobject, PartialSubobject)):
-            raise TypeError('Subobject is not allow as superobject.')
+    #     for name, idx in self.names.items():
+    #         reqs[idx] = (name, reqs[idx][1])
 
+    #     return reqs
+
+    def inclusion(self):
+        return Inclusion(self, self.sup)
+
+    def __init__(self, sup: Obj, requirements: Iterable[LabeledParallel]):
         self.sup = sup
-        self.requirements = [eq for _, eq in requirements]
-        self.names = dict(
-            (name, i) for i, (name, _) in enumerate(requirements) if name
-        )
+        self.requirements = []
+        self.names = {}
+        names = self.names
+        reqs = self.requirements
 
-    def conversion(self, obj: Obj):
-        return super().conversion(obj) or (
-            self.included(obj) and Inclusion(self, obj)
-        ) or None
+        for name, eq in requirements:
+            if name:
+                names[name] = len(reqs)
 
-    def included(self, x: Obj):
-        """`x` includes `self`.
+            reqs.append(eq)
 
-        This means that any value accepted by `self` is also accepted by `x`.
-        """
+        if isinstance(sup, Subobject | LexProduct):
+            self.sup_len = sup.sup_len + len(sup.requirements)
+        else:
+            self.sup_len = 0
+
+    # TODO: This should return an int corresponding to the distance from the superobject or -1 if there is no inclusion.
+    @override
+    def diff(self, x: Obj):
+        # For simplicity this requires inclusion of one superobject in the other.
+        # Whatever names appear on the subobject must also appear on the
+        # superobject, unless they correspond to a requirement not belonging to
+        # the superobject. This only recognizes inclusion in a product when the
+        # `sup` is included in the product. The idea is that accounting for
+        # requirements that are differently distributed along the superobject
+        # hierarchy is too complicated.
+
         # To make sense of inclusion for purpose of conversion, names also must
         # coincide. In doesn't make sense to allow conversion when names don't
         # coincide, because the effect of laws is different. Laws that work on
@@ -126,7 +122,7 @@ class Subobject(CartObj, BaseSubobject):
         # Transformations that work on the losely named product must work the same
         # way on the product. Requirements cannot be reordered like the components
         # of a product, they are only accessed through laws and transformations built
-        # with `where`. Inclusions with consistent naming must be explicitly built,
+        # with `where`. Inclusions without consistent naming must be explicitly built,
         # just like inclusions where the order of requirements is different.
         # Consistent naming ensures that the result is the same in the case of refactoring
         # by composing directly a morphism with the law (in which case no inclusion
@@ -135,73 +131,102 @@ class Subobject(CartObj, BaseSubobject):
         # requirements (like component names in product). If a name shows up in the
         # subobject and in the superobject then it must refer to the same equality.
         # A name can show up in the subobject but not in the superobject.
+        s = super().diff(x)
+        if s >= 0:
+            return s
+
+        sup = self.sup
+        reqs = self.requirements
+        if isinstance(x, Subobject):
+            s = sup.diff(x.sup)
+            if s >= 0:
+                xreqs = x.requirements
+                names = self.names
+                xnames = x.names
+
+                if set(reqs) >= set(xreqs) and all(
+                    r not in xreqs or (
+                        n in xnames and r.parallel(xreqs[xnames[n]])
+                    ) for n, r in (
+                        (n, reqs[i]) for n, i in names.items()
+                    )
+                ):
+                    return s + len(reqs) - len(xreqs)
+
+            return -1
+
+        s = sup.diff(x)
+        if s >= 0:
+            return s + len(reqs)
+
+        return -1
+
+    @override
+    def ireq(self, idx: int):
+        reqs = self.requirements
+        sup_len = self.sup_len
+        if idx < sup_len:
+            if idx < 0:
+                raise ValueError("`name` of type `int` can't be negative.")
+
+            return self.sup.ireq(idx)
+
+        idx -= sup_len
+        if idx >= len(reqs):
+            raise ValueError("`name` of type `int` is too large.")
+
+        eq = reqs[idx].compose_eq(Inclusion(self, self.sup).ref())
+        eq.proven = True
+        return eq
+
+    @override
+    def req(self, name: str):
+        # TODO: !! Define LexProduct which handles flattening of component requirements!
+        # Notice that in this case some isinstance(..., Subobject) checks will need to be
+        # changed to isintance(..., LexProduct | Subobject).
+        reqs = self.requirements
+        names = self.names
+        if name not in names:
+            try:
+                return self.sup.req(name)
+            except TypeError as exc:
+                raise ValueError(
+                    "`name` does not correspond to any requirement",
+                ) from exc
+
+        idx = names[name]
+        eq = reqs[idx].compose_eq(Inclusion(self, self.sup).ref())
+        eq.proven = True
+        return eq
+        # TODO: target of inclusion must be partial object
+        # Just directly use the source of the requirement. While the composition does
+        # not undergo any check of source matching target, it is better to follow the
+        # consistently.
+
+    def identical(self, x: Obj):
         if super().identical(x):
             return True
 
-        sup = self.sup
-        if isinstance(x, Subobject) and sup.identical(x.sup):
+        if isinstance(x, Subobject) and self.sup.identical(x.sup):
             reqs = self.requirements
             xreqs = x.requirements
             names = self.names
             xnames = x.names
 
-            if len(reqs) < len(xreqs):
-                return False
-
-            for r, s in zip(reqs, xreqs):
-                if not r.parallel(s):
-                    return False
-
-            for name, idx in xnames.items():
-                if name in names and names[name] != idx:
-                    return False
-
-            return True
-
-        return sup.identical(x)
-
-    @override
-    def req(self, name: str | int = 0):
-
-        deep = isinstance(self.sup, Subobject)
-        if deep:
-            requirements = list(self.all_requirements())
-        else:
-            requirements = self.requirements
-
-        if isinstance(name, int):
-            idx = name
-            if idx >= len(requirements) or idx < 0:
-                raise ValueError("`name` of type `int` is out of range.")
-        else:
-            if deep:
-                idx = self.name_to_len_idx(name)[1]
-            else:
-                idx = self.names.get(name, -1)
-
-            if idx < 0:
-                raise ValueError(
-                    "`name` does not correspond to any requirement.",
+            return (
+                set(reqs) == set(xreqs) and len(names) == len(xnames) and all(
+                    n in xnames and r.parallel(xreqs[xnames[n]])
+                    for n, r in (
+                        (n, reqs[i]) for n, i in names.items()
+                    )
                 )
+            )
 
-        # TODO: target of inclusion must be partial object
-        # Just directly use the source of the requirement. While the composition does
-        # not undergo any check of source matching target, it is better to follow the
-        # consistently.
-        eq = requirements[idx].compose_eq(Inclusion(self, self.sup).ref())
-        eq.proven = True
-        return eq
-
-    def identical(self, x: Obj):
-        return super().identical(x) or (
-            isinstance(x, Subobject)
-            and self.top_sup.identical(x.top_sup)
-            and set(self.all_requirements()) == set(x.all_requirements())
-        )
+        return False
 
     def hint(self):
         return (
-            type(self), self.top_sup, sum(hash(r) for r in self.all_requirements()),
+            type(self), self.sup, sum(hash(r) for r in self.requirements),
         )
 
     def accepts(self, x: object):
@@ -212,142 +237,56 @@ class Subobject(CartObj, BaseSubobject):
     def same(self, x: object, y: object):
         return self.sup.same(x, y)
 
-class PartialSubobject(CartObj):
-    __slots__ = 'sup', 'requirements', 'names', 'req_length'
-    sup: Obj
-    requirements: list[Eq]
-    names: dict[str, int]
-    req_length: int
+# TODO: The superobject can be a product, with some components themselves having
+# requirements. These requirements must become part of the subobject requirements.
 
-    def __init__(self, sup: Obj, name: str, requirement: Eq):
-        if isinstance(sup, PartialSubobject):
-            requirements = sup.requirements
-            names = sup.names
-            if sup.req_length < len(requirements):
-                raise ValueError("Can't reuse partial subobject as superobject")
+# TODO: Proofs in `where` are equalities, so when using laws one must explicitly
+# compose with the source in order to get the equality. One writes
+# `req() @ X` or `t(req(0), req(1)) @ X` where X is the subobject.
+# This solution appears then to be to disallow requirements that depend on requirements
+# in the same `where` call. No partial subobjects, no flattening!
+# Some `where` calls would then become two `where` calls.
+# The source of the equalizer_mor has to be the source of the proofs, this
+# points to not needing to explicitly compose with `X`. Avoid as well explicit
+# composition with inclusion? Unless there is a single requirement,
+# req(...) must give an inclusion (besides the one that gets composed with the requirement).
+# This inclusion goes from the superobject to the largest admissible source.
+# !! The goal is to prove that two equalizer morphisms are the same
+# even if they differ only by the inclusion factor. This should be possible
+# intentionally by using the equalizer_pairing_unique.
 
-            self.sup = sup.sup
-            self.requirements = requirements
-            self.names = names
-
-            if name:
-                # `name` masks any previous occurrence of the same key.
-                names[name] = len(requirements)
-
-            requirements.append(requirement)
-            self.req_length = len(requirements)
-        else:
-            self.sup = sup
-            self.requirements = [requirement]
-
-            if name:
-                self.names = {name: 0}
-            else:
-                self.names = {}
-
-            self.req_length = 1
-
-    # TODO: The superobject can be a product, with some components themselves having
-    # requirements. These requirements must become part of the subobject requirements.
-
-    # TODO: Proofs in `where` are equalities, so when using laws one must explicitly
-    # compose with the source in order to get the equality. One writes
-    # `req() @ X` or `t(req(0), req(1)) @ X` where X is the subobject.
-    # This solution appears then to be to disallow requirements that depend on requirements
-    # in the same `where` call. No partial subobjects, no flattening!
-    # Some `where` calls would then become two `where` calls.
-    # The source of the equalizer_mor has to be the source of the proofs, this
-    # points to not needing to explicitly compose with `X`. Avoid as well explicit
-    # composition with inclusion? Unless there is a single requirement,
-    # req(...) must give an inclusion (besides the one that gets composed with the requirement).
-    # This inclusion goes from the superobject to the largest admissible source.
-    # !! The goal is to prove that two equalizer morphisms are the same
-    # even if they differ only by the inclusion factor. This should be possible
-    # intentionally by using the equalizer_pairing_unique.
-
-    # TODO: Implement hint and identical! One still needs equality `parallel`
-    # to work when using reqs. f @ i and g @ i are the same when they only differ
-    # by the requirements of the source of the first factor. This is the nature
-    # of (intensional) inclusions (which include coprojections). Notice that in the case of
-    # coprojections extensivity seems to be what allows overloading.
-    # Think of constructing an isomorphism of subobjects with the same requirements
-    # in different order. The sources of the requirements will end up being different
-    # due to the order. A requirement that appears later in the list will itself have
-    # more (superfluous) requirements. This is comparable to the situation where not all
-    # components of the superobject product are used. In this case the transformation ends up
-    # giving a composition whose last factor is a projection.
-    # The arguments of `where` are requirements along with their proofs.
-    # In a sense laws allow deferring the proof. Define f, g: X -> Y and h: Z -> X.
-    # Suppose e: f @ h == g @ h. One gets h': Z -> X' where X' has requirement f == g.
-    # h' is h with requirement f == g and proof e. The proof must be parallel to the
-    # composition of the requirement with h. (Perhaps rename req to proof.)
-    # The requirement in `where` can be a law (but concerned with the proof being a law). When setting the source to the partial
-    # subobject this law becomes an (unproven) equality, which turns the target of the morphism
-    # into a subobject. Just like composition with transformation projections results in composition with projections,
-    # the result of `where` with a law must be a composition with an inclusion.
-    # The morphism composed with the inclusion must have the largest admissible source.
-    # When a proof in `where` is a law, the resulting morphism is a transformation.
-    # So one deduces this largest source from the laws used in the proofs?
-
-    @override
-    def req(self, name: str | int = 0):
-        # Raises IndexError when `name` is an index out of range
-        sup = self.sup
-        if isinstance(name, str):
-            idx = self.names.get(name)
-
-            if idx is None:
-                if isinstance(sup, Subobject):
-                    return sup.req(name)
-
-                raise ValueError(
-                    "`name` does not correspond to any requirement"
-                )
-        else:
-            idx = name
-            if isinstance(sup, Subobject):
-                sup_reqs = sup.requirements
-                sup_len = len(sup_reqs)
-
-                if idx < sup_len:
-                    return sup.req(idx)
-
-                idx -= sup_len
-
-        eq = self.requirements[idx].compose_eq(
-            Inclusion(self, self.sup).ref(),
-        )
-        eq.proven = True
-        return eq
-
-    def labeled_requirements(self):
-        sup = self.sup
-        if isinstance(sup, Subobject):
-            yield from sup.labeled_requirements()
-
-
-
-    def to_subobject(self):
-        if self.req_length < len(self.requirements):
-            raise ValueError(
-                "Can't convert partial subobject to subobject after using as "
-                "superobject"
-            )
-
-        sup = self.sup
-        if isinstance(sup, Subobject):
-            requirements = chain(
-                sup.labeled_requirements(), self.labeled_requirements(),
-            )
-
-
-
-
-
-
+# TODO: Implement hint and identical! One still needs equality `parallel`
+# to work when using reqs. f @ i and g @ i are the same when they only differ
+# by the requirements of the source of the first factor. This is the nature
+# of (intensional) inclusions (which include coprojections). Notice that in the case of
+# coprojections extensivity seems to be what allows overloading.
+# Think of constructing an isomorphism of subobjects with the same requirements
+# in different order. The sources of the requirements will end up being different
+# due to the order. A requirement that appears later in the list will itself have
+# more (superfluous) requirements. This is comparable to the situation where not all
+# components of the superobject product are used. In this case the transformation ends up
+# giving a composition whose last factor is a projection.
+# The arguments of `where` are requirements along with their proofs.
+# In a sense laws allow deferring the proof. Define f, g: X -> Y and h: Z -> X.
+# Suppose e: f @ h == g @ h. One gets h': Z -> X' where X' has requirement f == g.
+# h' is h with requirement f == g and proof e. The proof must be parallel to the
+# composition of the requirement with h. (Perhaps rename req to proof.)
+# The requirement in `where` can be a law (but concerned with the proof being a law). When setting the source to the partial
+# subobject this law becomes an (unproven) equality, which turns the target of the morphism
+# into a subobject. Just like composition with transformation projections results in composition with projections,
+# the result of `where` with a law must be a composition with an inclusion.
+# The morphism composed with the inclusion must have the largest admissible source.
+# When a proof in `where` is a law, the resulting morphism is a transformation.
+# So one deduces this largest source from the laws used in the proofs?
 
 class Inclusion(CartMor):
     """Models inclusion"""
+    # An inclusion where source and target are identical is at least
+    # intensionally the same as the identity. Proving this however may not be
+    # possible, since one does not allow subobjects without requirements.
+    # It is then better to avoid creating identity inclusions, and in general
+    # just create inclusions through the methods provided in this module, which
+    # are guaranteed to produce valid inclusions.
     __slots__ = ()
 
     def incl_compose(self, mor: Self):
@@ -361,6 +300,8 @@ class Inclusion(CartMor):
         return type(self), self.source, self.target
 
     def same(self, x: Mor):
+        # This should not be interpreted as there only being one inclusion from
+        # the object, but as there only being one with the given `ev`.
         return super().same(x) or (
             isinstance(x, Inclusion)
             and self.source.identical(x.source)
@@ -369,7 +310,7 @@ class Inclusion(CartMor):
 
 class EqualizerMor(LexMor):
     """Models object corresponding to `lex.EqualizerMor`"""
-    __slots__ = ('_sup',)
+    __slots__ = ('sup',)
     # The shape of the actual limit is more like a flower,
     # each petal being a parallel pair.
     # So the components are the petals, i.e. equalities.
@@ -386,49 +327,45 @@ class EqualizerMor(LexMor):
     # TODO: Should the pairing for the composition mentioned here have names
     # f and g? Probably not since e.g. args in python don't have to be named.
     # Check Product methods accepts, same, identical, etc.
-    _sup: Mor
+    sup: Mor
 
-    def after_incl(self, mor: 'Inclusion') -> Mor:
+    def after_incl(self, mor: 'Inclusion') -> Mor | tuple[Mor, Mor]:
         """Get supermorphism by composing with the inclusion"""
         target = mor.target
+        sup = self.sup
+        d = sup.target.diff(target)
 
-        if isinstance(target, Subobject):
-            return EqualizerMor(self.sup, target.labeled_requirements())
+        if d == 0:
+            return sup
 
-        return self.sup
+        if d > 0:
+            return Inclusion(sup.target, target), sup
+
+        # In this case `target` is supposed to be included in `sup.target`.
+        assert target.diff(sup.target) > 0
+        return EqualizerMor(sup, target)
 
     def __init__(
-        self, mor: Mor, requirements: Sequence[LabeledParallel],
-        flattened: bool = True,
+        self, mor: Mor, target: Obj,
     ):
         # When instantiating `ProductMor`, we may provide a `consistency`
         # argument. In contrast, here we never provide the equalities that prove
         # the parallel pairs, because unlike checking consistency checking the
         # forks is part of the theory. For this we use the binary operation
         # `equalizer_pairing`.
-        target = Subobject(mor.target, requirements, flattened=flattened)
         super().__init__(mor.source, target)
-
-        self._sup = mor
-        if flattened and isinstance(mor, EqualizerMor):
-            self._sup = self.sup
-
-    @property
-    def sup(self) -> Mor:
-        """Superobject"""
-        mor = self._sup
-        if isinstance(mor, EqualizerMor):
-            return mor.sup
-
-        return mor
+        self.sup = mor
 
     def ev(self, x: object):
-        return self._sup.ev(x)
+        return self.sup.ev(x)
 
     def hint(self):
         return self.target, self.sup
 
     def same(self, x: Mor):
+        # The `self.sup` comparison can only be as conclusive as the
+        # `self.target` comparison based on the `identical` method, so we use
+        # `self.sup.same`.
         return super().same(x) or (
             isinstance(x, EqualizerMor)
             and self.target.identical(x.target)
@@ -467,9 +404,81 @@ class LexComposition(CartComposition, LexMor):
         # latter form.
         if isinstance(mor, EqualizerMor):
             target = mor.target
-            assert isinstance(target, Subobject)
-            return EqualizerMor(pmor.compose(mor.sup), target.labeled_requirements())
+            return EqualizerMor(pmor.compose(mor.sup), target)
 
         return super()._simplify_proj_single_factor(pmor, mor)
 
 LexMor.comp_cls = LexComposition
+
+class LexProduct(Product, BaseSubobject):
+    """Handles flattening of requirements"""
+    __slots__ = ('sup_len', '_subobjects', '_subobject_idx', '_subobject_names')
+    sup_len: int
+    requirements = ()
+    _subobjects: list[Subobject]
+    _subobject_idx: list[int]
+    _subobject_names: dict[str, Subobject]
+
+
+    def __init__(self, params: Sequence[LabeledObj], flattened: bool = True):
+        super().__init__(params, flattened=flattened)
+
+        # TODO: Use of objects as projections should be allowed, especially when the
+        # object corresponds to a product. The way to accomplish this may be to convert
+        # objects not into identities but into transformations.
+
+        length = 0
+        self._subobject_names = {}
+        self._subobjects = []
+        self._subobject_idx = []
+        snames = self._subobject_names
+        subobjects = self._subobjects
+        sidx = self._subobject_idx
+        for c in self.components:
+            if isinstance(c, Subobject):
+                for k in c.names:
+                    if k in snames:
+                        raise ValueError("Requirement name collision")
+
+                    snames[k] = c
+
+                subobjects.append(c)
+                sidx.append(length)
+                length += c.sup_len + len(c.requirements)
+
+    @override
+    def diff(self, x: Obj):
+        s = super().diff(x)
+        if s >= 0:
+            return s
+
+        if isinstance(x, Product) and len(self.components) == len(x.components):
+            r = 0
+            for (n, (_, s)), (m, (_, t)) in zip(
+                self.components.items(), x.components.items(),
+            ):
+                if n == m:
+                    return -1
+
+                d = s.diff(t)
+                if d < 0:
+                    return -1
+
+                r += d
+
+            return r
+
+        return -1
+
+    @override
+    def ireq(self, idx: int):
+        sidx = self._subobject_idx
+        cidx = bisect(sidx, idx)
+        if cidx > len(sidx) or sidx[cidx] > idx:
+            cidx -= 1
+
+        return self._subobjects[cidx].ireq(idx - sidx[cidx])
+
+    @override
+    def req(self, name: str):
+        return self._subobject_names[name].req(name)

@@ -1,5 +1,5 @@
 """Base classes for cells and cell exceptions"""
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import Optional
@@ -274,9 +274,22 @@ class Obj(metaclass=ABCMeta):
         """
         return self is x
 
+    def diff(self, x: 'Obj') -> int:
+        """>= 0 when `x` includes `self`.
+
+        This means that any value accepted by `self` is also accepted by `x`.
+        """
+        if self.identical(x):
+            return 0
+
+        return -1
+
     def identity(self) -> 'Mor':
         """Models morphism `category.identity`"""
         raise TypeError("Requires CategoryObj")
+
+    def inclusion(self) -> 'Mor':
+        return self.identity()
 
     @staticmethod
     def terminal() -> 'Obj':
@@ -295,7 +308,11 @@ class Obj(metaclass=ABCMeta):
         """Projection, that is leg of product span"""
         raise TypeError("Requires Product")
 
-    def req(self, name: str | int = 0) -> 'Eq':
+    def ireq(self, idx: int) -> 'Eq':
+        """Requirement of subobject"""
+        raise TypeError("Requires Subobject")
+
+    def req(self, name: str) -> 'Eq':
         """Requirement of subobject"""
         raise TypeError("Requires Subobject")
 
