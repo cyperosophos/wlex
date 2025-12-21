@@ -13,7 +13,7 @@ class Context(category.Context):
     """Handles cells of a theory with ambient cart"""
     __slots__ = ()
 
-    terminal = Product(())
+    terminal = staticmethod(public.terminal)
     product = staticmethod(public.product)
     pairing = staticmethod(public.pairing)
     pairing_eq = staticmethod(public.pairing_eq)
@@ -21,6 +21,7 @@ class Context(category.Context):
     @staticmethod
     def proj(name: object):
         """Create projection transformation from name"""
+        @Transformation
         def _proj(source: Obj):
             return source.proj(name)
 
@@ -31,7 +32,10 @@ class Context(category.Context):
 
         An element is a morphism from the terminal object.
         """
-        return self.mor(name, cell, target and (self.terminal, target))
+        return self.mor(
+            name, cell,
+            target and (self.terminal(type(target)), target),
+        )
 
 def _unlabeled[T](factors: Iterator[T]) -> Sequence[tuple[Label, T]]:
     return [('', f) for f in factors]
@@ -59,15 +63,15 @@ def _pairing_eq(
 def _mor_pairing(comp: category.Composer[Mor], factors: Iterator[Mor]):
     args = list(factors)
     res = reduce(comp, iter(args))
-    return ProductMor(res.source, _unlabeled(iter(args)), flattened=False)
+    return res.source.vproduct_mor(_unlabeled(iter(args)), flattened=False)
 
 def _eq_pairing(comp: category.Composer[Eq], factors: Iterator[Eq]):
     args = list(factors)
     res = reduce(comp, iter(args))
     source = res.ssource.source
     return Eq(
-        ProductMor(source, _unlabeled(f.ssource for f in args), flattened=False),
-        ProductMor(source, _unlabeled(f.starget for f in args), flattened=False),
+        source.vproduct_mor(_unlabeled(f.ssource for f in args), flattened=False),
+        source.vproduct_mor(_unlabeled(f.starget for f in args), flattened=False),
     )
 
 def _labeled_product_mor(
@@ -76,7 +80,7 @@ def _labeled_product_mor(
 ):
     assert isinstance(unlabeled, ProductMor)
     assert len(labeled_params) == len(unlabeled.components)
-    return ProductMor(unlabeled.source, [
+    return unlabeled.source.vproduct_mor([
         (label, component)
         for (label, _), (_, component)
         in zip(labeled_params, unlabeled.components)
@@ -235,6 +239,8 @@ def producer(ctx: Context):
 
     def product(first: LabeledObj, *params: LabeledObj) -> Product:
         reduce(produce, chain((first[1],), (f for _, f in params)))
-        return Product(list(chain((first,), params)))
+        res = first[1].vproduct(list(chain((first,), params)))
+        assert isinstance(res, Product)
+        return res
 
     return product

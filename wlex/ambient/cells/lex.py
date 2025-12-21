@@ -22,7 +22,16 @@ from .cart import (
 #     """
 #     return Subobject(self, eqs)
 
-LexObj = CartObj
+class LexObj(CartObj, metaclass=ABCMeta):
+    __slots__ = ()
+
+    # TODO: Does this need _suobject_cls, etc.?
+
+    @classmethod
+    def init_cls(cls):
+        cls._composition_cls = LexComposition
+        cls._product_cls = LexProduct
+
 LexMor = CartMor
 LexPrimMor = CartPrimMor
 
@@ -100,7 +109,6 @@ class Subobject(BaseSubobject):
         else:
             self.sup_len = 0
 
-    # TODO: This should return an int corresponding to the distance from the superobject or -1 if there is no inclusion.
     @override
     def diff(self, x: Obj):
         # For simplicity this requires inclusion of one superobject in the other.
@@ -408,8 +416,6 @@ class LexComposition(CartComposition, LexMor):
 
         return super()._simplify_proj_single_factor(pmor, mor)
 
-LexMor.comp_cls = LexComposition
-
 class LexProduct(Product, BaseSubobject):
     """Handles flattening of requirements"""
     __slots__ = ('sup_len', '_subobjects', '_subobject_idx', '_subobject_names')
@@ -418,7 +424,6 @@ class LexProduct(Product, BaseSubobject):
     _subobjects: list[Subobject]
     _subobject_idx: list[int]
     _subobject_names: dict[str, Subobject]
-
 
     def __init__(self, params: Sequence[LabeledObj], flattened: bool = True):
         super().__init__(params, flattened=flattened)
@@ -482,3 +487,5 @@ class LexProduct(Product, BaseSubobject):
     @override
     def req(self, name: str):
         return self._subobject_names[name].req(name)
+
+LexObj.init_cls()

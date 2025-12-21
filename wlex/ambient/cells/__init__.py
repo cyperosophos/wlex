@@ -291,8 +291,12 @@ class Obj(metaclass=ABCMeta):
     def inclusion(self) -> 'Mor':
         return self.identity()
 
-    @staticmethod
-    def terminal() -> 'Obj':
+    @classmethod
+    def vcomposition(cls, *factors: 'Mor') -> 'Mor':
+        raise TypeError("Requires CategoryObj")
+
+    @classmethod
+    def terminal(cls) -> 'Obj':
         """Models morphism `cart.terminal`"""
         raise TypeError("Requires CartObj")
 
@@ -302,6 +306,24 @@ class Obj(metaclass=ABCMeta):
 
     def product(self, y: 'Obj') -> 'Obj':
         """Models morphism that gets source of span `cart.product`"""
+        raise TypeError("Requires CartObj")
+
+    @classmethod
+    def vproduct(
+        cls,
+        params: Sequence[tuple[str | tuple[str, ...], 'Obj']],
+        flattened: bool = True,
+    ) -> 'Obj':
+        raise TypeError("Requires CartObj")
+
+    def vproduct_mor(
+        self,
+        params: Sequence[tuple[str | tuple[str, ...], 'Mor']],
+        consistency: Sequence['Eq'] = (), flattened: bool = True,
+    ) -> 'Mor':
+        # TODO: It be nicer to have the right params type here so as to avoid
+        # extra dynamic type checking. To accomplish this place all cells modules
+        # into a single module.
         raise TypeError("Requires CartObj")
 
     def proj(self, name: object) -> 'Mor':
@@ -422,8 +444,7 @@ class PrimMor(Mor):
     after initialization, that is during execution of the theory, to which the
     primitive morphisms belong.
     """
-    __slots__ = ('_ev',)
-    _ev: Callable[[object], object]
+    __slots__ = ()
 
     @abstractmethod
     def raw_ev(self, x: object) -> object:
@@ -475,6 +496,8 @@ class PrimMor(Mor):
 
             return x.exit(res)
         raise TargetMismatch("Not accepted by target:", x, res)
+
+MorStub = Mor | Callable[[Obj, Obj], PrimMor]
 
 class Eq:
     """Base class for equalities (2-cells)"""
@@ -595,3 +618,4 @@ class PrimEq(Eq):
         self.ssource.source.require_eq(self, self.public)
 
 Cell = Obj | Mor | Eq
+EqStub = Eq | Callable[[Mor, Mor], PrimEq]

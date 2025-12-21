@@ -4,6 +4,7 @@ from typing import Self
 
 from wlex.ambient.category import (
     Obj, Mor, Eq, Context, Theory, TheoryStub, composer,
+    MorStub, EqStub,
 )
 from wlex.ambient.category import one as _
 
@@ -13,8 +14,8 @@ class BasicQuiverStub(TheoryStub):
     Node: Obj | None = None
     Edge: Obj | None = None
 
-    source: Mor | None = None
-    target: Mor | None = None
+    source: MorStub | None = None
+    target: MorStub | None = None
 
     def with_base(self, base: Self):
         return type(self)(
@@ -22,6 +23,15 @@ class BasicQuiverStub(TheoryStub):
             Edge=_(self.Edge, base.Edge),
             source=_(self.source, base.source),
             target=_(self.target, base.target),
+        )
+
+    @classmethod
+    def from_theory(cls, theory: 'BasicQuiver') -> Self:
+        return cls(
+            Node=theory.Node,
+            Edge=theory.Edge,
+            source=theory.source,
+            target=theory.target,
         )
 
 @dataclass
@@ -54,8 +64,8 @@ class QuiverStub(TheoryStub):
     Q0: BasicQuiverStub | None = None
     Q1: BasicQuiverStub | None = None
 
-    source_globular_cond: Eq | None = None
-    target_globular_cond: Eq | None = None
+    source_globular_cond: EqStub | None = None
+    target_globular_cond: EqStub | None = None
 
     def with_base(self, base: Self):
         return type(self)(
@@ -67,6 +77,15 @@ class QuiverStub(TheoryStub):
             target_globular_cond=_(
                 self.target_globular_cond, base.target_globular_cond,
             ),
+        )
+
+    @classmethod
+    def from_theory(cls, theory: 'Quiver') -> Self:
+        return cls(
+            Q0=BasicQuiverStub.from_theory(theory.Q0),
+            Q1=BasicQuiverStub.from_theory(theory.Q1),
+            source_globular_cond=theory.source_globular_cond,
+            target_globular_cond=theory.target_globular_cond,
         )
 
 @dataclass

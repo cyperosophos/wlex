@@ -32,6 +32,8 @@ type ComposableEq := (
     source @ S.source @ $d == target @ S.target @ $e,
 );
 
+# compose_eq corresponds to composition being uniquely determined according
+# to rule 3 of the theory of categories in fully formal etcs (nlab).
 fn compose_eq: compose! @ !(S.source, S.target) @ ComposableEq -> eq;
 # (S.source, S.target) @ ComposableEq is ambiguous
 # it can mean ((s d, s e), (t d, t e)) or

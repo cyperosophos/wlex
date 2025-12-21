@@ -4,8 +4,7 @@ from abc import ABCMeta, abstractmethod
 from typing import Any, Self, TypeGuard, TypeVar, overload
 from itertools import chain
 
-from .cells import Obj, Mor, Eq
-from .cells.category import Composition
+from .cells import Obj, Mor, Eq, MorStub, EqStub
 from . import cells
 from .public import category as public
 
@@ -34,9 +33,11 @@ class CellFromObj[T: Mor | Eq]:
 
 class Transformation(CellFromObj[Mor]): # pylint: disable=R0903
     """Source dependent morphism"""
+    __slots__ = ()
 
 class Law(CellFromObj[Eq]): # pylint: disable=R0903
     """Source dependent equality"""
+    __slots__ = ()
 
 MorLike = Mor | Obj | Transformation
 EqLike = MorLike | Eq | Law
@@ -149,12 +150,17 @@ def one[T](*args: T | None) -> T:
 
     return res
 
-class TheoryStub(metaclass=ABCMeta): # pylint: disable=R0903
+class TheoryStub(metaclass=ABCMeta):
     """Base class for the theory stub"""
 
     @abstractmethod
     def with_base(self, base: Any) -> Self:
         """Combine `self` and `base`"""
+
+    @abstractmethod
+    @classmethod
+    def from_theory(cls, theory: Any) -> Self:
+        """Create stub from theory"""
 
 class Theory(metaclass=ABCMeta):
     """Base class for theories"""
@@ -163,7 +169,7 @@ class Theory(metaclass=ABCMeta):
 
     @abstractmethod
     @classmethod
-    def from_prim(cls, ctx: 'Context', prim: Any) -> Self:
+    def from_prim(cls, ctx: Any, prim: Any) -> Self:
         """Create theory from primitives"""
         # Some rules must be followed in the implementation, which are not
         # enforced through code. Attributes of `prim` must be used exactly once
@@ -201,6 +207,10 @@ class Context:
     def __init__(self):
         self.name_stack = ()
 
+    @property
+    def id(self):
+        return Transformation(self.identity)
+
     def with_name(self, name: str):
         """Copy of `self` with name added to its `name_stack`"""
         ctx = Context()
@@ -222,6 +232,7 @@ class Context:
         # There is checking for keeping attributes of `prim` from remaining
         # unused. Also, checking that the resulting theory has no empty
         # attributes.
+        # TODO: Check that context arg is of the right type!
         return theory.from_prim(self.with_name(name), prim)
 
     def _set_name(self, name: str, cell: cells.Cell):
@@ -233,32 +244,32 @@ class Context:
         self._set_name(name, cell)
         return cell
 
+    # TODO: Make overloading for fine-grained? (espcially to avoid
+    # callable cell without signature).
     @overload
     def mor(
-        self, name: str, cell: MorLike,
-        signature: tuple[Obj, Obj] | None,
+        self, name: str, cell: MorLike | MorStub,
+        signature: tuple[Obj, Obj] | None = None,
     ) -> Mor: ...
     @overload
     def mor(
-        self, name: str, cell: MorLike,
-        signature: tuple[Obj, Mor],
-    ) -> tuple[Mor, Callable[[EqLike], Eq]]: ...
+        self, name: str, cell: MorLike | MorStub,
+        signature: tuple[Obj, Mor | Transformation],
+    ) -> tuple[Mor, Callable[[EqLike | EqStub], Eq]]: ...
     @overload
     def mor(
-        self, name: str, cell: MorLike,
-        signature: tuple[Mor, Obj],
-    ) -> tuple[Mor, Callable[[EqLike], Eq]]: ...
-    @overload
-    def mor(
-        self, name: str, cell: MorLike,
-        signature: tuple[Mor, Mor],
-    ) -> tuple[Mor, Callable[[EqLike], Eq]]: ...
+        self, name: str, cell: MorLike | MorStub,
+        signature: tuple[Mor | Transformation, Mor | Transformation],
+    ) -> tuple[Mor, Callable[[EqLike | EqStub], Eq]]: ...
 
     def mor(
-        self, name: str, cell: MorLike,
-        signature: tuple[Obj | Mor, Obj | Mor] | None = None,
+        self, name: str, cell: MorLike | MorStub,
+        signature: tuple[MorLike, MorLike] | None = None,
     ):
         """Sets name on morphism and checks signature"""
+        # Object `target` is disallowed here, because it would have the same
+        # effect as setting the value of the morphism being created to
+        # `source`. There must preferably be only one way to do things.
         if isinstance(cell, Obj):
             cell = cell.identity()
 
@@ -267,9 +278,10 @@ class Context:
             # transformations can only be checked after providing a source.
             # For this and other reasons, it makes sense to not make
             # transformation part of the theory the way morphisms are.
-            if isinstance(cell, Transformation):
+            # This convers callable `MorStub`.
+            if isinstance(cell, Callable):
                 raise TypeError(
-                    "If `cell` is transformation, signature is needed.",
+                    "If `cell` is callable, signature is needed.",
                 )
 
             self._set_name(name, cell)
@@ -282,25 +294,59 @@ class Context:
                 cell = cell(source)
 
             if isinstance(target, Obj):
+                if isinstance(cell, Callable):
+                    cell = cell(source, target)
+
                 cell = _fit_mor(source, target, cell)
                 self._set_name(name, cell)
                 return cell
+
+            if isinstance(target, Transformation):
+                if isinstance(cell, Callable):
+                    raise TypeError(
+                        "Callable `MorStub` can't have transformation as "
+                        "target.",
+                    )
+
+                target = target(cell.target)
+            elif isinstance(cell, Callable):
+                cell = cell(source, target.source)
 
             return self._hat_mor(
                 name, cell, (source, target.source),
                 (source.identity(), target),
             )
 
-        if isinstance(target, Obj):
-            # Object `target` is disallowed here, because it would have the same
-            # effect as setting the value of the morphism being created to
-            # `source`. There must preferably be only one way to do things.
-            raise TypeError(
-                "If `source` is morphism, then so must be `target`.",
-            )
-
         if isinstance(cell, Transformation):
+            if isinstance(source, Transformation):
+                raise TypeError(
+                    "Can't have both `cell` and `source` of type "
+                    "`Transformation`",
+                )
+
             cell = cell(source.source)
+
+        if isinstance(source, Transformation):
+            if isinstance(cell, Callable):
+                raise TypeError(
+                    "Callable `MorStub` can't have transformation as "
+                    "source.",
+                )
+
+            source = source(cell.source)
+
+        if isinstance(target, Transformation):
+            if isinstance(cell, Callable):
+                raise TypeError(
+                    "Callable `MorStub` can't have transformation as "
+                    "target.",
+                )
+
+            target = target(cell.target)
+
+        assert not isinstance(target, Obj)
+        if isinstance(cell, Callable):
+            cell = cell(source.source, target.source)
 
         return self._hat_mor(
             name, cell, (source.source, target.source), (source, target),
@@ -309,13 +355,13 @@ class Context:
     def _hat_mor(
         self, name: str, cell: Mor,
         signature: tuple[Obj, Obj], hat_signature: tuple[Mor, Mor],
-    ) -> tuple[Mor, Callable[[EqLike], Eq]]:
+    ) -> tuple[Mor, Callable[[EqLike | EqStub], Eq]]:
         """Sets name on morphism and checks signature"""
         source, target = signature
         cell = _fit_mor(source, target, cell)
         hat_source, hat_target = hat_signature
 
-        def _hat(c: EqLike):
+        def _hat(c: EqLike | EqStub):
             # We defer assigning hat, because we may end up needing cell in its
             # definition.
             return self.eq(
@@ -326,7 +372,7 @@ class Context:
         return cell, _hat
 
     def eq(
-        self, name: str, cell: EqLike,
+        self, name: str, cell: EqLike | EqStub,
         ssignature: tuple[MorLike, MorLike] | None = None,
     ):
         """Sets name on equality and checks signature"""
@@ -347,8 +393,7 @@ class Context:
         if not ssignature:
             if isinstance(cell, Callable):
                 raise TypeError(
-                    "If `cell` is transformation or law, setoid signature is "
-                    "needed.",
+                    "If `cell` is callable, setoid signature is needed.",
                 )
 
             self._set_name(name, cell)
@@ -371,12 +416,13 @@ class Context:
                 "At least one of `ssource` and `starget` must be a morphism.",
             )
 
-        if isinstance(cell, Callable):
+        if isinstance(cell, Transformation):
             # There is no assumption about source being preserved here.
+            cell = cell(ssource.source).ref()
+        elif isinstance(cell, Law):
             cell = cell(ssource.source)
-
-            if isinstance(cell, Mor):
-                cell = cell.ref()
+        elif isinstance(cell, Callable):
+            cell = cell(ssource, starget)
 
         cell = _fit_eq(ssource, starget, cell)
         self._set_name(name, cell)
@@ -433,7 +479,7 @@ def _obj_or_mor_to_mor(cell: Obj | Mor):
 
     return cell
 
-def _mor_like_to_mor(source: Obj, cell: MorLike):
+def mor_like_to_mor(source: Obj, cell: MorLike):
     if isinstance(cell, Callable):
         cell = cell(source)
 
@@ -448,7 +494,7 @@ def _cell_to_eq(cell: cells.Cell):
 
     return cell
 
-def _eq_like_to_eq(source: Obj, cell: EqLike):
+def eq_like_to_eq(source: Obj, cell: EqLike):
     if isinstance(cell, Callable):
         cell = cell(source)
 
@@ -475,7 +521,7 @@ def _mor_compose(comp: Composer[Mor], factors: Iterator[Mor]):
     # Discard LazyComposition, it is just for type checking.
     res = reduce(comp, iter(args))
     if res.depth > 5:
-        return Composition.simplified(*list(reversed(args)))
+        return res.source.vcomposition(*list(reversed(args)))
 
     return res.expanded()
 
@@ -633,7 +679,7 @@ def operate_mor_common_source(
     @Transformation
     def _t(source: Obj):
         factor_it = (
-            _mor_like_to_mor(source, x)
+            mor_like_to_mor(source, x)
             for x in _sequence_to_iterator(first, factors, rev)
         )
         return op(factor_it)
@@ -659,7 +705,7 @@ def operate_eq_common_source(
     @Law
     def _t(source: Obj):
         factor_it = (
-            _eq_like_to_eq(source, x)
+            eq_like_to_eq(source, x)
             for x in _sequence_to_iterator(first, factors, rev)
         )
         return op(factor_it)

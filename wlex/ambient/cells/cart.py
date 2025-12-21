@@ -12,19 +12,53 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
     """Models object `cart.Obj`"""
     __slots__ = ()
 
+    _product_cls: type['Product']
+    _product_mor_cls: type['ProductMor']
+
+    @classmethod
+    def init_cls(cls):
+        cls._composition_cls = CartComposition
+        cls._product_cls = Product
+        cls._product_mor_cls = ProductMor
+
     @override
-    @staticmethod
-    def terminal():
-        return Product(())
+    @classmethod
+    def terminal(cls):
+        return cls.vproduct(())
 
     @override
     def terminal_mor(self):
-        return ProductMor(self, ())
+        return self.vproduct_mor(())
 
     @override
     def product(self, y: Obj):
         x = self
-        return Product((('x', x), ('y', y)))
+        return self.vproduct((('x', x), ('y', y)))
+
+    @override
+    @classmethod
+    def vproduct(
+        cls,
+        params: Sequence[tuple[str | tuple[str, ...], 'Obj']],
+        flattened: bool = True,
+    ):
+        if not _all_labeled_obj(params):
+            raise TypeError('Tuple label is for products.')
+
+        return cls._product_cls(params, flattened=flattened)
+
+    @override
+    def vproduct_mor(
+        self,
+        params: Sequence['LabeledMor'],
+        consistency: Sequence[Eq] = (),
+        flattened: bool = True,
+    ) -> Mor:
+        return self._product_mor_cls(
+            self, params,
+            consistency=consistency,
+            flattened=flattened,
+        )
 
 class CartMor(CategoryMor, metaclass=ABCMeta):
     """Models object `cart.Mor`"""
@@ -33,7 +67,7 @@ class CartMor(CategoryMor, metaclass=ABCMeta):
     @override
     def same(self, x: Mor):
         # We handle sameness of terminal morphisms here.
-        terminal = Product(())
+        terminal = self.source.terminal()
         return super().same(x) or (
             self.target.identical(terminal)
             and x.target.identical(terminal)
@@ -43,7 +77,7 @@ class CartMor(CategoryMor, metaclass=ABCMeta):
     @override
     def pairing(self, q: Mor):
         p = self
-        return ProductMor(p.source, (('p', p), ('q', q)))
+        return p.source.vproduct_mor((('p', p), ('q', q)))
 
     @override
     def pairing_unique(self, p: Mor, q: Mor):
@@ -70,6 +104,14 @@ ComponentName = int | str | Obj
 Label = str | tuple[str, ...]
 LabeledMor = tuple[Label, Mor]
 
+def _all_labeled_obj(
+    params: Sequence[tuple[str | tuple[str, ...], Obj]],
+) -> TypeGuard[Sequence[LabeledObj]]:
+    return all(
+        isinstance(l, str) or isinstance(p, Product)
+        for l, p in params
+    )
+
 class Product(CartObj):
     """Models object corresponding to source of span `cart.product`"""
     __slots__ = 'components', 'names'
@@ -93,10 +135,11 @@ class Product(CartObj):
 
     def __new__(cls, params: Sequence[LabeledObj], flattened: bool = True):
         if not params:
-            if not hasattr(cls, '_terminal'):
-                cls._terminal = super().__new__(cls)
+            terminal = getattr(cls, '_terminal', None)
+            if isinstance(terminal, cls):
+                return terminal
 
-            return cls._terminal
+            cls._terminal = super().__new__(cls)
 
         return super().__new__(cls)
 
@@ -199,11 +242,12 @@ class Product(CartObj):
         for arg in params:
             name, obj = arg
             if isinstance(name, tuple):
-                if not isinstance(obj, Product):
-                    raise TypeError(
-                        "An object associated to a tuple of names must be an "
-                        "instance of `Product`.",
-                    )
+                # if not isinstance(obj, Product):
+                #     raise TypeError(
+                #         "An object associated to a tuple of names must be an "
+                #         "instance of `Product`.",
+                #     )
+                assert isinstance(obj, Product) # Ensured by type annotation
                 # Names of product components get overridden here.
                 self._add_names(name, obj)
             elif name:
@@ -559,7 +603,7 @@ class ProductMor(CartMor):
         # ProductMor instance here may actually end up being just a terminal
         # morphism, which means that all components of the result of morphism
         # get deleted.
-        return (names, obj), (True, ProductMor(obj, [
+        return (names, obj), (True, obj.vproduct_mor([
             (new, obj.proj(old)) for new, old in renaming
         ]).compose(mor))
 
@@ -568,16 +612,16 @@ class ProductMor(CartMor):
         name: str, mor: Mor,
     ):
         obj = mor.target
+
         if name:
-            if self._add_name(name_to_mor, mor_to_eq, name, mor):
-                component = False, mor
-            else:
-                component = True, ProductMor(mor.source, ())
+            label = name
         else:
-            if self._add_name(name_to_mor, mor_to_eq, obj, mor):
-                component = False, mor
-            else:
-                component = True, ProductMor(mor.source, ())
+            label = obj
+
+        if self._add_name(name_to_mor, mor_to_eq, label, mor):
+            component = False, mor
+        else:
+            component = True, mor.source.vproduct_mor(())
 
         return (name, obj), component
 
@@ -605,7 +649,7 @@ class ProductMor(CartMor):
             component = True, mor
         else:
             # ProductMor instance here may be terminal morphism.
-            component = True, ProductMor(obj, [
+            component = True, obj.vproduct_mor([
                 (m, obj.proj(m)) for m in segment
             ]).compose(mor)
 
@@ -613,7 +657,7 @@ class ProductMor(CartMor):
 
     def _update_components(
         self, target_params: list[LabeledObj], param: LabeledObj,
-        component: tuple[bool, Mor], _terminal: Obj = Product(()),
+        component: tuple[bool, Mor],
     ):
         # Based on having no assumptions about implementation and functions
         # being pure it makes sense to discard functions whose return values
@@ -622,7 +666,8 @@ class ProductMor(CartMor):
 
         # Terminal morphisms get exluded in order to facilitate comparison
         # through `same`.
-        if not component[1].target.identical(_terminal):
+        terminal = self.source.terminal()
+        if not component[1].target.identical(terminal):
             self.components.append(component)
 
     def __init__(
@@ -690,7 +735,8 @@ class ProductMor(CartMor):
                     name_to_mor, mor_to_eq, name, mor,
                 ))
 
-        target = Product(target_params, flattened=flattened)
+        target = source.vproduct(target_params, flattened=flattened)
+        assert isinstance(target, Product)
         assert len(name_to_mor) == len(target.components)
         assert all(j == k for j, k in zip(name_to_mor, target.components))
         super().__init__(source, target)
@@ -811,7 +857,7 @@ class CartComposition(Composition, CartMor):
 
                 params.append((label, m))
 
-            return ProductMor(mor.source, params)
+            return mor.source.vproduct_mor(params)
 
         return pmor, mor
 
@@ -834,7 +880,7 @@ class CartComposition(Composition, CartMor):
         return True
 
     @classmethod
-    def simplify(cls, factors: tuple[Mor, ...]):
+    def simplify(cls, factors: Sequence[Mor]):
         factor_it = iter(super().simplify(factors))
         for prev in factor_it:
             break
@@ -855,4 +901,4 @@ class CartComposition(Composition, CartMor):
 
         return _factors
 
-CartMor.comp_cls = CartComposition
+CartObj.init_cls()

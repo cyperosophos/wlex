@@ -1,5 +1,5 @@
 """Category cell classes"""
-from typing import override
+from typing import override, Callable
 from abc import ABCMeta
 from collections.abc import Sequence
 
@@ -9,15 +9,24 @@ class CategoryObj(Obj, metaclass=ABCMeta):
     """Models object `category.Obj`"""
     __slots__ = ()
 
+    _composition_cls: type['Composition']
+
+    @classmethod
+    def init_cls(cls):
+        cls._composition_cls = Composition
+
     @override
     def identity(self):
-        return Composition.identity(self)
+        return self._composition_cls.identity(self)
+
+    @override
+    @classmethod
+    def vcomposition(cls, *factors: Mor) -> Mor:
+        return cls._composition_cls.simplified(factors)
 
 class CategoryMor(Mor, metaclass=ABCMeta):
     """Models object `category.Mor`"""
     __slots__ = ()
-
-    comp_cls: type['Composition']
 
     @override
     def ref(self):
@@ -27,8 +36,11 @@ class CategoryMor(Mor, metaclass=ABCMeta):
 
     @override
     def compose(self, g: Mor) -> Mor:
+        def expand(x: Mor, y: Mor):
+            return self.source.vcomposition(x, y)
+
         f = self
-        return LazyComposition(f, g, self.comp_cls)
+        return LazyComposition(f, g, expand)
 
 class CategoryPrimMor(PrimMor, CategoryMor, metaclass=ABCMeta):
     """Models object `category.Mor` as primitive"""
@@ -74,10 +86,10 @@ class CategoryPrimEq(PrimEq, CategoryEq):
 
 class LazyComposition(CategoryMor):
     """Models lazy composition"""
-    __slots__ = 'f', 'g', '_expanded', '_depth', 'comp_cls'
+    __slots__ = 'f', 'g', '_expanded', '_depth', '_expand'
     f: Mor
     g: Mor
-    comp_cls: type['Composition']
+    _expand: Callable[[Mor, Mor], Mor]
     _expanded: Mor
     _depth: int
     sameness_priority = True
@@ -87,18 +99,18 @@ class LazyComposition(CategoryMor):
         """Depth of composition"""
         return self._depth
 
-    def __init__(self, f: Mor, g: Mor, comp_cls: type['Composition']):
+    def __init__(self, f: Mor, g: Mor, expand: Callable[[Mor, Mor], Mor]):
         super().__init__(g.source, f.target)
         self.f = f
         self.g = g
-        self.comp_cls = comp_cls
+        self._expand = expand
         self._depth = max(f.depth, g.depth) + 1
 
     def expanded(self):
         if hasattr(self, '_expanded'):
             return self._expanded
 
-        self._expanded = self.comp_cls.simplified(self.f, self.g)
+        self._expanded = self._expand(self.f, self.g)
         return self._expanded
 
     def ev(self, x: object):
@@ -127,10 +139,10 @@ class Composition(CategoryMor):
         """Separate comoposition into the first factors and last factor"""
         if len(self.factors) <= 1:
             raise ValueError("Requires at least two factors")
-        return self.simplified(*self.factors[:-1]), self.factors[-1]
+        return self.simplified(self.factors[:-1]), self.factors[-1]
 
     @classmethod
-    def simplified(cls, *factors: Mor):
+    def simplified(cls, factors: Sequence[Mor]):
         """Creates composition after simplifying factors"""
 
         if not factors:
@@ -149,7 +161,7 @@ class Composition(CategoryMor):
         return cls(obj, obj, ())
 
     @classmethod
-    def simplify(cls, factors: tuple[Mor, ...]) -> Sequence[Mor]:
+    def simplify(cls, factors: Sequence[Mor]) -> Sequence[Mor]:
         """Simplifies factors"""
         _factors: list[Mor] = []
         for factor in factors:
@@ -190,4 +202,4 @@ class Composition(CategoryMor):
     def __repr__(self):
         return f'`comp {self!s}`'
 
-CategoryMor.comp_cls = Composition
+CategoryObj.init_cls()

@@ -1,7 +1,7 @@
 """Private model of model of `lex` morphisms"""
-from ..cells import Obj, Mor, Eq
+from ..cells import Mor, Eq
 from . import category
-from .category import source, target, ssource, starget
+from .category import source, target
 
 Parallel = tuple[Mor, Mor]
 Fork = tuple[Mor, Mor, Mor, Eq]

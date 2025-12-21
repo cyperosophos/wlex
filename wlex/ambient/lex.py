@@ -1,13 +1,10 @@
 """High level interface fo the lex ambient"""
-from abc import ABCMeta
 from itertools import chain
 
-from .cells import Obj, Eq, PrimMor
+from .cells import Obj, Mor, Eq
 from . import cart
-from .cells.lex import (
-    LexObj, LexMor, LexComposition, LabeledParallel, Subobject, EqualizerMor,
-)
-from .category import Law
+from .cells.lex import Subobject, EqualizerMor
+from .category import Law, mor_like_to_mor, eq_like_to_eq
 from .public import lex as public
 
 class Context(cart.Context):
@@ -33,48 +30,57 @@ class Context(cart.Context):
 def _eq_to_par(eq: Eq):
     return eq.ssource, eq.starget
 
-class LexAmbientObj(LexObj):
-    """Models object `lex.Obj` with requirements"""
-    __slots__ = ('ctx',)
+LabeledParallelLike = tuple[str, cart.MorLike, cart.MorLike]
+LabeledForkLike = tuple[str, cart.MorLike, cart.MorLike, cart.EqLike]
 
-    ctx: Context
+def _lpl_to_lp(obj: Obj, eq: LabeledParallelLike):
+    label, ssource, starget = eq
+    return label, Eq(
+        mor_like_to_mor(obj, ssource),
+        mor_like_to_mor(obj, starget),
+    )
 
-    def __init__(self, ctx: Context):
-        self.ctx = ctx
+def _lfl_to_lf(mor: Mor, fork: LabeledForkLike):
+    label, ssource, starget, eq = fork
+    return (
+        *_lpl_to_lp(mor.target, (label, ssource, starget)),
+        eq_like_to_eq(mor.source, eq),
+    )
 
-    def requiring(self, first: LabeledParallel, *eqs: LabeledParallel):
-        compose_eq = self.ctx.compose_eq
+def requirer(ctx: Context):
+    compose_eq = ctx.compose_eq
+
+    # TODO: Functions like this should actually be a method of Context!
+    def require(obj: Obj, first: LabeledParallelLike, *eqs: LabeledParallelLike):
         # TODO: Check that everywhere else in context methods public theory
         # functions are being used instead of cell methods. This ensures type
         # checking! Public functions are only needed with user provided args.
 
-        inc = compose_eq((first[1], self.identity().ref())).equalizer()
-        for eq in eqs:
+        first_ = _lpl_to_lp(obj, first)
+        eqs_ = [_lpl_to_lp(obj, eq) for eq in eqs]
+        inc = compose_eq((first_[1], obj.identity().ref())).equalizer()
+        for eq in eqs_:
             inc = inc.compose(compose_eq((eq[1], inc.ref())).equalizer())
 
-        return Subobject(self, chain((first,), eqs))
+        return Subobject(obj, chain((first_,), eqs_))
+
+    return require
 
 LabeledFork = tuple[str, Eq, Eq] # Second `Eq` is proof.
 
-class LexAmbientMor(LexMor, metaclass=ABCMeta):
-    """Models object `lex.Mor` with fulfilled requirements"""
-    __slots__ = ('ctx',)
+def prover(ctx: Context):
+    equalizer_pairing = ctx.equalizer_pairing
+    compose_eq = ctx.compose_eq
 
-    ctx: Context
-
-    def __init__(self, ctx: Context):
-        self.ctx = ctx
-
-    def where(self, first: LabeledFork, *forks: LabeledFork):
-        equalizer_pairing = self.ctx.equalizer_pairing
-        compose_eq = self.ctx.compose_eq
-
-        _, req, proof = first
+    def prove(mor: Mor, first: LabeledForkLike, *forks: LabeledForkLike):
+        first_ = _lfl_to_lf(mor, first)
+        forks_ = [_lfl_to_lf(mor, fork) for fork in forks]
+        _, req, proof = first_
         lift = equalizer_pairing((
-            self, *_eq_to_par(req), proof,
+            mor, *_eq_to_par(req), proof,
         ))[0]
         inc = lift.target.inclusion()
-        for fork in forks:
+        for fork in forks_:
             _, req, proof = fork
             lift = equalizer_pairing((
                 lift,
@@ -84,16 +90,8 @@ class LexAmbientMor(LexMor, metaclass=ABCMeta):
             ))[0]
             inc = inc.compose(lift.target.inclusion())
 
-        return EqualizerMor(self, Subobject(self.target, (
-            (n, r) for n, r, _ in chain((first,), forks)
+        return EqualizerMor(mor, Subobject(mor.target, (
+            (n, r) for n, r, _ in chain((first_,), forks_)
         )))
 
-class LexAmbientPrimMor(PrimMor, LexAmbientMor, metaclass=ABCMeta):
-    """Models object `lex.Mor` as primitive with fulfilled requirements"""
-    __slots__ = ()
-
-class LexAmbientComposition(LexComposition, LexAmbientMor):
-    """Composition with fulfilled requirements"""
-    __slots__ = ()
-
-LexAmbientMor.comp_cls = LexAmbientComposition
+    return prove
