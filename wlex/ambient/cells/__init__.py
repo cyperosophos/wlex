@@ -289,10 +289,12 @@ class Obj(metaclass=ABCMeta):
         raise TypeError("Requires CategoryObj")
 
     def inclusion(self) -> 'Mor':
+        """Inclusion morphism"""
         return self.identity()
 
     @classmethod
     def vcomposition(cls, *factors: 'Mor') -> 'Mor':
+        """Variadic composition"""
         raise TypeError("Requires CategoryObj")
 
     @classmethod
@@ -314,6 +316,7 @@ class Obj(metaclass=ABCMeta):
         params: Sequence[tuple[str | tuple[str, ...], 'Obj']],
         flattened: bool = True,
     ) -> 'Obj':
+        """Variadic product"""
         raise TypeError("Requires CartObj")
 
     def vproduct_mor(
@@ -321,6 +324,7 @@ class Obj(metaclass=ABCMeta):
         params: Sequence[tuple[str | tuple[str, ...], 'Mor']],
         consistency: Sequence['Eq'] = (), flattened: bool = True,
     ) -> 'Mor':
+        """Variadic product morphism"""
         # TODO: It be nicer to have the right params type here so as to avoid
         # extra dynamic type checking. To accomplish this place all cells modules
         # into a single module.
@@ -330,21 +334,26 @@ class Obj(metaclass=ABCMeta):
         """Projection, that is leg of product span"""
         raise TypeError("Requires Product")
 
-    def ireq(self, idx: int) -> 'Eq':
-        """Requirement of subobject"""
-        raise TypeError("Requires Subobject")
-
     def req(self, name: str) -> 'Eq':
         """Requirement of subobject"""
         raise TypeError("Requires Subobject")
 
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
-    __slots__ = 'name', 'source', 'target'
+    __slots__ = 'name', 'source', 'target', '_hat'
     name: Name
     source: Obj
     target: Obj
+    _hat: tuple['Mor', 'Mor']
     depth = 0 # Used in LazyComposition
+
+    @property
+    def hat(self):
+        """Hat equality associated to morphism"""
+        # This raises AttributeError in the case of morphisms lacking a hat
+        # equality.
+        hat_source, hat_target = self._hat
+        return Eq(hat_source, hat_target.compose(self))
 
     def expanded(self):
         """Underlying composition in the case of LazyComposition"""
@@ -420,6 +429,10 @@ class Mor(metaclass=ABCMeta):
 
     def __repr__(self):
         return f'Mor("{self!s}: {self.source} -> {self.target}")'
+
+    def split(self) -> tuple['Mor', 'Mor']:
+        """Separate comoposition into the first factors and last factor"""
+        raise TypeError("Requires Composition")
 
     def ref(self) -> 'Eq':
         """Models morphism `category.ref`"""
@@ -616,6 +629,7 @@ class PrimEq(Eq):
         # public one).
         super().__init__(ssource, starget)
         self.ssource.source.require_eq(self, self.public)
+        self.proven = True
 
 Cell = Obj | Mor | Eq
 EqStub = Eq | Callable[[Mor, Mor], PrimEq]

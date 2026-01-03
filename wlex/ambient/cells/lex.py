@@ -25,7 +25,7 @@ from .cart import (
 class LexObj(CartObj, metaclass=ABCMeta):
     __slots__ = ()
 
-    # TODO: Does this need _suobject_cls, etc.?
+    # TODO: Does this need _subobject_cls, etc.?
 
     @classmethod
     def init_cls(cls):
@@ -59,6 +59,137 @@ class LexPrimEq(PrimEq, LexEq, metaclass=ABCMeta):
     __slots__ = ()
 
 LabeledParallel = tuple[str, Eq]
+
+class BaseSubobject2(LexObj):
+    __slots__ = ()
+    sup: Obj
+    requirements: list[Eq]
+    named_requirements: dict[str, Eq]
+
+    def conversion(self, obj: Obj):
+        return super().conversion(obj) or (
+            self.diff(obj) > 0 and Inclusion(self, obj)
+        ) or None
+
+class Subobject2(BaseSubobject2):
+    __slots__ = 'sup', 'requirements', 'named_requirements'
+
+    def __init__(self, sup: Obj, requirements: Iterable[LabeledParallel]):
+        # When requirements are provided in the high-level interface, their
+        # protypical source (source of the last factor) is the top superobject.
+        # High-level composition then restricts this source (if there are no
+        # fork proofs for requirements of previous factors). Type checking
+        # (through binary `equalizer`) requires that the requirement be again
+        # precomposed with an appropriate (general and obtained through lifting)
+        # inclusion if needed. However, this precomposition is not included in
+        # the requirements of variadic instantiation, because that would ruin
+        # normalization. Since the forks generated from the equality will always
+        # have the bottom subobject as their source, one should always be able
+        # to get the proofs from the requirements of another subobject even if
+        # their sources were restricted in a different way. This mean that one
+        # would be able to prove that the two subobjects are isomorphic even if
+        # not identical. At the high-level, it may then seem helful to disallow
+        # requirements whose source is a subobject, but this would be a problem
+        # as the restriction to a subobject may already be part of the
+        # signature of the last factor.
+
+        # Notice that empty requirements is allowed (although useless).
+        if isinstance(sup, Subobject2):
+            self.sup = sup.sup
+            nreqs = sup.named_requirements.copy()
+            reqs = sup.requirements[:]
+        else:
+            self.sup = sup
+            nreqs: dict[str, Eq] = {}
+            reqs: list[Eq] = []
+
+        for name, req in requirements:
+            # TODO: The source of `req` is `sup` not `self.sup`.
+            # The source of `req` as provided in parameters is already `sup`.
+            # The fork is the `req` composed with the inclusion from `self`
+            # to the source of the `req` (`self.sup` or a subobject thereof
+            # such as `sup`). This inclusion is guaranteed to exist.
+            # The high-level takes care of making sure that the source of `req`
+            # is `sup` (type checking). This isn't enough, since the result for
+            # purposes of `identical` comparison ends up being the same as always
+            # making `self.sup` be `sup`, which is not aggressive normalization.
+            # One may leave the source of `req` unchanged for the sake of simplicity,
+            # instead of enlarging it to become the largest admissible subobject of `self.sup`.
+            # One must then allow the source of `req` to be a superobject of `sup` instead of `sup`.
+            # An example is a requirement with compose @ ($f, $g). The lifting occurs
+            # through a requirement of the superobject (itself a subobject).
+            # In this case $f and $g are transformations, but if they were actual morphisms
+            # then precomposing with an inclusion would be required. For type checking
+            # of the binary equalizer_pairing the source must be the `sup` (but it can also be a subobject by making all prev reqs hold).
+            # There must actually be a way to extend the source of `req` so as to get rid
+            # of superfluous requirements.
+            # One approach is to first set the source to the (top) superobject then
+            # shrink the source as needed according the requirements arising from the compositions
+            # in the `req`. This way the source of `req` here will be largest admissible one.
+            # The requirement is generated when doing the composition and then is checked against the
+            # previous `reqs` (when precomposing with the inclusion).
+            reqs.append(req)
+            nreqs[name] = req
+
+        self.named_requirements = nreqs
+        self.requirements = reqs
+
+    def inclusion(self):
+        return Inclusion(self, self.sup)
+
+    @override
+    def req(self, name: str):
+        # Recall that `r.ssource.source` need not be `self.sup`.
+        r = self.named_requirements[name]
+        eq = r.compose_eq(Inclusion(self, r.ssource.source).ref())
+        eq.proven = True
+        return eq
+
+    def identical(self, x: Obj):
+        # Just like two morphisms can be the same without having the same hat,
+        # two subobjects can be identical without having the same requirement
+        # naming.
+        return super().identical(x) or (
+            isinstance(x, Subobject2)
+            and self.sup.identical(x.sup)
+            and set(self.requirements) == set(x.requirements)
+        )
+
+    @override
+    def diff(self, x: Obj):
+        if super().identical(x):
+            return 0
+
+        sup = self.sup
+        reqs = self.requirements
+        if isinstance(x, Subobject):
+            if sup.identical(x.sup):
+                xreqs = x.requirements
+                if set(reqs) >= set(xreqs):
+                    return len(reqs) - len(xreqs)
+
+            return -1
+
+        if sup.identical(x):
+            return len(reqs)
+
+        return -1
+
+    def hint(self):
+        return self.sup, frozenset(self.requirements)
+
+    def accepts(self, x: object):
+        # That `x` is accepted by the source of `eq` is guaranteed by the order
+        # of `self.requirements`.
+        return self.sup.accepts(x) and all(
+            eq.verify(x) for eq in self.requirements
+        )
+
+    def same(self, x: object, y: object):
+        return self.sup.same(x, y)
+
+    def proj(self, name: object) -> 'Mor':
+        return self.sup.proj(name)
 
 class BaseSubobject(LexObj):
     __slots__ = ()
@@ -415,6 +546,70 @@ class LexComposition(CartComposition, LexMor):
             return EqualizerMor(pmor.compose(mor.sup), target)
 
         return super()._simplify_proj_single_factor(pmor, mor)
+
+class ProductSubobject(Product, BaseSubobject2):
+    __slots__ = 'sup', 'requirements', 'named_requirements'
+
+    def _extract_requirements(self, param: BaseSubobject2, proj: Mor):
+        # TODO: compose with projection before updating (named_)requirements.
+        # In the case of flattened product param, composition with projections
+        # has already been done, but the projections have to be changed.
+        # There is a theoretical way to do this. The flattened product param is
+        # recovered through a projection pairing. Is the result of composing the
+        # req projection with this projection pairing a renamed projection? Yes!
+        # TODO: Initialization of product superobject should perhaps occur before
+        # requirement extraction.
+        inv_nreqs: dict[Eq, str] = {}
+        for name, req in param.named_requirements.items():
+            inv_nreqs[req] = name
+
+        reqs = self.requirements
+        nreqs = self.named_requirements
+        for req in param.requirements:
+            # TODO: It may be occur that this composition is mediated by lifting.
+            # Liftings are only introduced automatically at the high-level.
+            # Does this mean proj should have the original component as target
+            # even if the component is a subobject?
+            reqp = req.compose_eq(proj.ref())
+            reqs.add(reqp)
+            if req in inv_nreqs:
+                nreqs[inv_nreqs[req]] = reqp
+
+        return
+
+    def _extract_requirements_from_params(self, params: Sequence[LabeledObj]):
+        for name, param in params:
+            if isinstance(name, tuple):
+                assert isinstance(param, Product)
+                if isinstance(param, ProductSubobject):
+                    pass
+                # Flattened product
+                yield name, param
+            else:
+                # Flattened product when name is empty.
+                yield name, param
+
+    def __init__(self, params: Sequence[LabeledObj], flattened: bool = True):
+        # TODO: All subobject params must be converted to their superobjects.
+        # The requirements must be composed with the corresponding projections.
+        self.requirements = set()
+        self.named_requirements = {}
+        super().__init__(
+            list(self._extract_requirements(params)),
+            flattened=flattened,
+        )
+
+        # The point of having a ProductSubobject is to compose with liftings.
+        # The target of projections is never a subobject. This is fine, since
+        # the needed object equalities are all registered, so that a lifting can
+        # be done when needed.
+
+        # TODO: Lifting a pairing (converting its target to a product subobject)
+        # should be currently supported, since the fork with the projection inserted
+        # in the parallel pair is extensionally equal to the original fork. Check that this is the case!
+
+        # Projection target is superobject. If subobject is needed in requirement comoposition
+        # then the subobject is recovered by the automatic restriction.
 
 class LexProduct(Product, BaseSubobject):
     """Handles flattening of requirements"""

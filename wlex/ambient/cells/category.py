@@ -135,8 +135,8 @@ class Composition(CategoryMor):
         super().__init__(source, target)
         self.factors = factors
 
-    def split(self) -> tuple[Mor, Mor]:
-        """Separate comoposition into the first factors and last factor"""
+    @override
+    def split(self):
         if len(self.factors) <= 1:
             raise ValueError("Requires at least two factors")
         return self.simplified(self.factors[:-1]), self.factors[-1]
@@ -176,7 +176,7 @@ class Composition(CategoryMor):
 
     def ev(self, x: object):
         res = x
-        for factor in self.factors:
+        for factor in reversed(self.factors):
             res = factor.ev(res)
 
         return res

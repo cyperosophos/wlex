@@ -15,6 +15,8 @@ class Context(cart.Context):
     equalizer_pairing = staticmethod(public.equalizer_pairing)
     equalizer_pairing_unique = staticmethod(public.equalizer_pairing_unique)
 
+    # TODO: Override obj so that all requirement equalities get registered.
+
     @staticmethod
     def req(name: str | int = 0):
         """Create requirement law from name"""
@@ -73,6 +75,39 @@ def prover(ctx: Context):
     compose_eq = ctx.compose_eq
 
     def prove(mor: Mor, first: LabeledForkLike, *forks: LabeledForkLike):
+        # TODO: There has to be a `prove` function which handles MorLike and
+        # a simpler function which is not directly used in the theory, but used
+        # during inferred lifting. Lifting is the alternative to conversion.
+        # The right way to access equalities is through their signature.
+        # This simplifies a lot of code. Laws can be kept even with this approach?
+        # Equalities can be named but need not to.
+        # Hat and requirement equalities can be accessed through refs from
+        # morphisms and subobjects respectively. These are created dynamically.
+        # All proven equalities appear in a global set. Subobjects need a set
+        # of (parallel pairs) requirements for comparison purposes.
+        # Equality instances are setoid signatures.
+        # One does not know whether to apply conversion or lifiting first,
+        # and more generally where to parenthize the lifted morphism.
+        # One possible approach is then to parenthize maximally
+        # (and to convert before lifting which should have the same effect as lifting before converting).
+        # In this case one needs to try out all tails of the composition until
+        # finding one that corresponds to an equality.
+        # Evident requirement: the empty tail must also be tried out, it corresponds
+        # to a requirement that is always fulfilled.
+        # Conversion with lifting can include more than one conversion and more than one lifting.
+        # The solution is to explicitly induce the conversion through composition
+        # with identity. Lifting may also be required when adapting to signature target.
+        # Recall that a disjoint union of subobjects is a subobject of a disjoint union.
+        # A problem arises with having to replicate a subobject (which may be
+        # also a product or disjoin union). The solution (which may fail) is to
+        # normalize aggressively, make subobject products into subobjects, etc.
+        # The way to normalize subobject disjoint unions seems to involve disjoint
+        # union of morphisms. Operations such as projections must still be applicable
+        # to the product-turned-subobject, especially for the purpose of composition normalization.
+        # A pullback must have projections without having to be converted into a product.
+        # There must be then a ProductSubobject class and eventually also
+        # a CoproductSubobject class (Initial algebra subobject?).
+
         first_ = _lfl_to_lf(mor, first)
         forks_ = [_lfl_to_lf(mor, fork) for fork in forks]
         _, req, proof = first_

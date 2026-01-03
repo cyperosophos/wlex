@@ -132,6 +132,47 @@ def _fit_eq(ssource: Mor, starget: Mor, cell: Eq):
 
     assert False
 
+def _mor_like_to_mor_ssignature(ssignature: tuple[MorLike, MorLike]):
+    ssource, starget = ssignature
+    ssource, starget = (
+        m.identity() if isinstance(m, Obj) else m
+        for m in (ssource, starget)
+    )
+
+    if isinstance(ssource, Mor):
+        if not isinstance(starget, Mor):
+            starget = starget(ssource.source)
+    elif isinstance(starget, Mor):
+        ssource = ssource(starget.source)
+    else:
+        raise TypeError(
+            "At least one of `ssource` and `starget` must be a morphism.",
+        )
+
+    return ssource, starget
+
+def _is_proven_eq(
+    proven_eqs: set[tuple[Mor, Mor]],
+    ssource: Mor, starget: Mor,
+) -> bool:
+    if ssource == starget:
+        return True
+
+    if (ssource, starget) in proven_eqs:
+        return True
+
+    # Handling all possible ways in which an equality can arise would be
+    # unfeasible. Composition split based equalities are useful for liftings.
+    try:
+        tail_s, head_s = ssource.split()
+        tail_t, head_t = starget.split()
+        return (
+            _is_proven_eq(proven_eqs, tail_s, tail_t)
+            and _is_proven_eq(proven_eqs, head_s, head_t)
+        )
+    except (ValueError, TypeError):
+        return False
+
 def one[T](*args: T | None) -> T:
     """Returns the unique argument that is not None"""
     res: T | None = None
@@ -187,8 +228,9 @@ class Theory(metaclass=ABCMeta):
 
 class Context:
     """Handles cells of a theory with ambient category"""
-    __slots__ = ('name_stack',)
+    __slots__ = 'name_stack', 'proven_eqs'
     name_stack: tuple[str, ...]
+    proven_eqs: set[tuple[Mor, Mor]] # set of ssignatures
 
     compose = staticmethod(public.compose)
     compose_eq = staticmethod(public.compose_eq)
@@ -236,7 +278,8 @@ class Context:
         return theory.from_prim(self.with_name(name), prim)
 
     def _set_name(self, name: str, cell: cells.Cell):
-        if not hasattr(cell, 'name'):
+        # An empty `name` may occur in the case of equalities.
+        if not (hasattr(cell, 'name') and cell.name[-1]):
             cell.name = (*self.name_stack, name)
 
     def obj(self, name: str, cell: Obj):
@@ -255,12 +298,12 @@ class Context:
     def mor(
         self, name: str, cell: MorLike | MorStub,
         signature: tuple[Obj, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | EqStub], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
     @overload
     def mor(
         self, name: str, cell: MorLike | MorStub,
         signature: tuple[Mor | Transformation, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | EqStub], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
 
     def mor(
         self, name: str, cell: MorLike | MorStub,
@@ -355,13 +398,13 @@ class Context:
     def _hat_mor(
         self, name: str, cell: Mor,
         signature: tuple[Obj, Obj], hat_signature: tuple[Mor, Mor],
-    ) -> tuple[Mor, Callable[[EqLike | EqStub], Eq]]:
+    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]:
         """Sets name on morphism and checks signature"""
         source, target = signature
         cell = _fit_mor(source, target, cell)
         hat_source, hat_target = hat_signature
 
-        def _hat(c: EqLike | EqStub):
+        def _hat(c: EqLike | EqStub | None):
             # We defer assigning hat, because we may end up needing cell in its
             # definition.
             return self.eq(
@@ -371,11 +414,40 @@ class Context:
         self._set_name(name, cell)
         return cell, _hat
 
+    def _prove(self, ssource: Mor, starget: Mor):
+        if _is_proven_eq(self.proven_eqs, ssource, starget):
+            e = Eq(ssource, starget)
+            e.proven = True
+            return e
+
+        raise ValueError(f"No equality for {ssource} and {starget}")
+
+    def prove(self, ssignature: tuple[MorLike, MorLike]):
+        """Produce an proven equality from a setoid signature"""
+        # This is used in `eq` when no `cell` is provided, in ssignature based
+        # trans (trans with morphisms), in conversions for filling gaps.
+        # TODO: Get rid of morphism conversions.
+        ssource, starget = _mor_like_to_mor_ssignature(ssignature)
+        return self._prove(ssource, starget)
+
     def eq(
-        self, name: str, cell: EqLike | EqStub,
+        self, name: str, cell: EqLike | EqStub | None,
         ssignature: tuple[MorLike, MorLike] | None = None,
     ):
         """Sets name on equality and checks signature"""
+        # `name` may be empty since the equality can still be accessed through
+        # its signature. Some equalities don't have names and can't be
+        # reproduced through operations (e.g. subobject requirements). Such
+        # equalities must be registered (by method `obj`) so that they can be
+        # accessed. Other equalities (e.g. hat equalities) are registered even
+        # if they can be accessed by name. `cell` can also be optional when
+        # there is an `ssignature`. Provided an unproven `cell` is the same as
+        # providing no `cell` at all. More generally, high-level handling of
+        # equalities must handle unproven equalities (by trying to prove them).
+        # Currently the only operation producing an unproven equality is the hat
+        # equality accessed through the morphism. Accessing subobject forks
+        # through the subobject always gives proven equalities.
+
         # There is no point in providing a `signature` besides the `ssignature`.
         # Is `ssource` and `starget` have to be made to fit, then `cell` must
         # also be modified. However, `cell.ssource` and `cell.starget` are
@@ -391,30 +463,30 @@ class Context:
             cell = cell.ref()
 
         if not ssignature:
+            if not cell:
+                raise TypeError(
+                    "`ssignature is required when no `cell` is provided.",
+                )
+
             if isinstance(cell, Callable):
                 raise TypeError(
                     "If `cell` is callable, setoid signature is needed.",
                 )
 
+            if cell.proven:
+                self.proven_eqs.add((cell.ssource, cell.starget))
+            else:
+                cell = self._prove(cell.ssource, cell.starget)
+
             self._set_name(name, cell)
             return cell
 
-        ssource, starget = ssignature
+        ssource, starget = _mor_like_to_mor_ssignature(ssignature)
 
-        ssource, starget = (
-            m.identity() if isinstance(m, Obj) else m
-            for m in (ssource, starget)
-        )
-
-        if isinstance(ssource, Mor):
-            if not isinstance(starget, Mor):
-                starget = starget(ssource.source)
-        elif isinstance(starget, Mor):
-            ssource = ssource(starget.source)
-        else:
-            raise TypeError(
-                "At least one of `ssource` and `starget` must be a morphism.",
-            )
+        if not cell:
+            cell = self._prove(ssource, starget)
+            self._set_name(name, cell)
+            return cell
 
         if isinstance(cell, Transformation):
             # There is no assumption about source being preserved here.
@@ -425,6 +497,12 @@ class Context:
             cell = cell(ssource, starget)
 
         cell = _fit_eq(ssource, starget, cell)
+
+        if cell.proven:
+            self.proven_eqs.add((ssource, starget))
+        else:
+            cell = self._prove(ssource, starget)
+
         self._set_name(name, cell)
         return cell
 
