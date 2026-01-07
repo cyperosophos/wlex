@@ -244,3 +244,10 @@ def producer(ctx: Context):
         return res
 
     return product
+
+def weak(ctx: Context, mor: Mor):
+    @Transformation
+    def _t(source: Obj):
+        return mor.compose(ctx.proj(mor.source)(source))
+
+    return _t

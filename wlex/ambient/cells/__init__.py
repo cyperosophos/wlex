@@ -361,6 +361,7 @@ class Mor(metaclass=ABCMeta):
 
     def conversion(self, mor: 'Mor') -> Optional['Eq']:
         """Gives equality that converts `self` into `mor`"""
+        # TODO: Is this superfluous??
         if self.same(mor):
             return self.ref()
 

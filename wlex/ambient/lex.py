@@ -7,6 +7,12 @@ from .cells.lex import Subobject, EqualizerMor
 from .category import Law, mor_like_to_mor, eq_like_to_eq
 from .public import lex as public
 
+# TODO: Both product and pairing have to be overridden so that they
+# handle subobjects. In the future coproducts will also have to be taken
+# care of. In the case of pairings, when the components are equalizer
+# pairings, one uses instead the supermorphism and then wraps the pairing
+# in an equalizer pairing.
+
 class Context(cart.Context):
     """Handles cells of a theory with ambient lex"""
     __slots__ = ()

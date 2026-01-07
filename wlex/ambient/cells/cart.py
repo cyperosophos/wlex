@@ -112,16 +112,22 @@ def _all_labeled_obj(
         for l, p in params
     )
 
+def _component_name_to_str(n: ComponentName):
+    if isinstance(n, str):
+        return n
+    return ''
+
 class Product(CartObj):
     """Models object corresponding to source of span `cart.product`"""
-    __slots__ = 'components', 'names'
+    __slots__ = 'components', 'names', 'multi_components'
     components: dict[ComponentName, tuple[int, Obj]]
+    multi_components: dict['Product', int]
     names: list[ComponentName]
     # TODO: Wouldn't it be better if components was the list and names the dict?
     #       (Same applies in ProductMor.) Compare with cells.lex.Subobject.
 
     @override
-    def proj(self, name: object):
+    def proj(self, name: object): # TODO: Should be name: ComponentName
         if name in self.components:
             assert isinstance(name, ComponentName)
             return Projection.from_path(self, name)
@@ -129,9 +135,39 @@ class Product(CartObj):
         if isinstance(name, int):
             if name >= len(self.components) or name < 0:
                 raise ValueError("`name` of type `int` is out of range.")
-            return Projection.from_path(self, self.pos_to_name(name))
+            return Projection.from_path(self, self.names[name])
+
+        if isinstance(name, Product):
+            if name in self.multi_components:
+                return self._multi_proj(name)
+
+            # TODO: Objects can be converted to the corresponding one component
+            # product and back.
+            # Permissive approach: take the component objects of the conversion
+            # target (projection target) and create projections based on these
+            # objects. The question is then how much this coincides with python
+            # args kwargs handling. If there are no repeated objects in the source,
+            # then this works. If there are repeated objects, the extra object don't
+            # get used. This points to separating weakening (projections) from
+            # conversions (args kwargs handling). For weakening one makes a transformation
+            # from a morphism f by writing f!, that has a smaller product as source.
+            # In the case of repeated objects one would need to use explicit projections.
+            # Conversion (renaming, or rather reordering) then doesn't involve any weakening.
+            # TODO: Handle this multi proj here?
 
         raise ValueError("`name` does not correspond to any component.")
+
+    def _multi_proj(self, prod: 'Product'):
+        # `multi_components` includes also all `multi_components` recursively.
+        idx = self.multi_components[prod]
+        names = (self.names[i] for i in range(idx, len(prod.components)))
+        return ProductMor(self, [
+            (_component_name_to_str(n), Projection.from_path(self, n))
+            for n in names
+        ], flattened=all(
+            isinstance(n, str) or not isinstance(s, Product)
+            for n, (_, s) in prod.components.items()
+        ))
 
     def __new__(cls, params: Sequence[LabeledObj], flattened: bool = True):
         if not params:
@@ -188,13 +224,6 @@ class Product(CartObj):
         """
         return self.components[self.names[pos]][1]
 
-    def pos_to_name(self, pos: int):
-        """Get the name occupying position `pos` in components
-
-        This will raise an `IndexError` if `pos` is outside range.
-        """
-        return self.names[pos]
-
     def pos_to_name_and_obj(self, pos: int):
         """Get the name and object occupying position `pos` in components
 
@@ -216,6 +245,14 @@ class Product(CartObj):
                 # that, in the case of a named product subparam, no further
                 # unpacking will occur, it will remain as a product param.
                 self._add_name(*obj.pos_to_name_and_obj(i))
+
+    def _add_multi_components(self, obj: 'Product', idx: int):
+        comps = self.multi_components
+        if obj not in comps:
+            comps[obj] = idx
+            subcomps = obj.multi_components
+            for p, i in subcomps.items():
+                self._add_multi_components(p, i)
 
     def __init__(self, params: Sequence[LabeledObj], flattened: bool = True):
         # Repeated component names are allowed. This is based on the fact that
@@ -249,10 +286,12 @@ class Product(CartObj):
                 #     )
                 assert isinstance(obj, Product) # Ensured by type annotation
                 # Names of product components get overridden here.
+                self._add_multi_components(obj, len(self.components))
                 self._add_names(name, obj)
             elif name:
                 self._add_name(name, obj)
             elif isinstance(obj, Product) and flattened:
+                self._add_multi_components(obj, len(self.components))
                 for subname, (_, t) in obj.components.items():
                     self._add_name(subname, t)
             else:
@@ -262,6 +301,9 @@ class Product(CartObj):
         self.names = list(self.components)
 
     def identical(self, x: Obj):
+        # In order to be consistent with `accepts` and `same`, two objects can
+        # only be identical is they the have the same components with the same
+        # names in the same order.
         return super().identical(x) or (
             isinstance(x, Product)
             and len(self.components) == len(x.components)
@@ -271,6 +313,46 @@ class Product(CartObj):
                 in zip(self.components.items(), x.components.items())
             )
         )
+
+    def conversion(self, obj: Obj):
+        res = super().conversion(obj)
+        if res is not None:
+            return res
+
+        if len(self.components) == 1 and self.pos_to_obj(0).identical(obj):
+            # TODO: There should be an Obj.compatible method handling the reverse
+            # direction of this.
+            return self.proj(0)
+
+        if not (
+            isinstance(obj, Product)
+            and len(self.components) == len(obj.components)
+        ):
+            return None
+
+        params: list[LabeledMor] = []
+        named = False
+
+        for (n, (_, s)), (m, (_, t)) in zip(
+            self.components.items(), obj.components.items(),
+        ):
+            if isinstance(n, str):
+                named = True
+                assert isinstance(m, str)
+                if m in self.components and self.name_to_obj(m).identical(t):
+                    params.append((m, Projection.from_path(self, m)))
+                else:
+                    return None
+            elif named:
+                return None
+            elif s.identical(t):
+                params.append((
+                    _component_name_to_str(m), Projection.from_path(self, n),
+                ))
+            else:
+                return None
+
+        return ProductMor(self, params, flattened=False)
 
     def hint(self):
         return ((n, s) for n, (_, s) in self.components.items())
@@ -485,13 +567,10 @@ class ProductMor(CartMor):
 
     def component_compose(self, mor: Mor):
         """Compose each component with `mor`"""
-        def _as_str(d: object):
-            return d if isinstance(d, str) else ''
-
         pos = 0
         target = self.target
         assert isinstance(target, Product)
-        tcomp = target.components
+        tnames = target.names
 
         for unpack, m in self.components:
             res = m.compose(mor)
@@ -501,12 +580,13 @@ class ProductMor(CartMor):
                 length = len(t.components)
 
                 yield tuple(
-                    _as_str(tcomp[i + pos]) for i in range(pos, pos + length)
+                    _component_name_to_str(tnames[i + pos])
+                    for i in range(pos, pos + length)
                 ), res
 
                 pos += length
             else:
-                yield _as_str(tcomp[pos]), res
+                yield _component_name_to_str(tnames[pos]), res
 
     @staticmethod
     def _load_consistency(mor_to_eq: dict[Mor, Eq], consistency: Sequence[Eq]):
@@ -588,7 +668,7 @@ class ProductMor(CartMor):
         # target product.
         renaming: list[tuple[str, ComponentName]] = []
         for i, subname in enumerate(names):
-            origname = obj.pos_to_name(i)
+            origname = obj.names[i]
 
             # Public type checking guarantees that this passes
             # (dependent) type checking.
@@ -597,7 +677,7 @@ class ProductMor(CartMor):
             n = subname or origname
             if self._add_name(name_to_mor, mor_to_eq, n, pmor):
                 renaming.append(
-                    (n if isinstance(n, str) else '', origname),
+                    (_component_name_to_str(n), origname),
                 )
 
         # ProductMor instance here may actually end up being just a terminal
@@ -641,7 +721,7 @@ class ProductMor(CartMor):
                 name_to_mor, mor_to_eq, subname, pmor,
             ):
                 segment.append(
-                    subname if isinstance(subname, str) else '',
+                    _component_name_to_str(subname),
                 )
 
         if len(segment) == len(obj.components):

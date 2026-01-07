@@ -9,6 +9,10 @@ from .cart import (
     CartObj, CartMor, CartPrimMor, CartEq, CartComposition, Product, LabeledObj,
 )
 
+# TODO: Lifting a pairing (converting its target to a product subobject)
+# should be currently supported, since the fork with the projection inserted
+# in the parallel pair is extensionally equal to the original fork. Check that this is the case!
+
 # TODO: This method must be instead in a LexObj subclass in ambient.lex
 # where Eq | None is the arg type, there is at least one equality
 # (first, eqs) and the source of the equalities is the `obj` of the
@@ -71,7 +75,7 @@ class BaseSubobject2(LexObj):
             self.diff(obj) > 0 and Inclusion(self, obj)
         ) or None
 
-class Subobject2(BaseSubobject2):
+class Subobject(BaseSubobject2):
     __slots__ = 'sup', 'requirements', 'named_requirements'
 
     def __init__(self, sup: Obj, requirements: Iterable[LabeledParallel]):
@@ -189,6 +193,12 @@ class Subobject2(BaseSubobject2):
         return self.sup.same(x, y)
 
     def proj(self, name: object) -> 'Mor':
+        # The target of projections is never a subobject. This is fine, since
+        # the needed object equalities are all registered, so that a lifting can
+        # be done when needed.
+
+        # If subobject is needed in requirement comoposition then the subobject
+        # is recovered by the automatic restriction.
         return self.sup.proj(name)
 
 class BaseSubobject(LexObj):
@@ -199,7 +209,7 @@ class BaseSubobject(LexObj):
             self.diff(obj) > 0 and Inclusion(self, obj)
         ) or None
 
-class Subobject(BaseSubobject):
+class Subobject2(BaseSubobject):
     """Models subobject
 
     A subobject is an object to which requirements have been associated.
@@ -598,89 +608,5 @@ class ProductSubobject(Product, BaseSubobject2):
             list(self._extract_requirements(params)),
             flattened=flattened,
         )
-
-        # The point of having a ProductSubobject is to compose with liftings.
-        # The target of projections is never a subobject. This is fine, since
-        # the needed object equalities are all registered, so that a lifting can
-        # be done when needed.
-
-        # TODO: Lifting a pairing (converting its target to a product subobject)
-        # should be currently supported, since the fork with the projection inserted
-        # in the parallel pair is extensionally equal to the original fork. Check that this is the case!
-
-        # Projection target is superobject. If subobject is needed in requirement comoposition
-        # then the subobject is recovered by the automatic restriction.
-
-class LexProduct(Product, BaseSubobject):
-    """Handles flattening of requirements"""
-    __slots__ = ('sup_len', '_subobjects', '_subobject_idx', '_subobject_names')
-    sup_len: int
-    requirements = ()
-    _subobjects: list[Subobject]
-    _subobject_idx: list[int]
-    _subobject_names: dict[str, Subobject]
-
-    def __init__(self, params: Sequence[LabeledObj], flattened: bool = True):
-        super().__init__(params, flattened=flattened)
-
-        # TODO: Use of objects as projections should be allowed, especially when the
-        # object corresponds to a product. The way to accomplish this may be to convert
-        # objects not into identities but into transformations.
-
-        length = 0
-        self._subobject_names = {}
-        self._subobjects = []
-        self._subobject_idx = []
-        snames = self._subobject_names
-        subobjects = self._subobjects
-        sidx = self._subobject_idx
-        for c in self.components:
-            if isinstance(c, Subobject):
-                for k in c.names:
-                    if k in snames:
-                        raise ValueError("Requirement name collision")
-
-                    snames[k] = c
-
-                subobjects.append(c)
-                sidx.append(length)
-                length += c.sup_len + len(c.requirements)
-
-    @override
-    def diff(self, x: Obj):
-        s = super().diff(x)
-        if s >= 0:
-            return s
-
-        if isinstance(x, Product) and len(self.components) == len(x.components):
-            r = 0
-            for (n, (_, s)), (m, (_, t)) in zip(
-                self.components.items(), x.components.items(),
-            ):
-                if n == m:
-                    return -1
-
-                d = s.diff(t)
-                if d < 0:
-                    return -1
-
-                r += d
-
-            return r
-
-        return -1
-
-    @override
-    def ireq(self, idx: int):
-        sidx = self._subobject_idx
-        cidx = bisect(sidx, idx)
-        if cidx > len(sidx) or sidx[cidx] > idx:
-            cidx -= 1
-
-        return self._subobjects[cidx].ireq(idx - sidx[cidx])
-
-    @override
-    def req(self, name: str):
-        return self._subobject_names[name].req(name)
 
 LexObj.init_cls()
