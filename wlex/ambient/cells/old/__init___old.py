@@ -3,7 +3,6 @@ from collections.abc import Callable, Sequence
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import Optional
-from enum import Enum
 
 class Error(Exception):
     """Base class for cell exceptions"""
@@ -189,6 +188,7 @@ class Obj(metaclass=ABCMeta):
     def conversion(self, obj: 'Obj') -> Optional['Mor']:
         """Gives morphism that converts `self` into `obj`"""
         # Inclusion conversions always make sense.
+        # TODO: Is there any case where implicit weakening conversion is useful?
         if self.identical(obj):
             return self.identity()
 
@@ -274,23 +274,31 @@ class Obj(metaclass=ABCMeta):
         """
         return self is x
 
+    def diff(self, x: 'Obj') -> int:
+        """>= 0 when `x` includes `self`.
+
+        This means that any value accepted by `self` is also accepted by `x`.
+        """
+        if self.identical(x):
+            return 0
+
+        return -1
+
     @property
     def sup(self):
         """Superobject, i.e. largest object containing `self`"""
         return self
 
-    @property
-    def requirements(self) -> frozenset[tuple['Mor', 'Mor']]:
-        return frozenset()
+    def labeled_requirements(self) -> Sequence[tuple[str, 'Eq']]:
+        return ()
 
     def identity(self) -> 'Mor':
         """Models morphism `category.identity`"""
         raise TypeError("Requires CategoryObj")
 
-    def incl(self, obj: Optional['Obj']) -> 'Mor':
+    def inclusion(self) -> 'Mor':
         """Inclusion morphism"""
-        # Analogous to `proj`
-        raise TypeError("Requires Subobject")
+        return self.identity()
 
     @classmethod
     def vcomposition(cls, *factors: 'Mor') -> 'Mor':
@@ -330,7 +338,7 @@ class Obj(metaclass=ABCMeta):
         """Projection, that is leg of product span"""
         raise TypeError("Requires Product")
 
-    def fork(self, ssource: 'Mor', starget: 'Mor') -> 'Eq':
+    def req(self, name: str) -> 'Eq':
         """Requirement of subobject"""
         raise TypeError("Requires Subobject")
 
@@ -354,6 +362,14 @@ class Mor(metaclass=ABCMeta):
     def expanded(self):
         """Underlying composition in the case of LazyComposition"""
         return self
+
+    def conversion(self, mor: 'Mor') -> Optional['Eq']:
+        """Gives equality that converts `self` into `mor`"""
+        # TODO: Is this superfluous??
+        if self.same(mor):
+            return self.ref()
+
+        return None
 
     @abstractmethod
     def ev(self, x: object) -> object:
@@ -439,15 +455,6 @@ class Mor(metaclass=ABCMeta):
         """Models morphism `cart.pairing_unique`"""
         raise TypeError("Requires CartMor")
 
-class PrimEv:
-    __slots__ = ('func',)
-
-    def __init__(self, func: Callable[[object], object]):
-        self.func = func
-
-    def to_mor(self, source: Obj, target: Obj):
-        return PrimMor(source, target, self.func)
-
 class PrimMor(Mor):
     """Base of primitive morphisms
 
@@ -455,13 +462,11 @@ class PrimMor(Mor):
     after initialization, that is during execution of the theory, to which the
     primitive morphisms belong.
     """
-    __slots__ = ('raw_ev')
+    __slots__ = ()
 
-    raw_ev: Callable[[object], object]
-
-    def __init__(self, source: Obj, target: Obj, raw_ev: Callable[[object], object]):
-        super().__init__(source, target)
-        self.raw_ev = raw_ev
+    @abstractmethod
+    def raw_ev(self, x: object) -> object:
+        """Raw evaluation (no type checking)"""
 
     def ev(self, x: object) -> object:
         # TargetInvalid can only get caught outside the call stack, so there is
@@ -510,12 +515,12 @@ class PrimMor(Mor):
             return x.exit(res)
         raise TargetMismatch("Not accepted by target:", x, res)
 
-MorStub = Mor | PrimEv
+MorStub = Mor | Callable[[Obj, Obj], PrimMor]
 
 class Eq:
     """Base class for equalities (2-cells)"""
     # There is no distinction between proven and unproven equalities. All that
-    # matters is that the equality be constructed through the operations provided
+    # matters is that the equality constructed through the operations provided
     # by the theory. Something similar would happen with morphisms if no `ev`
     # was needed. In this case we would forget the construction and just retain
     # the signature. `Mor` would have no need to be abstract. An unproven
@@ -577,8 +582,6 @@ class Eq:
         that is their signature."""
         return (self.ssource, self.starget)
 
-    ssignature = hint
-
     def parallel(self, proof: 'Eq'):
         """Equalities that coincide in their signature are parallel."""
         if proof is self:
@@ -620,24 +623,18 @@ class Eq:
         """Models morphism `lex.equalizer_pairing_unique`"""
         raise TypeError("Requires LexEq")
 
-class Axiom(Enum):
-    PRIVATE = False
-    PUBLIC = True
-
 class PrimEq(Eq):
     """Base of primitive equalities"""
     __slots__ = ()
+    public = False
 
-    def __init__(self, ssource: Mor, starget: Mor, public: bool | Axiom):
+    def __init__(self, ssource: Mor, starget: Mor):
         # Trusting the target of a primitive morphism is analogous to not
         # providing a proof when assuming a primitive equality (especially a non
         # public one).
         super().__init__(ssource, starget)
-        if isinstance(public, Axiom):
-            public = public.value
-
-        self.ssource.source.require_eq(self, public)
+        self.ssource.source.require_eq(self, self.public)
         self.proven = True
 
 Cell = Obj | Mor | Eq
-EqStub = Eq | Axiom
+EqStub = Eq | Callable[[Mor, Mor], PrimEq]

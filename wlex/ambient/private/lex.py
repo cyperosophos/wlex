@@ -46,7 +46,7 @@ def equalizer(par: Parallel) -> Fork:
     # equalities.
     i, j = par
     mor = Eq(i, j).equalizer()
-    eq = mor.source.ireq(0)
+    eq = mor.source.fork(i, j)
     return mor, i, j, eq
 
 # TODO: equalizer_hat

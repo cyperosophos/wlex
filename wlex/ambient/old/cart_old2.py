@@ -1,11 +1,11 @@
 """High level interface for cartesian ambient"""
 from collections.abc import Sequence, Iterator
-from typing import overload, Callable
+from typing import TypeGuard, overload
 from itertools import chain
 
 from .cells import Obj, Mor, Eq
 from . import category
-from .category import EqLike, MorLike, Transformation, reduce
+from .category import EqLike, MorLike, Transformation, Law, reduce
 from .public import cart as public
 from .cells.cart import ProductMor
 
@@ -21,6 +21,7 @@ class CartContext(category.Context):
     @staticmethod
     def proj(name: str | int):
         """Create projection transformation from name"""
+        @Transformation
         def _proj(source: Obj):
             return source.proj(name)
 
@@ -55,7 +56,7 @@ class CartContext(category.Context):
 
     def _pair_op_eq(
         self, first: EqLike, factors: Sequence[EqLike],
-    ) -> Eq:
+    ) -> Eq | Law:
         return _pairing_eq(self._pair_eq, first, factors)
 
     @overload
@@ -67,21 +68,21 @@ class CartContext(category.Context):
     @overload
     def pair(
         self,
-        first: tuple[str | int, Eq],
+        first: tuple[str | int, Eq | Law],
         *factors: tuple[str | int, EqLike],
-    ) -> Eq: ...
+    ) -> Eq | Law: ...
     @overload
     def pair(
         self,
         first: tuple[str | int, MorLike],
-        *factors: tuple[str | int, Eq],
-    ) -> Eq: ...
+        *factors: tuple[str | int, Eq | Law],
+    ) -> Eq | Law: ...
 
     def pair(
         self,
         first: tuple[str | int, EqLike],
         *factors: tuple[str | int, EqLike],
-    ) -> Mor | Transformation | Eq:
+    ) -> Mor | Transformation | Eq | Law:
         """Variadic high-level pairing"""
         # A consistent even if somewhat cumbersome way of providing factors
         # (namely as tuples containing the label and the factor) makes sense,
@@ -92,24 +93,33 @@ class CartContext(category.Context):
         res = category.operate_mor_or_eq(
             self._pair_op_mor, self._pair_op_eq, first[1], [f for _, f in factors],
         )
-        labels = [l for l, _ in chain((first,), factors)]
-        if isinstance(res, Mor):
-            assert isinstance(res, ProductMor)
-            return res.l(labels)
 
-        if isinstance(res, Callable):
+        if isinstance(res, Mor):
+            return _labeled_product_mor(res, factors)
+
+        if isinstance(res, Transformation):
+            @Transformation
             def _pair(source: Obj):
-                m = res(source)
-                assert isinstance(m, ProductMor)
-                return m.l(labels)
+                return _labeled_product_mor(res(source), factors)
 
             return _pair
 
-        assert isinstance(res.ssource, ProductMor)
-        assert isinstance(res.starget, ProductMor)
+        if isinstance(res, Law):
+            @Law
+            def _pair_eq(source: Obj):
+                e = res(source)
+                eq = Eq(
+                    _labeled_product_mor(e.ssource, factors),
+                    _labeled_product_mor(e.starget, factors),
+                )
+                eq.proven = e.proven
+                return eq
+
+            return _pair_eq
+
         eq = Eq(
-            res.ssource.l(labels),
-            res.starget.l(labels),
+            _labeled_product_mor(res.ssource, factors),
+            _labeled_product_mor(res.starget, factors),
         )
         eq.proven = res.proven
         return eq
@@ -119,13 +129,20 @@ class CartContext(category.Context):
 
     def prod(self, first: tuple[str | int, Obj], *params: tuple[str | int, Obj]) -> Obj:
         """Variadic high-level products"""
-        # The point of the next line is to use the undelying theory.
         reduce(self._produce, chain((first[1],), (f for _, f in params)))
         res = first[1].vproduct(list(chain((first,), params)))
         return res
 
-def _unlabeled[T](factors: Iterator[T]) -> Sequence[tuple[int, T]]:
-    return tuple(enumerate(factors))
+    def weak(self, mor: Mor):
+        """Make transformation out of morphism to allow weakening"""
+        @Transformation
+        def _t(source: Obj):
+            return mor.compose(self.proj(mor.source)(source))
+
+        return _t
+
+def _unlabeled[T](factors: Iterator[T]) -> Sequence[tuple[str | int, T]]:
+    return [('', f) for f in factors]
 
 def _pairing(
     comp: category.Composer[Mor],
@@ -143,7 +160,7 @@ def _pairing_eq(
     comp: category.Composer[Eq],
     first: EqLike,
     factors: Sequence[EqLike],
-) -> Eq:
+) -> Eq | Law:
     def op(it: Iterator[Eq]):
         return _eq_pairing(comp, it)
 
@@ -157,7 +174,7 @@ def _mor_pairing(comp: category.Composer[Mor], factors: Iterator[Mor]):
     # `_labeled_product_mor`.
     args = list(factors)
     res = reduce(comp, iter(args))
-    return res.source.vproduct_mor(_unlabeled(iter(args)))
+    return res.source.vproduct_mor(_unlabeled(iter(args)), flattened=False)
 
 def _eq_pairing(comp: category.Composer[Eq], factors: Iterator[Eq]):
     args = list(factors)
@@ -167,3 +184,17 @@ def _eq_pairing(comp: category.Composer[Eq], factors: Iterator[Eq]):
         source.vproduct_mor(_unlabeled(f.ssource for f in args)),
         source.vproduct_mor(_unlabeled(f.starget for f in args)),
     )
+
+def _labeled_product_mor(
+    unlabeled: Mor, labeled_params: Sequence[tuple[str | int, object]],
+):
+    assert isinstance(unlabeled, ProductMor)
+    assert len(labeled_params) == len(unlabeled.components)
+    return unlabeled.source.vproduct_mor([
+        (label, component)
+        for (label, _), (_, component)
+        in zip(labeled_params, unlabeled.components.items())
+    ])
+
+def _all_eq(factors: Sequence[EqLike]) -> TypeGuard[Sequence[Eq]]:
+    return all(isinstance(f, Eq) for f in factors)

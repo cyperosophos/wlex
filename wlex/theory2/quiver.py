@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Self
 
 from wlex.ambient.category import (
-    Obj, Mor, Eq, Context, Theory, TheoryStub, composer,
+    Obj, Mor, Eq, Context, Theory, TheoryStub,
     MorStub, EqStub,
 )
 from wlex.ambient.category import one as _
@@ -64,19 +64,15 @@ class QuiverStub(TheoryStub):
     Q0: BasicQuiverStub | None = None
     Q1: BasicQuiverStub | None = None
 
-    source_globular_cond: EqStub | None = None
-    target_globular_cond: EqStub | None = None
+    eqs: tuple[EqStub | None, EqStub | None] = (None, None)
 
     def with_base(self, base: Self):
+        eqs = tuple(_(s, b) for s, b in zip(self.eqs, base.eqs))
+        assert len(eqs) == 2
         return type(self)(
             Q0=_(self.Q0, base.Q0),
             Q1=_(self.Q1, base.Q1),
-            source_globular_cond=_(
-                self.source_globular_cond, base.source_globular_cond,
-            ),
-            target_globular_cond=_(
-                self.target_globular_cond, base.target_globular_cond,
-            ),
+            eqs=eqs,
         )
 
     @classmethod
@@ -84,8 +80,7 @@ class QuiverStub(TheoryStub):
         return cls(
             Q0=BasicQuiverStub.from_theory(theory.Q0),
             Q1=BasicQuiverStub.from_theory(theory.Q1),
-            source_globular_cond=theory.source_globular_cond,
-            target_globular_cond=theory.target_globular_cond,
+            eqs=theory.eqs,
         )
 
 @dataclass
@@ -93,21 +88,21 @@ class Quiver(Theory):
     Q0: BasicQuiver
     Q1: BasicQuiver
 
-    source_globular_cond: Eq
-    target_globular_cond: Eq
+    eqs: tuple[Eq, Eq]
 
     Stub = QuiverStub
 
     @classmethod
     def from_prim(cls, ctx: Context, prim: QuiverStub):
-        c = composer(ctx)
+        c = ctx.c
         Q0 = ctx.sub('Q0', BasicQuiver, _(prim.Q0))
         Q1 = ctx.sub('Q1', BasicQuiver, _(prim.Q1), BasicQuiverStub(
             Node=Q0.Edge,
         ))
 
+        # It the future, naming equalities may become optional.
         source_globular_cond = ctx.eq(
-            'source_globular_cond', _(prim.source_globular_cond),
+            _(prim.eqs[0]),
             (
                 c(Q0.source, Q1.source),
                 c(Q0.source, Q1.target),
@@ -115,7 +110,7 @@ class Quiver(Theory):
         )
 
         target_globular_cond = ctx.eq(
-            'target_globular_cond', _(prim.target_globular_cond),
+            _(prim.eqs[1]),
             (
                 c(Q0.target, Q1.source),
                 c(Q0.target, Q1.target),
@@ -125,6 +120,14 @@ class Quiver(Theory):
         return cls(
             Q0=Q0,
             Q1=Q1,
-            source_globular_cond=source_globular_cond,
-            target_globular_cond=target_globular_cond,
+            eqs=(source_globular_cond, target_globular_cond),
         )
+
+# TODO: Support referencing eqs by signature, and perhaps some factoring resolution.
+# TODO: Full review of ambient/category
+# TODO: Full review of ambient/cart (it's not clear that the semantics of labeled params, especially with regards to '', label has been kept.)
+# TODO: Named eqs are just morphisms () -> Eq. All morphisms to Eq provide a proof of equalities with a certain signature.
+#       Equalities from equalizers are not referred by name, so they are resolved based on signature.
+#       All signature resolution is ad hoc and corresponds to morphisms with target Eq.
+#       The idea is that in some case the construction is computationally feasible.
+#       Running (type checking) the morphisms is just the verification of the construction.

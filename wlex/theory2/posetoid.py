@@ -3,12 +3,11 @@ from dataclasses import dataclass
 from typing import Self
 
 from wlex.ambient.category import (
-    Obj, Mor, Eq as MetaEq, Theory, TheoryStub, composer,
+    Obj, Mor, Eq as MetaEq, Theory, TheoryStub,
     MorStub, EqStub,
 )
 from wlex.ambient.category import one as _
-from wlex.ambient.cart import pairer0, producer
-from wlex.ambient.lex import Context, requirer
+from wlex.ambient.lex import LexContext#, requirer
 from .quiver import BasicQuiver, BasicQuiverStub
 
 @dataclass
@@ -51,14 +50,12 @@ class Posetoid(Theory):
     ref_hat: MetaEq
     trans_hat: MetaEq
 
-
     @classmethod
-    def from_prim(cls, ctx: Context, prim: PosetoidStub):
-        # TODO: Convert these function to context methods!
-        c = composer(ctx)
-        p = pairer0(ctx)
-        product = producer(ctx)
-        require = requirer(ctx)
+    def from_prim(cls, ctx: LexContext, prim: PosetoidStub):
+        c = ctx.c
+        p = ctx.pair0
+        prod = ctx.prod
+        #require = requirer(ctx)
         proj = ctx.proj
         i = ctx.id
 
@@ -69,7 +66,7 @@ class Posetoid(Theory):
         target = Q.target
 
         Path = require(
-            product(('f', Rel), ('g', Rel)),
+            prod(('f', Rel), ('g', Rel)),
             ('', c(source, proj('f')), c(target, proj('g'))),
         )
 
