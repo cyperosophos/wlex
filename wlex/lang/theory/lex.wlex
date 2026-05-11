@@ -33,4 +33,19 @@ type EqualizerMor := (
 fn equalizer_pairing: Fork @ ($ -> EqualizerMor);
 fn equalizer_pairing_unique: Mor @ (equalizer_pairing, $) @ EqualizerMor -> eq;
 
-# TODO: equalizer_pairing_eq?
+# equalizer_pairing_eq: An equality of morphisms within forks
+# must give an equality of their lifts. Cf. cart/pairing_eq
+# For simplicity there is only one parallel pair, since if there
+# were two equal parallel pairs one could just convert one fork into the
+# other.
+type ForkEq := (
+    (x, p, c): Fork, (y, p, d): Fork, e: Eq,
+    source @ ($x == $y), # TODO: One can currently skip requirements if they are implied by other requirements.
+    target @ ($x == $y),
+    ($x, $y) == eq,
+)
+fn equalizer_pairing_eq: Mor @ equalizer_pairing @ ForkEq -> eq; # pseucodish!
+fn equalizer_pairing_eq = C.S.S.sym @ equalizer_pariring_unique @ (
+    Mor, ($y, $p, $d),
+    C.S.S.P.trans @ ($e, Eq @ EqualizerMor),
+) @ equalizer_pairing @ ($x, $p, $c);

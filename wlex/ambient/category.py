@@ -5,6 +5,7 @@ from typing import Any, Self, TypeGuard, TypeVar, overload
 from itertools import chain
 
 from .cells import Obj, Mor, Eq, MorStub, EqStub, PrimEv, PrimEq, Axiom
+from .cells.category import Composition
 from . import cells
 from .public import category as public
 
@@ -13,20 +14,23 @@ MorLike = Mor | Obj | Transformation
 EqLike = MorLike | Eq
 Prover = Callable[[Mor, Mor], Eq]
 
-def _fit_mor(source: Obj, target: Obj, cell: Mor):
-    # Subclasses of `Obj` can support specific type conversions. Handling of
-    # transformations occurs before this (in which case no fitting is
-    # needed).
-    sconv = source.conversion(cell.source)
-    if not sconv:
-        raise cells.SourceUnfit("Can't convert", source, cell.source)
+class UnprovenEq(Exception):
+    pass
 
-    tconv = cell.target.conversion(target)
-    if not tconv:
-        raise cells.TargetUnfit("Can't convert", cell.target, target)
+# def _fit_mor(source: Obj, target: Obj, cell: Mor):
+#     # Subclasses of `Obj` can support specific type conversions. Handling of
+#     # transformations occurs before this (in which case no fitting is
+#     # needed).
+#     sconv = source.trim(cell.source)
+#     if not sconv:
+#         raise cells.SourceUnfit("Can't convert", source, cell.source)
 
-    # This will be just `cell` when `tconv` as `sconv` are identities.
-    return tconv.compose(cell).compose(sconv)
+#     tconv = cell.target.trim(target)
+#     if not tconv:
+#         raise cells.TargetUnfit("Can't convert", cell.target, target)
+
+#     # This will be just `cell` when `tconv` as `sconv` are identities.
+#     return tconv.compose(cell).compose(sconv)
 
 def _source_fit_mor_like(source: Obj, cell: MorLike):
     if isinstance(cell, Callable):
@@ -35,70 +39,77 @@ def _source_fit_mor_like(source: Obj, cell: MorLike):
     if isinstance(cell, Obj):
         cell = cell.identity()
 
-    sconv = source.conversion(cell.source)
+    sconv = source.trim(cell.source)
     if not sconv:
         raise cells.SourceUnfit(
             "Can't convert for fitting source", source, cell.source,
         )
 
-    return cell.compose(sconv)
+    #return cell.compose(sconv)
+    return cell, sconv
 
 def _source_fit_eq(source: Obj, cell: Eq):
-    sconv = source.conversion(cell.ssource.source)
+    sconv = source.trim(cell.ssource.source)
     if not sconv:
         raise cells.SourceUnfit(
             "Can't convert for fitting source", source, cell.ssource.source,
         )
 
-    return cell.compose_eq(sconv.ref())
+    #return cell.compose_eq(sconv.ref())
+    return cell, sconv.ref()
+
 
 def _ssource_fit_eq(ssource: Mor, cell: Eq, prove: Prover):
-    cell = _target_fit_eq(ssource.source, cell)
+    # TODO: This seems wrong. It be better to not do any "fitting" here of
+    # morphism. Also since the conversion is not guaranteed to match
+    # (calls to fit for lifitng may be needed), one must return a tuple
+    # of cells instead of composing.
+    #cell = _target_fit_eq(ssource.source, cell)
 
     sconv = prove(ssource, cell.ssource)
-    if not sconv:
-        cell = cell.sym()
-        sconv = prove(ssource, cell.ssource)
+    # TODO: Check that trans is not relying on implicit symmetry. This would be too messy!
 
-        if not sconv:
-            raise cells.SSourceUnfit(
-                "Can't convert for fitting setoid source",
-                ssource, cell.ssource,
-            )
+    if not sconv:
+        raise cells.SSourceUnfit(
+            "Can't convert for fitting setoid source",
+            ssource, cell.ssource,
+        )
 
     return cell.trans(sconv)
 
-def _target_fit_eq(target: Obj, cell: Eq):
-    tconv = cell.ssource.target.conversion(target)
-    if not tconv:
-        raise cells.TargetUnfit(
-            "Can't convert for fitting target", cell.ssource.target, target,
-        )
+# def _target_fit_eq(target: Obj, cell: Eq):
+#     tconv = cell.ssource.target.trim(target)
+#     if not tconv:
+#         raise cells.TargetUnfit(
+#             "Can't convert for fitting target", cell.ssource.target, target,
+#         )
 
-    return tconv.ref().compose_eq(cell)
+#     return tconv.ref().compose_eq(cell)
 
-def _fit_eq(ssource: Mor, starget: Mor, cell: Eq, prove: Prover):
-    prev_err = None
-    for i in range(2):
-        try:
-            sconv = prove(ssource, cell.ssource)
-            if not sconv:
-                raise cells.SSourceUnfit("Can't convert", ssource, cell.ssource)
+# def _fit_eq(ssource: Mor, starget: Mor, cell: Eq, prove: Prover):
+#     prev_err = None
+#     for i in range(2):
+#         try:
+#             sconv = prove(ssource, cell.ssource)
+#             if not sconv:
+#                 raise cells.SSourceUnfit("Can't convert", ssource, cell.ssource)
 
-            tconv = prove(cell.starget, starget)
-            if not tconv:
-                raise cells.STargetUnfit("Can't convert", cell.starget, starget)
-        except cells.MorUnfit as err:
-            if i == 0:
-                cell = cell.sym()
-                prev_err = err
-                continue
+#             tconv = prove(cell.starget, starget)
+#             if not tconv:
+#                 raise cells.STargetUnfit("Can't convert", cell.starget, starget)
+#         except cells.MorUnfit as err:
+#             if i == 0:
+#                 # Use of `sym` is justified here, because it doesn't get
+#                 # handled by `prove`.
+#                 cell = cell.sym()
+#                 prev_err = err
+#                 continue
 
-            raise err from prev_err
+#             raise err from prev_err
 
-        return tconv.trans(cell).trans(sconv)
+#         return tconv.trans(cell).trans(sconv)
 
-    assert False
+#     assert False
 
 def _mor_like_to_mor_ssignature(ssignature: tuple[MorLike, MorLike]):
     ssource, starget = ssignature
@@ -119,26 +130,28 @@ def _mor_like_to_mor_ssignature(ssignature: tuple[MorLike, MorLike]):
 
     return ssource, starget
 
-def _is_proven_eq(
-    proven_eqs: set[tuple[Mor, Mor]],
-    ssource: Mor, starget: Mor,
-) -> bool:
-    if (ssource, starget) in proven_eqs or (starget, ssource) in proven_eqs:
-        return True
+# def _is_proven_eq(
+#     proven_eqs: set[tuple[Mor, Mor]],
+#     ssource: Mor, starget: Mor,
+# ) -> bool:
+#     if (ssource, starget) in proven_eqs or (starget, ssource) in proven_eqs:
+#         return True
+
+#     return False
 
     # Handling all possible ways in which an equality can arise would be
     # unfeasible. Composition split based equalities are useful for liftings.
     # TODO: Are they?
     # TODO: Provide instead the specific equality! Move this to `def _prove`.
-    try:
-        tail_s, head_s = ssource.split()
-        tail_t, head_t = starget.split()
-        return (
-            _is_proven_eq(proven_eqs, tail_s, tail_t)
-            and _is_proven_eq(proven_eqs, head_s, head_t)
-        )
-    except (ValueError, TypeError):
-        return False
+    # try:
+    #     tail_s, head_s = ssource.split()
+    #     tail_t, head_t = starget.split()
+    #     return (
+    #         _is_proven_eq(proven_eqs, tail_s, tail_t)
+    #         and _is_proven_eq(proven_eqs, head_s, head_t)
+    #     )
+    # except (ValueError, TypeError):
+    #     return False
 
 def one[T](*args: T | None) -> T:
     """Returns the unique argument that is not None"""
@@ -308,7 +321,8 @@ class Context:
                 if isinstance(cell, PrimEv):
                     cell = cell.to_mor(source, target)
 
-                cell = _fit_mor(source, target, cell)
+                #cell = _fit_mor(source, target, cell)
+                cell = self.c(target, cell, source)
                 self._set_name(name, cell)
                 return cell
 
@@ -369,7 +383,8 @@ class Context:
     ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]:
         """Sets name on morphism and checks signature"""
         source, target = signature
-        cell = _fit_mor(source, target, cell)
+        #cell = _fit_mor(source, target, cell)
+        cell = self.c(target, cell, source)
         hat_source, hat_target = hat_signature
 
         def _hat(c: EqLike | EqStub | None):
@@ -382,24 +397,72 @@ class Context:
         self._set_name(name, cell)
         return cell, _hat
 
-    def _prove(self, ssource: Mor, starget: Mor):
-        if ssource.same(starget):
-            return ssource.ref()
+    # def _prove(self, ssource: Mor, starget: Mor):
+    #     if (ssource, starget) in self.proven_eqs:
+    #         e = Eq(ssource, starget)
+    #         e.proven = True
+    #         return e
 
-        if _is_proven_eq(self.proven_eqs, ssource, starget):
-            e = Eq(ssource, starget)
-            e.proven = True
+    #     return None
+
+    def prove(self, ssource: Mor, starget: Mor, _fork: bool = True) -> Eq:
+        # Reflexivity
+        if ssource.same(starget):
+            return self.ref(ssource)
+
+        e = Eq(ssource, starget)
+        e.proven = True
+        if (ssource, starget) in self.proven_eqs:
             return e
 
-        raise ValueError(f"No equality for {ssource} and {starget}")
+        # Symmetry
+        if (starget, ssource) in self.proven_eqs:
+            return self.sym(e)
 
-    def prove(self, ssignature: tuple[MorLike, MorLike]):
-        """Produce a proven equality from a setoid signature"""
-        # This is used in `eq` when no `cell` is provided, in ssignature based
-        # trans (trans with morphisms), in conversions for filling gaps.
-        # TODO: Get rid of morphism conversions.
-        ssource, starget = _mor_like_to_mor_ssignature(ssignature)
-        return self._prove(ssource, starget)
+        # TODO: Handle Pairing eq and Equalizer pairing eq in Cart and Lex contexts.
+
+        # Forks
+        # First find the handle, then try proving from shortest to longest
+        # handle.
+        if _fork and isinstance(ssource, Composition) and isinstance(starget, Composition):
+            hlen = -1
+            for hlen, (f, g) in enumerate(zip(
+                reversed(ssource.factors),
+                reversed(starget.factors),
+            )):
+                if not f.same(g):
+                    break
+            else:
+                hlen += 1
+
+            while hlen > 0:
+                s = ssource.drop_head(hlen)
+                t = starget.drop_head(hlen)
+                e = self.prove(s, t, _fork = False)
+                if e:
+                    # The following line is equivalent to
+                    # ```
+                    # fork = e.compose_eq(ssource.source.vcomposition(
+                    #     *ssource.factors[-hlen:],
+                    # ).ref())
+                    # ```
+                    # but type-checked.
+                    fork = self.c(e, *ssource.factors[-hlen:])
+                    # Memoize it
+                    self.proven_eqs.add((fork.ssource, fork.starget))
+                    return fork
+
+                hlen -= 1
+
+        raise UnprovenEq(f"No equality for {ssource} and {starget}")
+
+    # def prove(self, ssignature: tuple[MorLike, MorLike]) -> Eq | None:
+    #     """Produce a proven equality from a setoid signature"""
+    #     # This is used in `eq` when no `cell` is provided, in ssignature based
+    #     # trans (trans with morphisms), in conversions for filling gaps.
+    #     # TODO: Get rid of morphism conversions.
+    #     ssource, starget = _mor_like_to_mor_ssignature(ssignature)
+    #     return self._prove(ssource, starget)
 
     def eq(
         self, cell: EqLike | EqStub | None,
@@ -447,14 +510,14 @@ class Context:
             if cell.proven:
                 self.proven_eqs.add((cell.ssource, cell.starget))
             else:
-                cell = self._prove(cell.ssource, cell.starget)
+                cell = self.prove(cell.ssource, cell.starget)
 
             return cell
 
         ssource, starget = _mor_like_to_mor_ssignature(ssignature)
 
         if not cell:
-            cell = self._prove(ssource, starget)
+            cell = self.prove(ssource, starget)
             return cell
 
         if isinstance(cell, Callable):
@@ -463,26 +526,42 @@ class Context:
         elif isinstance(cell, Axiom):
             cell = PrimEq(ssource, starget, cell)
 
-        cell = _fit_eq(ssource, starget, cell, self._prove)
+        #cell = _fit_eq(ssource, starget, cell, self.prove)
+        cell = self.t(starget, cell, ssource)
 
         if cell.proven:
             self.proven_eqs.add((ssource, starget))
         else:
-            cell = self._prove(ssource, starget)
+            cell = self.prove(ssource, starget)
 
         return cell
 
-
-    def _comp_op_mor(
+    def comp_op_mor(
         self, first: MorLike, factors: Sequence[MorLike],
+        straighten: Callable[[Iterator[Mor]], Iterator[Mor]] | None = None,
     ) -> Mor | Transformation:
-        return _compose(self.compose, first, factors)
+        def noop(x: Iterator[Mor]):
+            return x
 
-    def _comp_op_eq(
+        if straighten is None:
+            straighten = noop
+
+        return _compose(self.compose, first, factors, straighten)
+
+    def comp_op_eq(
         self, first: EqLike, factors: Sequence[EqLike],
+        straighten: Callable[[Iterator[Eq]], Iterator[Eq]] | None = None,
     ) -> Eq:
-        return _compose_eq(self.compose_eq, first, factors)
+        def noop(x: Iterator[Eq]):
+            return x
 
+        if straighten is None:
+            straighten = noop
+
+        return _compose_eq(self.compose_eq, first, factors, straighten)
+
+    @overload
+    def c(self, first: MorLike, *factors: Mor | Obj) -> Mor: ...
     @overload
     def c(self, first: MorLike, *factors: MorLike) -> Mor | Transformation: ...
     @overload
@@ -492,11 +571,11 @@ class Context:
 
     def c(self, first: EqLike, *factors: EqLike,) -> Mor | Transformation | Eq:
         """Variadic high-level composition"""
-        return operate_mor_or_eq(self._comp_op_mor, self._comp_op_eq, first, factors)
+        return operate_mor_or_eq(self.comp_op_mor, self.comp_op_eq, first, factors)
 
     def t(self, first: EqLike, *factors: EqLike):
         """Variadic high-level transitivity"""
-        return _trans(self.trans, first, factors, self._prove)
+        return _trans(self.trans, first, factors, self.prove)
 
 ComposableT = TypeVar('ComposableT')
 Composer = Callable[[tuple[ComposableT, ComposableT]], ComposableT]
@@ -516,22 +595,27 @@ def reduce[T](comp: Composer[T], factors: Iterator[T]) -> T:
     return acc
 
 def _gen_fit_mors(source: Obj, factors: Iterator[MorLike]):
+    # Polish order
     # Adapt the sources of morphisms
     for f in factors:
-        f = _source_fit_mor_like(source, f)
+        f, g = _source_fit_mor_like(source, f)
         source = f.target
+        yield g
         yield f
 
 def _gen_fit_eqs(source: Obj, factors: Iterator[EqLike]):
+    # Polish order
     # Adapt the sources of equalities
     for f in factors:
         if isinstance(f, Eq):
-            f = _source_fit_eq(source, f)
+            f, g = _source_fit_eq(source, f)
             source = f.ssource.target
+            yield g
             yield f
         else:
-            f = _source_fit_mor_like(source, f)
+            f, g = _source_fit_mor_like(source, f)
             source = f.target
+            yield g.ref()
             yield f.ref()
 
 def _cell_source(cell: cells.Cell):
@@ -587,10 +671,10 @@ def _gen_fit_eqs_for_trans(factors: Iterator[Eq], prove: Prover):
 def _mor_compose(comp: Composer[Mor], factors: Iterator[Mor]):
     args = list(factors)
 
-    # Discard LazyComposition, it is just for type checking.
+    # Discard LazyComposition, its only purpose is type checking.
     res = reduce(comp, iter(args))
     if res.depth > 5:
-        return res.source.vcomposition(*list(reversed(args)))
+        return res.source.vcomposition(*reversed(args))
 
     return res.expanded()
 
@@ -613,20 +697,20 @@ def _all_obj_or_mor(factors: Sequence[MorLike]) -> TypeGuard[Sequence[Obj | Mor]
 def _compose(
     comp: Composer[Mor],
     first: MorLike,
-    factors: Sequence[MorLike]
+    factors: Sequence[MorLike],
+    straighten: Callable[[Iterator[Mor]], Iterator[Mor]],
 ) -> Mor | Transformation:
     factor_it = chain(reversed(factors), (first,))
-
     if factors:
         last = factors[-1]
     else:
-        last = first
+        raise ValueError("Must provide at least two factors")
 
     if isinstance(last, Callable):
         def _comp(source: Obj):
             # This allows having more than one transformation in factors.
             return _mor_compose(
-                comp, _gen_fit_mors(source, factor_it),
+                comp, straighten(_gen_fit_mors(source, factor_it)),
             )
 
         return _comp
@@ -636,17 +720,18 @@ def _compose(
     else:
         source = last.source
 
-    return _mor_compose(comp, _gen_fit_mors(source, factor_it))
+    return _mor_compose(comp, straighten(_gen_fit_mors(source, factor_it)))
 
 def _compose_eq(
     comp: Composer[Eq],
     first: EqLike,
     factors: Sequence[EqLike],
+    straighten: Callable[[Iterator[Eq]], Iterator[Eq]],
 ) -> Eq:
     if factors:
         last = factors[-1]
     else:
-        last = first
+        raise ValueError("Must provide at least two factors")
 
     if isinstance(last, Callable):
         raise ValueError("Last factor can't be transformation.")
@@ -659,7 +744,7 @@ def _compose_eq(
         source = last.ssource.source
 
     factor_it = chain(reversed(factors), (first,))
-    return reduce(comp, _gen_fit_eqs(source, factor_it))
+    return reduce(comp, straighten(_gen_fit_eqs(source, factor_it)))
 
 def operate_mor_or_eq(
     op_mor: Callable[[MorLike, Sequence[MorLike]], Mor | Transformation],

@@ -1,5 +1,5 @@
 """Base classes for cells and cell exceptions"""
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Sequence, Collection
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import Optional
@@ -186,7 +186,7 @@ class Obj(metaclass=ABCMeta):
     name: Name
     eqs: dict['Obj', list[tuple['Eq', bool]]] = defaultdict(list)
 
-    def conversion(self, obj: 'Obj') -> Optional['Mor']:
+    def trim(self, obj: 'Obj') -> Optional['Mor']:
         """Gives morphism that converts `self` into `obj`"""
         # Inclusion conversions always make sense.
         if self.identical(obj):
@@ -263,7 +263,7 @@ class Obj(metaclass=ABCMeta):
         """
         return id(self)
 
-    def identical(self, x: 'Obj'):
+    def identical(self, x: 'Obj') -> bool:
         """`x` is admitted instead of `self` as source or target.
 
         This is possible because `self.accepts` (resp. `self.same`) is in this
@@ -272,7 +272,11 @@ class Obj(metaclass=ABCMeta):
         is a reflexive and symmetric relation. The identity morphism acts as an
         isomorphism from `self` to `x`.
         """
-        return self is x
+        return (
+            self is x
+            or (bool(getattr(x, 'identity_priority', False)) and x.identical(self))
+        )
+
 
     @property
     def sup(self):
@@ -290,8 +294,18 @@ class Obj(metaclass=ABCMeta):
     def incl(self, obj: Optional['Obj']) -> 'Mor':
         """Inclusion morphism"""
         # Analogous to `proj`
-        raise TypeError("Requires Subobject")
+        if obj is None or self.identical(obj):
+            return self.identity()
 
+        raise ValueError("Not included")
+
+    def lift(self, mor: 'Mor') -> 'Mor':
+        if self.identical(mor.target):
+            return mor
+
+        raise ValueError("Can't lift")
+
+    # TODO: Why not Sequence['Mor']?
     @classmethod
     def vcomposition(cls, *factors: 'Mor') -> 'Mor':
         """Variadic composition"""
@@ -328,11 +342,17 @@ class Obj(metaclass=ABCMeta):
 
     def proj(self, label: str | int) -> 'Mor':
         """Projection, that is leg of product span"""
-        raise TypeError("Requires Product")
+        if label == '':
+            return self.identity()
+
+        raise ValueError("No labels")
 
     def fork(self, ssource: 'Mor', starget: 'Mor') -> 'Eq':
         """Requirement of subobject"""
         raise TypeError("Requires Subobject")
+
+    def subobject(self, requirements: Collection[tuple['Mor', 'Mor']],) -> 'Obj':
+        raise TypeError("Requires LexObj")
 
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
@@ -419,9 +439,9 @@ class Mor(metaclass=ABCMeta):
     def __repr__(self):
         return f'Mor("{self!s}: {self.source} -> {self.target}")'
 
-    def split(self) -> tuple['Mor', 'Mor']:
-        """Separate comoposition into the first factors and last factor"""
-        raise TypeError("Requires Composition")
+    # def split(self) -> tuple['Mor', 'Mor']:
+    #     """Separate comoposition into the first factors and last factor"""
+    #     raise TypeError("Requires Composition")
 
     def ref(self) -> 'Eq':
         """Models morphism `category.ref`"""

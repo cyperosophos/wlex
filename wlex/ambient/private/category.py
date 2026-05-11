@@ -24,7 +24,7 @@ def target_globular_cond(eq: Eq):
 
 def is_eq(eq: Eq):
     """Models requirements of equalities with source `Eq`"""
-    return source_globular_cond(eq) and target_globular_cond(eq)
+    return source_globular_cond(eq) and target_globular_cond(eq) and eq.proven
 
 def is_composable(c: Composable):
     """Models requirement of `category.Composable`"""

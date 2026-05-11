@@ -5,7 +5,7 @@ from itertools import chain
 
 from .cells import Obj, Mor, Eq
 from . import category
-from .category import EqLike, MorLike, Transformation, reduce
+from .category import EqLike, MorLike, Transformation, reduce, UnprovenEq
 from .public import cart as public
 from .cells.cart import ProductMor
 
@@ -16,7 +16,36 @@ class CartContext(category.Context):
     terminal = staticmethod(public.terminal)
     product = staticmethod(public.product)
     pairing = staticmethod(public.pairing)
+    pairing_unique = staticmethod(public.pairing_unique)
     pairing_eq = staticmethod(public.pairing_eq)
+
+    def _prove_pairing_eq(self, ssource: 'ProductMor', starget: 'ProductMor') -> Eq:
+        # First step is to prove each component equality.
+        length = len(ssource.components)
+        if length != len(starget.components):
+            raise UnprovenEq("Can't prove equality of pairings with different length")
+
+        # Can't prove equality if there are too many unlabeledd components
+        full_length = ssource.components.full_len()
+        if full_length != starget.components.full_len():
+            raise UnprovenEq("Can't prove equality of pairings with different unlabeled components")
+
+        if full_length - length > 5:
+            raise UnprovenEq("Can't prove equality of pairings with too many unlabeled components")
+
+        # Prove equality of labeled components and save unlabeled components for later
+        # TODO: Perhaps use some function from itertools for generating permutations
+        for s, t in ssource.
+
+    def prove(self, ssource: Mor, starget: Mor, _fork: bool = True) -> Eq:
+        try:
+            return super().prove(ssource, starget, _fork=_fork)
+        except UnprovenEq:
+            # Handle extensional `pairing_eq`
+            if isinstance(ssource, ProductMor) and isinstance(starget, ProductMor):
+                return self._prove_pairing_eq(ssource, starget)
+
+            raise
 
     @staticmethod
     def proj(name: str | int):
@@ -58,6 +87,12 @@ class CartContext(category.Context):
     ) -> Eq:
         return _pairing_eq(self._pair_eq, first, factors)
 
+    @overload
+    def pair(
+        self,
+        first: tuple[str | int, Mor],
+        *factors: tuple[str | int, Mor],
+    ) -> Mor: ...
     @overload
     def pair(
         self,

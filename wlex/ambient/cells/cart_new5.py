@@ -1,6 +1,6 @@
 """Cart cell classes"""
-from typing import Self, TypeGuard, override
-from collections.abc import Sequence, Mapping
+from typing import Self, TypeGuard, override, Union
+from collections.abc import Sequence, MutableSequence, Generator, Mapping
 from abc import ABCMeta
 
 from ..cells import Obj, Mor, Eq, PrimMor
@@ -39,7 +39,7 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
     @classmethod
     def vproduct(
         cls,
-        params: Sequence[tuple[str | int, Obj]],
+        params: Sequence[tuple[str, Obj]],
         no_repeat: bool = False,
     ):
         return cls._product_cls(params, no_repeat=no_repeat)
@@ -47,14 +47,8 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
     @override
     def vproduct_mor(
         self,
-        params: Sequence[tuple[str | int, Mor]],
-    ):
-        # Handle case of unlabeled morphism with product target.
-        if len(params) == 1:
-            l, c = params[0]
-            if not l and isinstance(c.target, Product):
-                return c
-
+        params: Sequence[tuple[str, Mor]],
+    ) -> Mor:
         return self._product_mor_cls(self, params)
 
 class CartMor(CategoryMor, metaclass=ABCMeta):
@@ -91,63 +85,67 @@ CartEq = CategoryEq
 CartPrimEq = CategoryPrimEq
 
 class ComponentMap[T](Mapping[str | int, T]):
-    __slots__ = '_map', 'data', 'tup'
+    __slots__ = '_map', '_values', '_keys'
 
-    _map: dict[str | int, T] | None # Contains only values with non-empty labels
-    data: frozenset[tuple[str | int, T]] | None
-    tup: tuple[T, ...]
+    _map: dict[str | int, T] | None
+    _data: frozenset[tuple[str | int, T]] | None
+    _values: tuple[T, ...] | None
 
     def __init__(self, data: Sequence[tuple[str | int, T]]):
-        if set(range(len(data))) == set(k for k, _ in data):
+        if all(i == l for i, (l, _) in enumerate(data)):
             self._map = None
-            self.data = None
-            self.tup = tuple(c for (_, c) in data)
+            self._data = None
+            self._values = tuple(c for (_, c) in data)
         else:
             self._map = dict((k, v) for k, v in data if k != '')
-            self.data = frozenset(data)
-            self.tup = ()
+            self._keys = frozenset(data)
+            self._values = None
+
+    def __init__2(self, values: tuple[T, ...] | dict[str | int, T], keys: tuple[str, ...] | None = None):
+        if keys is None:
+            if isinstance(values, tuple):
+                self._map = None
+                self._keys = None
+                self._values = values
+            else:
+                self._map = values
+                self._keys = tuple(sorted(values))
+                self._values = tuple(values[l] for l in self._keys)
+        else:
+            assert isinstance(values, tuple)
+            self._map = dict((k, v) for k, v in zip(keys, values) if k)
+            self._keys = tuple(sorted(keys))
+            self._values = tuple(self._map[l] for l in self._keys)
+
+    #def as_dict_or_tuple(self):
+    #    if self._map is None:
+    #        return self._values
+
+    #    return self._map
 
     def __getitem__(self, key: str | int):
         if self._map is None:
             if isinstance(key, int):
-                return self.tup[key]
+                return self._values[key]
 
             raise KeyError
 
-        return self._map[key]
+        if isinstance(key, str):
+            return self._map[key]
+
+        raise KeyError
 
     def __iter__(self):
         if self._map is None:
-            return iter(range(len(self.tup)))
+            return iter(range(len(self._values)))
 
         return iter(self._map)
 
     def __len__(self):
-        if self._map is None:
-            return len(self.tup)
-
-        return len(self._map)
+        return len(self._values)
 
     def __hash__(self):
-        return hash(self.data or self.tup)
-
-    def full_eq(self, x: Self):
-        if self._map is None:
-            return self.tup == x.tup
-
-        return self.data == x.data
-
-    def full_items(self):
-        if self.data is None:
-            return enumerate(self.tup)
-
-        return iter(self.data)
-
-    def full_len(self):
-        if self.data is None:
-            return len(self.tup)
-
-        return len(self.data)
+        return hash((self._keys, self._values))
 
 class Product(CartObj):
     """Models object corresponding to source of span `cart.product`"""
@@ -164,8 +162,33 @@ class Product(CartObj):
         if not isinstance(obj, Product):
             return None
 
+        comps = self.components.as_dict_or_tuple()
+        ocomps = obj.components.as_dict_or_tuple()
+
+        if isinstance(comps, tuple):
+            if not isinstance(ocomps, tuple):
+                return None
+
+            # No weakening
+            if len(comps) != len(ocomps):
+                return None
+
+            convs: list[Mor] = []
+            for c, oc in zip(comps, ocomps):
+                conv = c.conversion(oc)
+                if conv is None:
+                    return None
+
+                convs.append(conv)
+
+            return self.vproduct_mor(tuple(
+                c.compose(obj.proj(i))
+                for i, c in enumerate(convs)
+            ))
+
+        # ...
         components = self.components
-        conversions: list[tuple[str | int, Mor]] = []
+        labeled_convs: list[tuple[str, Mor]] = []
         for label, c in obj.components.items():
             if label not in components:
                 return None
@@ -174,18 +197,18 @@ class Product(CartObj):
             if conv is None:
                 return None
 
-            conversions.append((label, conv))
+            labeled_convs.append((label, conv))
 
         return self.vproduct_mor([
             (label, c.compose(obj.proj(label)))
-            for label, c in conversions
+            for label, c in labeled_convs
         ])
 
     @override
     def proj(self, label: str | int):
         return Projection.from_path(self, (label,))
 
-    def __new__(cls, components: Sequence[tuple[str | int, Obj]], no_repeat: bool = False):
+    def __new__(cls, components: ComponentMap[Obj] | tuple[Obj]):
         if not components:
             terminal = getattr(cls, '_terminal', None)
             if isinstance(terminal, cls):
@@ -193,20 +216,10 @@ class Product(CartObj):
 
             cls._terminal = super().__new__(cls)
 
-        if len(components) == 1:
-            l, c = components[0]
-            if not l and isinstance(c, Product):
-                return c
-
         return super().__new__(cls)
 
     @staticmethod
-    def _add_component(
-        agg: dict[str | int, Obj],
-        label: str | int,
-        component: Obj,
-        no_repeat: bool
-    ):
+    def _add_component(agg: dict[str, Obj], label: str, component: Obj, no_repeat: bool):
         if label in agg:
             if no_repeat:
                 raise ValueError("No repeats allowed")
@@ -216,32 +229,43 @@ class Product(CartObj):
         else:
             agg[label] = component
 
-    def with_labels(self, relabeling: dict[str | int, str | int] | Sequence[str | int]):
-        # This allows introducing overlaps and flattening product components.
-        # This also allows "deflattening" product target components, but there
-        # is no way to provide a different label for each such component unless
-        # `relabeling` is a sequence.
-        if isinstance(relabeling, dict):
-            for label in relabeling:
-                if label not in self.components:
-                    raise ValueError("Can't relabel `{label}` in product")
+    @classmethod
+    def make_components(cls, params: Sequence[tuple[str, Obj]], no_repeat: bool = False):
+        if len(params) == 1:
+            l, c = params[0]
+            if not l and isinstance(c, Product):
+                raise ValueError(
+                    "Can't have single product as component, since this just "
+                    "creates a copy of the product",
+                )
 
-            return self.vproduct([
-                (relabeling.get(label, label), component)
-                for label, component in self.components.full_items()
-            ])
+        agg: dict[str, Obj] = {}
+        for label, component in params:
+            if label:
+                cls._add_component(agg, label, component, no_repeat)
+            else:
+                if not isinstance(component, Product):
+                    raise ValueError("Unlabeled component must be product.")
 
-        if len(relabeling) > len(self.components):
-            raise ValueError("Product relabeling list is too long.")
+                comps = component.components.as_dict_or_tuple()
+                if isinstance(comps, tuple):
+                    raise ValueError("Product component must have labels.")
 
-        return self.vproduct([
-            (relabeling[i], component)
-            for i, (_, component) in enumerate(self.components.full_items())
-        ])
+                for l, c in comps.items():
+                    cls._add_component(agg, l, c, no_repeat)
 
-    l = with_labels
+        return ComponentMap(agg)
 
-    def __init__(self, components: Sequence[tuple[str | int, Obj]], no_repeat: bool = False):
+    @classmethod
+    def from_labeled_objects(cls,  params: Sequence[tuple[str, Obj]], no_repeat: bool = False):
+        return cls(cls.make_components(
+            params, no_repeat=no_repeat,
+        ))
+
+    def __init__(
+        self,
+        components: ComponentMap[Obj] | tuple[Obj],
+    ):
         # Repeated component labels are allowed. This is based on the fact that
         # AxBxC is the pullback of the projections AxB->B and BxC->B.
 
@@ -252,24 +276,10 @@ class Product(CartObj):
         ):
             return
 
-        if len(components) == 1:
-            l, c = components[0]
-            if not l and isinstance(c, Product):
-                return
-
-        agg: dict[str | int, Obj] = {}
-        for label, component in components:
-            if label != '':
-                self._add_component(agg, label, component, no_repeat)
-            else:
-                if not isinstance(component, Product):
-                    raise ValueError("Unlabeled component must be product.")
-
-                for l, c in component.components.items():
-                    assert l != ''
-                    self._add_component(agg, l, c, no_repeat)
-
-        self.components = ComponentMap(list(agg.items()))
+        if isinstance(components, ComponentMap):
+            self.components = components
+        else:
+            self.components = ComponentMap(components)
 
     def identical(self, x: Obj):
         return super().identical(x) or (
@@ -287,7 +297,7 @@ class Product(CartObj):
     def accepts(self, x: object):
         # No type accepts None!
         return (
-            _is_product_acceptable(x)
+            (_isinstance_dict_str_object(x) or _isinstance_tuple_object(x))
             and len(self.components) != len(x)
             and all(
                 l in x and c.accepts(_gi(x, l))
@@ -297,8 +307,10 @@ class Product(CartObj):
 
     def same(self, x: object, y: object):
         return (
-            _is_product_acceptable(x)
-            and _is_product_acceptable(y)
+            (
+                (_isinstance_dict_str_object(x) and _isinstance_dict_str_object(y))
+                or (_isinstance_tuple_object(x) and _isinstance_tuple_object(y))
+            )
             and len(x) == len(y)
             and all(
                 l in x and l in y and c.same(_gi(x, l), _gi(y, l))
@@ -306,30 +318,20 @@ class Product(CartObj):
             )
         )
 
-def _insert_or_pad(dest: list[object], idx: int, v: object):
-    while idx >= len(dest):
-        dest.append(None)
-
-    assert dest[idx] is None
-    dest[idx] = v
-
 def _isinstance_tuple_object(x: object) -> TypeGuard[tuple[object]]:
     return isinstance(x, tuple)
 
-def _isinstance_dict_str_object(x: object) -> TypeGuard[dict[str | int, object]]:
+def _isinstance_dict_str_object(x: object) -> TypeGuard[dict[str, object]]:
     return (
         isinstance(x, dict)
-        and all(isinstance(k, (str, int)) for k in x) # pyright: ignore[reportUnknownVariableType]
+        and all(isinstance(k, str) for k in x) # pyright: ignore[reportUnknownVariableType]
     )
-
-def _is_product_acceptable(x: object) -> TypeGuard[tuple[object] | dict[object, object]]:
-    return isinstance(x, (tuple, dict))
 
 def _is_identity(mor: Mor):
     # Identity in an extensional sense
     return isinstance(mor, Composition) and mor.factors == ()
 
-def _gi(x: tuple[object] | dict[object, object], key: str | int):
+def _gi(x: tuple[object] | dict[str, object], key: str | int):
     if isinstance(x, tuple):
         if isinstance(key, str):
             return None
@@ -338,6 +340,9 @@ def _gi(x: tuple[object] | dict[object, object], key: str | int):
             return None
 
         return x[key]
+
+    if isinstance(key, int):
+        return None
 
     return x.get(key)
 
@@ -393,13 +398,17 @@ class Projection(CartMor):
     def hint(self):
         return self.path, self.source
 
-# TODO: Does this work well with terminal morphisms?
 class ProductMor(CartMor):
     """Models object corresponding to `cart.ProductMor`"""
-    __slots__ = 'components', 'inplace'
+    __slots__ = 'components', '_inplace'
 
+    #components: frozenset[tuple[str, Mor]]
+    #_labeled_components: dict[str, Mor]
     components: ComponentMap[Mor]
-    inplace: bool
+    _inplace: bool
+
+    def get_component(self, label: str | int):
+        return self.components.get(label)
 
     def after_proj(self, mor: Projection) -> Mor | tuple[Mor, Mor]:
         """Get the morphism associated to projection in the pairing
@@ -416,7 +425,7 @@ class ProductMor(CartMor):
         # identity.
         for i, label in enumerate(mor.path):
             if isinstance(res, ProductMor):
-                component = res.components.get(label)
+                component = res.get_component(label)
                 if component is not None:
                     res = component
                     continue
@@ -431,137 +440,113 @@ class ProductMor(CartMor):
 
     def component_compose(self, mor: Mor):
         """Compose each component with `mor`"""
-        for label, component in self.components.full_items():
+        for label, component in self.components:
             yield label, component.compose(mor)
 
-    def with_labels(self, relabeling: dict[str | int, str | int] | Sequence[str | int]):
-        if isinstance(relabeling, dict):
-            for label in relabeling:
-                if label not in self.components:
-                    raise ValueError("Can't relabel `{label}`")
+    @classmethod
+    def make_target_components(cls, params: Sequence[tuple[str, Mor]]):
+        return Product.make_components([
+            (label, component.target)
+            for label, component in params
+        ], no_repeat=True)
 
-            return self.source.vproduct_mor([
-                (relabeling.get(label, label), component)
-                for label, component in self.components.items()
-            ])
+    @classmethod
+    def make_components(cls, params: Sequence[tuple[str, Mor]]):
+        mors: list[tuple[str, Mor]] = []
+        for label, component in params:
+            if label or not isinstance(component, ProductMor):
+                mors.append((label, component))
+            else:
+                comps = component.components.as_dict_or_tuple()
+                if isinstance(comps, tuple):
+                    raise ValueError("ProductMor component must have labels.")
 
-        if len(relabeling) > len(self.components):
-            raise ValueError("Relabeling list is too long.")
+                mors.extend(comps.items())
 
-        return self.source.vproduct_mor([
-            (relabeling[i], component)
-            for i, component in enumerate(self.components.values())
-        ])
+        return ComponentMap(tuple(mors))
 
-    l = with_labels
-
-    def __new__(
-        cls, source: Obj,
-        components: Sequence[tuple[str | int, Mor]],
-    ):
-        if len(components) == 1:
-            l, c = components[0]
-            if not l:
-                if isinstance(c, ProductMor):
-                    return c
-
-        return super().__new__(cls)
 
     def __init__(
         self, source: Obj,
-        components: Sequence[tuple[str | int, Mor]],
+        components: ComponentMap[Mor] | tuple[Mor],
     ):
-        if len(components) == 1:
-            l, c = components[0]
-            if not l:
-                if isinstance(c, ProductMor):
-                    return
+        if isinstance(components, ComponentMap):
+            self.components = components
+            target = Product.from_labeled_objects([
+                (l, c.target) for l, c in components.items()
+            ], no_repeat=True)
+        else:
+            self.components = ComponentMap(components)
 
-                assert not isinstance(c.target, Product)
 
-        target = source.vproduct([(l, c.target) for l, c in components], no_repeat=True)
-        mors: list[tuple[str | int, Mor]] = []
-        self.inplace = False
+        self._inplace = False
+        self._labeled_components = {}
+
         for label, component in components:
-            if label != '' or not isinstance(component, ProductMor):
+            if label:
+                target = component.target
+                target_components.append((label, target))
                 mors.append((label, component))
-                if _is_identity(component):
-                    self.inplace = True
+                self._labeled_components[label] = component
             else:
-                # Flatten. Notice that target will be at least as flat as
-                # morphism.
-                mors.extend(component.components.items())
-                if component.inplace:
-                    self.inplace = True
+                target = component.target
+                if not isinstance(target, Product):
+                    raise ValueError(
+                        "Morphism without label just have product as target.",
+                    )
 
-        self.components = ComponentMap(mors)
+                target_components.append(('', target))
+                if isinstance(component, ProductMor):
+                    # Flatten. Notice that target will be at least as flat as
+                    # morphism.
+                    mors.extend(component.components)
+                else:
+                    if _is_identity(component): # This misses identity in ProductMor component!
+                        self._inplace = True
+
+                    mors.append(('', component))
+
+        target = source.vproduct(target_components, no_repeat=True)
+        self.components = frozenset(mors) # No overlaps!
         super().__init__(source, target)
 
     def same(self, x: Mor):
         return super().same(x) or (
             isinstance(x, ProductMor)
-            and self.components.full_eq(x.components)
+            and len(self.components) == len(x.components)
+            and all(lmor in x.components for lmor in self.components)
         )
 
     def hint(self):
         return self.components
 
     def ev(self, x: object):
-        def update(dest: dict[object, object], src: object):
-            if _isinstance_dict_str_object(src):
-                for k, v in src.items():
-                    assert k not in res
-                    dest[k] = v
-            else:
-                assert _isinstance_tuple_object(src)
-                for k, v in enumerate(src):
-                    assert k not in res
-                    dest[k] = v
-
         components = self.components
-        if (
-            self.inplace
-            and _is_product_acceptable(x)
-            and isinstance(x, dict)
-        ):
-            for label, component in components.full_items():
-                if label != '':
+        if self._inplace:
+            assert _isinstance_dict_str_object(x)
+            for label, component in components:
+                if label:
                     x[label] = component.ev(x)
                 else:
                     if _is_identity(component):
                         continue
 
                     y = component.ev(x)
-                    update(x, y)
+                    assert _isinstance_dict_str_object(y)
+                    for k, v in y.items():
+                        x[k] = v
 
             return x
 
-        target = self.target
-        assert isinstance(target, Product)
-        if target.components.tup:
-            dest: list[object] = []
-            for label, component in components.full_items():
-                if label != '':
-                    assert isinstance(label, int)
-                    _insert_or_pad(dest, label, component.ev(x))
-                else:
-                    y = component.ev(x)
-                    if _isinstance_dict_str_object(y):
-                        for k, v in y.items():
-                            assert isinstance(k, int)
-                            _insert_or_pad(dest, k, v)
-                    else:
-                        assert _isinstance_tuple_object(y)
-                        for k, v in enumerate(y):
-                            _insert_or_pad(dest, k, v)
-
-        res: dict[object, object] = {}
-        for label, component in components.full_items():
-            if label != '':
+        res: dict[str, object] = {}
+        for label, component in components:
+            if label:
                 res[label] = component.ev(x)
             else:
                 y = component.ev(x)
-                update(res, y)
+                assert _isinstance_dict_str_object(y)
+                for k, v in y.items():
+                    res[k] = v
 
         return res
 
@@ -622,7 +607,7 @@ class CartComposition(Composition, CartMor):
 
         if isinstance(pmor, ProductMor):
             expensive: set[Mor] = set()
-            params: list[tuple[str | int, Mor]] = []
+            params: list[tuple[str, Mor]] = []
             for label, m in pmor.component_compose(mor):
                 # If there is a repeated "expensive" morphism, then don't
                 # simplify. An "expensive" morphism is one that is not a
@@ -645,7 +630,7 @@ class CartComposition(Composition, CartMor):
         if isinstance(mor, ProductMor):
             return all(
                 cls._extract_expensive_no_repeat(m, dst)
-                for _, m in mor.components.full_items()
+                for _, m in mor.components
             )
 
         if mor in dst:

@@ -1,6 +1,6 @@
 """Lex cell classes"""
 from abc import ABCMeta
-from collections.abc import Iterable
+from collections.abc import Collection, Callable
 from typing import Self, override
 from itertools import chain
 
@@ -15,6 +15,16 @@ class LexObj(CartObj, metaclass=ABCMeta):
     @classmethod
     def init_cls(cls):
         cls._composition_cls = LexComposition
+        cls._subobject_cls = Subobject
+        cls._equalizer_mor_cls = EqualizerMor
+
+    def subobject(self, requirements: Collection[tuple[Mor, Mor]]):
+        # There still has to be a `requiring` method that does type-checking
+        # at the context level.
+        if len(requirements) == 0:
+            return self
+
+        return self._subobject_cls(self, requirements)
 
 LexMor = CartMor
 LexPrimMor = CartPrimMor
@@ -23,14 +33,27 @@ class LexEq(CartEq, metaclass=ABCMeta):
     """Models object `lex.Mor`"""
     __slots__ = ()
 
+    @staticmethod
+    def _lazy_subobject_expand(sup: Obj, req: tuple[Mor, Mor]):
+        return sup.subobject((req,))
+
     @override
     def equalizer(self):
         source = self.ssource.source
-        return Inclusion(Subobject(source, (self.ssignature(),)), source)
+        # There is no point in this being lazy since we'll need the fork,
+        # and the fork is an equality for which we'll need to call
+        # `identical` when composing, etc.
+        return Inclusion(
+            source.subobject((self.ssignature(),)),
+            source,
+        )
 
     @override
     def equalizer_pairing(self, mor: Mor):
-        return EqualizerMor(mor, Subobject(mor.target, (self.ssignature(),)))
+        return LazySubobject(
+            mor.target, self.ssignature(),
+            self._lazy_subobject_expand,
+        ).lift(mor)
 
     @override
     def equalizer_pairing_unique(self, mor: Mor, fmor: Mor) -> Eq:
@@ -42,32 +65,117 @@ class LexPrimEq(PrimEq, LexEq, metaclass=ABCMeta):
     """Models object `lex.Eq` as primitive"""
     __slots__ = ()
 
-class Subobject(LexObj):
-    __slots__ = '_sup', '_requirements'
+class LiftingObj(LexObj, metaclass=ABCMeta):
+    __slots__ = ('_sup',)
     _sup: Obj
+
+    @override
+    def lift(self, mor: 'Mor'):
+        # This is also used for LazySubobject since a lazy EqualizerMor is just
+        # an EqualizerMor with a lazy target.
+        if self.identical(mor.target):
+            return mor
+
+        return self._equalizer_mor_cls(mor, self)
+
+class LazySubobject(LiftingObj):
+    __slots__ = '_requirement', '_expanded', '_expand'
+    _requirement: tuple[Mor, Mor]
+    _expand: Callable[[Obj, tuple[Mor, Mor]], Obj]
+    _expanded: Obj
+    identity_priority = True
+
+    def __init__(
+        self, sup: Obj,
+        requirement: tuple[Mor, Mor],
+        expand: Callable[[Obj, tuple[Mor, Mor]], Obj],
+    ):
+        self._sup = sup
+        self._requirement = requirement
+        self._expand = expand
+
+    def expanded(self):
+        if hasattr(self, '_expended'):
+            return self._expanded
+
+        self._expanded = self._expand(self._sup, self._requirement)
+        return self._expanded
+
+    def trim(self, obj: Obj):
+        return self.expanded().trim(obj)
+
+    @property
+    @override
+    def sup(self):
+        return self.expanded().sup
+
+    @property
+    @override
+    def requirements(self):
+        return self.expanded().requirements
+
+    @override
+    def incl(self, obj: Obj | None = None):
+        return self.expanded().incl(obj=obj)
+
+    @override
+    def fork(self, ssource: Mor, starget: Mor):
+        return self.expanded().fork(ssource, starget)
+
+    def identical(self, x: Obj):
+        if isinstance(x, type(self)):
+            x = x.expanded()
+
+        return self.expanded().identical(x)
+
+    def hint(self):
+        return self.expanded().hint()
+
+    def accepts(self, x: object):
+        return self.expanded().accepts(x)
+
+    def same(self, x: object, y: object):
+        return self.expanded().same(x, y)
+
+    def proj(self, label: str | int) -> Mor:
+        return self.expanded().proj(label)
+
+class Subobject(LiftingObj):
+    __slots__ = ('_requirements',)
     _requirements: frozenset[tuple[Mor, Mor]]
 
-    def conversion(self, obj: Obj):
-        # Conversion applies even when the `self` is not a subobject of `obj`.
-        # In this case lifting (through `restrict`) will be required, because
-        # the resulting conversion will only have a superobjet of `obj` as
-        # target.
-        res = super().conversion(obj)
+    def trim(self, obj: Obj):
+        res = super().trim(obj)
+        if res is not None:
+            return res
 
-        # Create superobject of `obj` and `self`. This will be the target.
-        reqs = self.requirements & obj.requirements
-        if not reqs:
-            sup = obj
-        else:
-            pass
+        return self.sup.trim(obj.sup)
 
-        if res is None:
-            try:
-                return self.incl(obj)
-            except ValueError:
-                return None
+    # def trim_old(self, obj: Obj):
+    #     # Conversion applies even when the `self` is not a subobject of `obj`.
+    #     # In this case lifting (through `restrict`) will be required, because
+    #     # the resulting conversion will only have a superobjet of `obj` as
+    #     # target.
+    #     res = super().trim(obj)
+    #     if res is None:
+    #         return res
 
-        return res
+    #     sup = self.sup
+    #     conv = sup.trim(obj.sup)
+    #     if not conv:
+    #         return None
+
+    #     # Each of the `obj.requirements` has to be precomposed with `conv`?
+    #     # Create superobject of `obj` and `self`. This will be the target.
+    #     reqs = self.requirements & obj.requirements
+    #     sup = sup.subobject(reqs)
+    #     return self.incl(sup)
+
+    #     # It would be better to limit the conversion to the superobject.
+    #     # The resulting conversion with have `obj` as the target and its source
+    #     # will have the same superobject as `self`.
+    #     # This would be analogous to Product conversion in the sense that the
+    #     # superobject is a component of the subobject.
 
     @property
     @override
@@ -79,7 +187,14 @@ class Subobject(LexObj):
     def requirements(self):
         return self._requirements
 
-    def __init__(self, sup: Obj, requirements: Iterable[tuple[Mor, Mor]]):
+    def __new__(cls, sup: Obj, requirements: Collection[tuple[Mor, Mor]]):
+        if len(requirements) == 0:
+            if isinstance(sup, Subobject):
+                return sup
+
+        return super().__new__(cls)
+
+    def __init__(self, sup: Obj, requirements: Collection[tuple[Mor, Mor]]):
         # High-level does not only handle type checking, it also makes sure that
         # there are requirements and that the requirements are not tautologies
         # (proven equalities), so that the resulting subobject does not end up
@@ -87,25 +202,31 @@ class Subobject(LexObj):
         # universal property of the equalizer).
 
         if isinstance(sup, Subobject):
+            if len(requirements) == 0:
+                return
+
             self._sup = sup.sup
-            requirements = chain(sup._requirements, requirements)
+            self._requirements = frozenset(
+                chain(sup._requirements, requirements),
+            )
         else:
+            assert requirements
             self._sup = sup
+            self._requirements = frozenset(requirements)
 
         # The actual source of a requirement may end up being an intermediate
         # subobject of `self.sup`. One uses the largest source allowed by the
         # requirement. Type checking ensures that the source of the requirement
         # is an intermediate subobject.
         self._requirements = frozenset(requirements)
-        if not self._requirements:
-            # We allow this subobject to just be a copy of `sup` (the argument).
-            raise ValueError("Can't create subobject without requirements")
 
     @override
     def incl(self, obj: Obj | None = None):
-        # Strict inclusion
         if obj is None:
+            # Strict inclusion
             obj = self.sup
+        elif self.identical(obj):
+            return self.identity()
 
         if (
             isinstance(obj, Subobject)
@@ -151,7 +272,7 @@ class Subobject(LexObj):
     def same(self, x: object, y: object):
         return self.sup.same(x, y)
 
-    def proj(self, label: str | int) -> 'Mor':
+    def proj(self, label: str | int) -> Mor:
         # The target of projections is never a subobject. This is fine, since
         # the needed object equalities are all registered, so that a lifting can
         # be done when needed.
@@ -163,10 +284,17 @@ class Subobject(LexObj):
 # TODO: Use __new__ to handle case where initialization parameters actually require
 # returning one of the parameters instead of a new instance. This applies for example
 # in the case of product when only one component (without label is provided).
+# Actually handle this in methods like vproduct (unless the same type is created), etc. and make sure that direct instantiation
+# is not being used.
 # TODO: Have "unpacking" LexProduct (unpacks subobject components)?
-# TODO: An inclusion is like a projection, and therefore some comdiags have to be
+# TODO: -> An inclusion is like a projection, and therefore some comdiags have to be
 # taken into account.
-# TODO: Compare lifting of a morphism with lifting the composed morphism.
+# TODO: -> Compare lifting of a morphism with lifting the composed morphism.
+# This is specially important in the case of considering the process of restricting
+# previous factors in the composition. Should one restrict the whole composition of the
+# previous factors? Or just the previous factor? The first option seems simpler but it
+# may miss tautologies. One must then try splitting in order to find the tautologies.
+# Either way the process somehow seems to end being quadratic.
 
 class Inclusion(CartMor):
     """Models inclusion"""
@@ -203,24 +331,41 @@ class Inclusion(CartMor):
 class EqualizerMor(LexMor):
     """Models object corresponding to `lex.EqualizerMor`"""
     __slots__ = ('sup',)
-
     sup: Mor
 
-    def after_incl(self, mor: 'Inclusion') -> Mor | tuple[Mor, Mor]:
+    def after_incl(self, mor: Inclusion) -> tuple[Mor, Mor]:
         """Get supermorphism by composing with the inclusion"""
         target = mor.target
         sup = self.sup
 
-        if sup.target.identical(target):
-            return sup
-
         try:
+            # Case where new target is larger than `sup.target`
             incl = sup.target.incl(target)
-        except ValueError:
+        except ValueError: # TODO: Use specific error!!
             # In this case `target` is supposed to be included in `sup.target`.
-            _ = target.incl(sup.target)
-            return EqualizerMor(sup, target)
+            # Following the analogy with `after_proj`, this more or less
+            # corresponds to the case where the whole projection is consumed.
+            # One can consider this case as overlapping with the other when
+            # `incl` is the identity.
 
+            # We don't check that `mor.source` is identical to `self.target`,
+            # because that's the task of type-checking, which also guarantees
+            # that `target` is a superobject of `self.target`, so that all
+            # forks required by `target` are also required by `self.target`,
+            # which means that the necessary type-checking for lifting would
+            # be passed.
+
+            # If `target` is not included in `sup.target`, then we get the
+            # intersection, so that the return value has an inclusion that gets
+            # rid of the extra requirements of `sup.target`.
+            t = sup.target.subobject(target.requirements)
+
+            # Here the inclusion ends up just being the identity when `target`
+            # is included in `sup.target`.
+            return t.incl(target), EqualizerMor(sup, t)
+
+        # In this case `sup.target` is the source of the inclusion, so `sup`
+        # doesn't get lifted.
         return incl, sup
 
     def __init__(self, mor: Mor, target: Obj):
@@ -257,7 +402,7 @@ class LexComposition(CartComposition, LexMor):
     def _simplify_proj_single_factor(
         cls, pmor: Mor, mor: Mor,
     ) -> Mor | tuple[Mor, Mor]:
-        # TODO: The result of composing with an inclusion is always! the same morphism
+        # TODO: The result of precomposing with an inclusion is always! the same morphism
         # but with a new more restricted source. We already do this when composing an
         # inclusion with an inclusion. Another case where we change the source of morphisms
         # is when readapting requirements during flattening (the sources are possibly partial
@@ -274,10 +419,14 @@ class LexComposition(CartComposition, LexMor):
         # Composing an equalizer pairing gives another equalizer pairing by
         # composing the `sup` attribute of the original equalizer pairing. To be
         # consistent with the way we simplify pairings, we simplify towards the
-        # latter form.
+        # latter form. This is also compatible to how we lift when restricting,
+        # because we lift the whole preceding composition instead of just the
+        # single preceding factor (which due to the precomposition with an
+        # inclusion for the restriction would require repeating the process for
+        # each of the previous factors until reaching the source or until all
+        # requirements get discarded as tautologies).
         if isinstance(mor, EqualizerMor):
-            target = mor.target
-            return EqualizerMor(pmor.compose(mor.sup), target)
+            return EqualizerMor(pmor.compose(mor.sup), mor.target)
 
         return super()._simplify_proj_single_factor(pmor, mor)
 
