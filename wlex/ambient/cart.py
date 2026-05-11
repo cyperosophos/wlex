@@ -1,7 +1,7 @@
 """High level interface for cartesian ambient"""
 from collections.abc import Sequence, Iterator
 from typing import overload, Callable
-from itertools import chain
+from itertools import chain, permutations
 
 from .cells import Obj, Mor, Eq
 from . import category
@@ -30,12 +30,48 @@ class CartContext(category.Context):
         if full_length != starget.components.full_len():
             raise UnprovenEq("Can't prove equality of pairings with different unlabeled components")
 
-        if full_length - length > 5:
+        if full_length - length > 5: # Hardcoded!
             raise UnprovenEq("Can't prove equality of pairings with too many unlabeled components")
 
-        # Prove equality of labeled components and save unlabeled components for later
-        # TODO: Perhaps use some function from itertools for generating permutations
-        for s, t in ssource.
+        labels = set(ssource.components)
+        if labels != set(starget.components):
+            raise UnprovenEq("Can't prove equality of pairings with different labels")
+
+        # Prove equality of labeled components
+        eqs = (
+            (label, self.prove(
+                ssource.components[label],
+                starget.components[label],
+            )) for label in labels
+        )
+
+        unlabeled = [
+            mor
+            for label, mor in ssource.components.full_items()
+            if label == ''
+        ]
+        unlabeled_t = [
+            mor
+            for label, mor in starget.components.full_items()
+            if label == ''
+        ]
+        unlabeled_eqs: list[Eq] = []
+        for perm in permutations(unlabeled):
+            for s, t in zip(perm, unlabeled_t):
+                try:
+                    e = self.prove(s, t)
+                except UnprovenEq:
+                    unlabeled_eqs = []
+                    break
+
+                unlabeled_eqs.append(e)
+            else:
+                assert len(unlabeled_eqs) == len(unlabeled)
+                break
+        else:
+            raise UnprovenEq("Tried all permutations of unlabeled components")
+
+        return self.pair(*chain(eqs, (('', e) for e in unlabeled_eqs)))
 
     def prove(self, ssource: Mor, starget: Mor, _fork: bool = True) -> Eq:
         try:
