@@ -471,6 +471,8 @@ class ProductMor(CartMor):
         self, source: Obj,
         components: Sequence[tuple[str | int, Mor]],
     ):
+        # Since this creates the target as a product this cannot be used
+        # directly with morphisms with Subobject targets (e.g. EqualizerMor).
         if len(components) == 1:
             l, c = components[0]
             if not l:

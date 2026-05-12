@@ -90,8 +90,6 @@ class Quiver(Theory):
 
     eqs: tuple[Eq, Eq]
 
-    Stub = QuiverStub
-
     @classmethod
     def from_prim(cls, ctx: Context, prim: QuiverStub):
         c = ctx.c
@@ -100,9 +98,11 @@ class Quiver(Theory):
             Node=Q0.Edge,
         ))
 
+        prim_source_globular_cond, prim_target_globular_cond = prim.eqs
+
         # It the future, naming equalities may become optional.
         source_globular_cond = ctx.eq(
-            _(prim.eqs[0]),
+            _(prim_source_globular_cond),
             (
                 c(Q0.source, Q1.source),
                 c(Q0.source, Q1.target),
@@ -110,7 +110,7 @@ class Quiver(Theory):
         )
 
         target_globular_cond = ctx.eq(
-            _(prim.eqs[1]),
+            _(prim_target_globular_cond),
             (
                 c(Q0.target, Q1.source),
                 c(Q0.target, Q1.target),

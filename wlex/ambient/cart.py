@@ -1,6 +1,6 @@
 """High level interface for cartesian ambient"""
 from collections.abc import Sequence, Iterator
-from typing import overload, Callable
+from typing import overload, Callable, TypeGuard
 from itertools import chain, permutations
 
 from .cells import Obj, Mor, Eq
@@ -19,7 +19,7 @@ class CartContext(category.Context):
     pairing_unique = staticmethod(public.pairing_unique)
     pairing_eq = staticmethod(public.pairing_eq)
 
-    def _prove_pairing_eq(self, ssource: 'ProductMor', starget: 'ProductMor') -> Eq:
+    def _prove_pairing_eq(self, ssource: ProductMor, starget: ProductMor) -> Eq:
         # First step is to prove each component equality.
         length = len(ssource.components)
         if length != len(starget.components):
@@ -126,6 +126,30 @@ class CartContext(category.Context):
     @overload
     def pair(
         self,
+        first: Mor,
+        *factors: Mor,
+    ) -> Mor: ...
+    @overload
+    def pair(
+        self,
+        first: MorLike,
+        *factors: MorLike,
+    ) -> Mor | Transformation: ...
+    @overload
+    def pair(
+        self,
+        first: Eq,
+        *factors: EqLike,
+    ) -> Eq: ...
+    @overload
+    def pair(
+        self,
+        first: MorLike,
+        *factors: Eq,
+    ) -> Eq: ...
+    @overload
+    def pair(
+        self,
         first: tuple[str | int, Mor],
         *factors: tuple[str | int, Mor],
     ) -> Mor: ...
@@ -150,10 +174,25 @@ class CartContext(category.Context):
 
     def pair(
         self,
+        first: tuple[str | int, EqLike] | EqLike,
+        *factors: tuple[str | int, EqLike] | EqLike,
+    ) -> Mor | Transformation | Eq:
+        """Variadic high-level pairing"""
+
+        if isinstance(first, (Mor, Obj, Callable, Eq)):
+            assert _all_unlabeled(factors)
+            first = (0, first)
+            factors = tuple(zip(range(1, len(factors) + 1), factors))
+        else:
+            assert _all_labeled(factors)
+
+        return self.labeled_pair(first, *factors)
+
+    def labeled_pair(
+        self,
         first: tuple[str | int, EqLike],
         *factors: tuple[str | int, EqLike],
     ) -> Mor | Transformation | Eq:
-        """Variadic high-level pairing"""
         # A consistent even if somewhat cumbersome way of providing factors
         # (namely as tuples containing the label and the factor) makes sense,
         # since theories written in python are just transpilations of wlex.
@@ -188,12 +227,50 @@ class CartContext(category.Context):
     def _produce(self, objs: tuple[Obj, Obj]):
         return self.product(objs)[0].source
 
-    def prod(self, first: tuple[str | int, Obj], *params: tuple[str | int, Obj]) -> Obj:
-        """Variadic high-level products"""
+    def labeled_prod(
+        self, first: tuple[str | int, Obj],
+        *params: tuple[str | int, Obj],
+    ) -> Obj:
         # The point of the next line is to use the undelying theory.
         reduce(self._produce, chain((first[1],), (f for _, f in params)))
         res = first[1].vproduct(list(chain((first,), params)))
         return res
+
+    @overload
+    def prod(
+        self, first: Obj,
+        *params: Obj,
+    ) -> Obj: ...
+    @overload
+    def prod(
+        self, first: tuple[str | int, Obj],
+        *params: tuple[str | int, Obj],
+    ) -> Obj: ...
+
+    def prod(
+        self, first: tuple[str | int, Obj] | Obj,
+        *params: tuple[str | int, Obj] | Obj,
+    ) -> Obj:
+        """Variadic high-level products"""
+
+        if isinstance(first, Obj):
+            assert _all_unlabeled(params)
+            first = (0, first)
+            params = tuple(zip(range(1, len(params) + 1), params))
+        else:
+            assert _all_labeled(params)
+
+        return self.labeled_prod(first, *params)
+
+def _all_unlabeled[T](
+    params: tuple[tuple[str | int, T] | T, ...],
+) -> TypeGuard[tuple[T, ...]]:
+    return all(not isinstance(param, tuple) for param in params)
+
+def _all_labeled[T](
+    params: tuple[tuple[str | int, T] | T, ...],
+) -> TypeGuard[tuple[tuple[str | int, T], ...]]:
+    return all(isinstance(param, tuple) for param in params)
 
 def _unlabeled[T](factors: Iterator[T]) -> Sequence[tuple[int, T]]:
     return tuple(enumerate(factors))

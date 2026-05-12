@@ -7,7 +7,7 @@ from wlex.ambient.category import (
     MorStub, EqStub,
 )
 from wlex.ambient.category import one as _
-from wlex.ambient.lex import LexContext#, requirer
+from wlex.ambient.lex import LexContext
 from .quiver import BasicQuiver, BasicQuiverStub
 
 @dataclass
@@ -15,16 +15,17 @@ class PosetoidStub(TheoryStub):
     Q: BasicQuiverStub | None = None
     ref: MorStub | None = None
     trans: MorStub | None = None
-    ref_hat: EqStub | None = None
-    trans_hat: EqStub | None = None
+
+    eqs: tuple[EqStub | None, EqStub | None] = (None, None)
 
     def with_base(self, base: Self):
+        eqs = tuple(_(s, b) for s, b in zip(self.eqs, base.eqs))
+        assert len(eqs) == 2
         return type(self)(
             Q=_(self.Q, base.Q),
             ref=_(self.ref, base.ref),
             trans=_(self.trans, base.trans),
-            ref_hat=_(self.ref_hat, base.ref_hat),
-            trans_hat=_(self.trans_hat, base.trans_hat),
+            eqs=eqs,
         )
 
     @classmethod
@@ -33,8 +34,7 @@ class PosetoidStub(TheoryStub):
             Q=BasicQuiverStub.from_theory(theory.Q),
             ref=theory.ref,
             trans=theory.trans,
-            ref_hat=theory.ref_hat,
-            trans_hat=theory.trans_hat,
+            eqs=theory.eqs,
         )
 
 @dataclass
@@ -47,15 +47,15 @@ class Posetoid(Theory):
     Path: Obj
     ref: Mor
     trans: Mor
-    ref_hat: MetaEq
-    trans_hat: MetaEq
+
+    eqs: tuple[MetaEq, MetaEq]
 
     @classmethod
     def from_prim(cls, ctx: LexContext, prim: PosetoidStub):
         c = ctx.c
-        p = ctx.pair0
+        p = ctx.pair
         prod = ctx.prod
-        #require = requirer(ctx)
+        req = ctx.req
         proj = ctx.proj
         i = ctx.id
 
@@ -65,24 +65,26 @@ class Posetoid(Theory):
         source = Q.source
         target = Q.target
 
-        Path = require(
+        Path = req(
             prod(('f', Rel), ('g', Rel)),
-            ('', c(source, proj('f')), c(target, proj('g'))),
+            (c(source, proj('f')), c(target, proj('g'))),
         )
 
+        prim_ref_hat, prim_trans_hat = prim.eqs
+
         ref, _ref_hat = ctx.mor('ref', _(prim.ref), (
-            c(p(('', i), ('', i)), El),
-            p(('', source), ('', target)),
+            c(p(i, i), El),
+            p(source, target),
         ))
-        ref_hat = _ref_hat(_(prim.ref_hat))
+        ref_hat = _ref_hat(_(prim_ref_hat))
         trans, _trans_hat = ctx.mor('trans', _(prim.trans), (
             c(p(
-                ('', c(source, proj('g'))),
-                ('', c(target, proj('f'))),
+                c(source, proj('g')),
+                c(target, proj('f')),
             ), Path),
-            p(('', source), ('', target)),
+            p(source, target),
         ))
-        trans_hat = _trans_hat(_(prim.trans_hat))
+        trans_hat = _trans_hat(_(prim_trans_hat))
 
         return cls(
             Q=Q,
@@ -93,8 +95,7 @@ class Posetoid(Theory):
             Path=Path,
             ref=ref,
             trans=trans,
-            ref_hat=ref_hat,
-            trans_hat=trans_hat,
+            eqs=(ref_hat, trans_hat),
         )
 
 @dataclass
@@ -128,16 +129,16 @@ class Setoid(Theory):
     sym_hat: MetaEq
 
     @classmethod
-    def from_prim(cls, ctx: Context, prim: SetoidStub) -> Self:
-        p = pairer0(ctx)
+    def from_prim(cls, ctx: LexContext, prim: SetoidStub) -> Self:
+        p = ctx.pair
 
         P = ctx.sub('P', Posetoid, _(prim.P))
         Eq = P.Rel
         source = P.source
         target = P.target
         sym, _sym_hat = ctx.mor('sym', _(prim.sym), (
-            p(('', source), ('', target)),
-            p(('', target), ('', source)),
+            p(source, target),
+            p(target, source),
         ))
         sym_hat = _sym_hat(_(prim.sym_hat))
 
@@ -182,11 +183,11 @@ class Congruence(Theory):
     unique_hat: MetaEq
 
     @classmethod
-    def from_prim(cls, ctx: Context, prim: CongruenceStub) -> Self:
-        c = composer(ctx)
-        p = pairer0(ctx)
-        product = producer(ctx)
-        require = requirer(ctx)
+    def from_prim(cls, ctx: LexContext, prim: CongruenceStub) -> Self:
+        c = ctx.c
+        p = ctx.pair
+        prod = ctx.prod
+        req= ctx.req
         proj = ctx.proj
         i = ctx.id
 
@@ -194,13 +195,13 @@ class Congruence(Theory):
         Eq = S.Eq
         source = S.source
         target = S.target
-        eq = ctx.mor('eq', p(('', source), ('', target)))
+        eq = ctx.mor('eq', p(source, target))
         unique, _unique_hat = ctx.mor('unique', _(prim.unique), (
-            require(
-                product(('d', Eq), ('e', Eq)),
-                ('', c(eq, proj('d')), c(eq, proj('e'))),
+            req(
+                prod(('d', Eq), ('e', Eq)),
+                (c(eq, proj('d')), c(eq, proj('e'))),
             ),
-            c(p(('', i), ('', i)), Eq),
+            c(p(i, i), Eq),
         ))
         unique_hat = _unique_hat(_(prim.unique_hat))
 

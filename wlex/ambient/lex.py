@@ -1,13 +1,13 @@
 """High level interface fo the lex ambient"""
 from itertools import chain
-from typing import override
+from typing import override, TypeGuard
 from collections.abc import Iterator, Sequence, Callable
 
 from .cells import Obj, Mor, Eq
 from . import cart
-from .category import EqLike, MorLike, Transformation, reduce, UnprovenEq
+from .category import EqLike, MorLike, reduce, UnprovenEq, Transformation
 from .cells.cart import Product
-from .cells.lex import Subobject, EqualizerMor
+from .cells.lex import EqualizerMor
 from .public import lex as public
 
 # TODO: When implementing extensive context recall the relation between
@@ -288,28 +288,115 @@ class LexContext(cart.CartContext):
 
     #     return EqualizerMor(mor.compose(source.incl(mor.source)), target)
 
+    def _prove_equalizer_pairing_eq(self, ssource: EqualizerMor, starget: EqualizerMor) -> Eq:
+        eq = self.prove(ssource.sup, starget.sup)
+        target = ssource.target
+        if target.identical(starget.target):
+            return self.fit_eq(eq, target)
+
+        raise UnprovenEq("Targets don't match.")
+
     def prove(self, ssource: Mor, starget: Mor, _fork: bool = True) -> Eq:
-        eq = super().prove(...)
+        try:
+            return super().prove(ssource, starget, _fork=_fork)
+        except UnprovenEq:
+            if isinstance(ssource, EqualizerMor) and isinstance(starget, EqualizerMor):
+                return self._prove_equalizer_pairing_eq(ssource, starget)
+
+            raise
 
     @override
-    def prod(self, first: tuple[str | int, Obj], *params: tuple[str | int, Obj]):
+    def labeled_prod(self, first: tuple[str | int, Obj], *params: tuple[str | int, Obj]):
         # Extract requirements of all subobject components and use them to turn
         # the product into a subobject of the product.
-        sup = super().prod(
-            *((l, p.sup) for l, p in chain((first,), params))
+        sup = super().labeled_prod(
+            *((l, p.sup) for l, p in chain((first,), params)),
         )
 
         if all(p is p.sup for _, p in chain((first,), params)):
             return sup
 
         assert isinstance(sup, Product)
-        # TODO: compose_eq needs the restriction!
-        #       The source of the requirement is an intermediate subobject!
-        reqs = chain(*(
-            ((l, req.compose_eq()))
-        ))
+        requirements = chain(*((
+            (self.c(s, proj), self.c(t, proj))
+            for s, t in reqs
+        ) for proj, reqs in (
+            (sup.proj(l), c.requirements)
+            for l, c in sup.components.items()
+        )))
 
-        # No need to type check the sources of the parallel pairs?
-        # TODO: Use `requiring` instead of directly using Subobject.
+        return self.req(sup, *requirements)
 
-        # TODO: More type checking?
+    @override
+    def labeled_pair(
+        self,
+        first: tuple[str | int, EqLike],
+        *factors: tuple[str | int, EqLike],
+    ):
+        components: list[tuple[str | int, Obj] | None] = []
+
+        def wrap_transformation(idx: int, label: str | int, factor: Transformation):
+            def wrapper(x: Obj):
+                mor = factor(x)
+                target = mor.target
+                # This means `wrapper` gets called only once.
+                assert components[idx] is None
+                components[idx] = (label, target)
+                return self.c(target.incl(), mor)
+
+            return wrapper
+
+        def handle_factor(idx: int, label: str | int, factor: EqLike):
+            # This can only be called once due to side effect on `components`.
+            # Preserve the source
+            assert len(components) == idx
+
+            if isinstance(factor, Callable):
+                components.append(None)
+                return label, wrap_transformation(idx, label, factor)
+
+            if isinstance(factor, Obj):
+                target = factor
+            elif isinstance(factor, Mor):
+                target = factor.target
+            else:
+                target = factor.ssource.target
+
+            components.append((label, target))
+            return label, self.c(target.incl(), factor)
+
+        sup = super().labeled_pair(
+            *(handle_factor(i, *f) for i, f in enumerate(chain((first,), factors))),
+        )
+
+        if isinstance(sup, Callable):
+            def wrapper(x: Obj):
+                mor = sup(x)
+                assert _all_labeled_obj(components)
+                target = self.labeled_prod(*iter(components))
+                restricted = self.c(target, mor)
+                assert target.sup.identical(mor.target)
+                assert restricted.source.identical(mor.source)
+                return restricted
+
+            return wrapper
+
+        assert _all_labeled_obj(components)
+        target = self.labeled_prod(*iter(components))
+        restricted = self.c(target, sup)
+
+        if isinstance(sup, Mor):
+            assert target.sup.identical(sup.target)
+            assert isinstance(restricted, Mor)
+            assert restricted.source.identical(sup.source)
+        else:
+            assert target.sup.identical(sup.ssource.target)
+            assert isinstance(restricted, Eq)
+            assert restricted.ssource.source.identical(sup.ssource.source)
+
+        return restricted
+
+def _all_labeled_obj(
+    factors: Sequence[tuple[str | int, Obj] | None],
+) -> TypeGuard[Sequence[tuple[str | int, Obj]]]:
+    return all(isinstance(f, tuple) for f in factors)

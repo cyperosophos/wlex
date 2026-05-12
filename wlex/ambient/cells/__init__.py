@@ -291,7 +291,7 @@ class Obj(metaclass=ABCMeta):
         """Models morphism `category.identity`"""
         raise TypeError("Requires CategoryObj")
 
-    def incl(self, obj: Optional['Obj']) -> 'Mor':
+    def incl(self, obj: Optional['Obj'] = None) -> 'Mor':
         """Inclusion morphism"""
         # Analogous to `proj`
         if obj is None or self.identical(obj):

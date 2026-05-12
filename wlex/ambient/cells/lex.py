@@ -201,6 +201,9 @@ class Subobject(LiftingObj):
         # being isomorphic to its superobject (which would be proven through the
         # universal property of the equalizer).
 
+        # Subobject with the same requirements up to symmetry (of equality) are
+        # only isomorphic.
+
         if isinstance(sup, Subobject):
             if len(requirements) == 0:
                 return
@@ -375,7 +378,11 @@ class EqualizerMor(LexMor):
         # `target` are the same must be avoided (this would be extensionally
         # equal to `mor`).
         super().__init__(mor.source, target)
-        self.sup = mor
+
+        if isinstance(mor, EqualizerMor):
+            self.sup = mor.sup
+        else:
+            self.sup = mor
 
     def ev(self, x: object):
         return self.sup.ev(x)
