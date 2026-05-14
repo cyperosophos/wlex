@@ -1,6 +1,7 @@
 """Cart cell classes"""
 from typing import Self, TypeGuard, override
-from collections.abc import Sequence, Mapping
+from collections import defaultdict
+from collections.abc import Sequence, Mapping, Iterator
 from abc import ABCMeta
 
 from ..cells import Obj, Mor, Eq, PrimMor
@@ -101,7 +102,7 @@ class ComponentMap[T](Mapping[str | int, T]):
         if set(range(len(data))) == set(k for k, _ in data):
             self._map = None
             self.data = None
-            self.tup = tuple(c for (_, c) in data)
+            self.tup = tuple(c for (_, c) in sorted(data))
         else:
             self._map = dict((k, v) for k, v in data if k != '')
             self.data = frozenset(data)
@@ -217,29 +218,116 @@ class Product(CartObj):
             agg[label] = component
 
     def with_labels(self, relabeling: dict[str | int, str | int] | Sequence[str | int]):
-        # This allows introducing overlaps and flattening product components.
-        # This also allows "deflattening" product target components, but there
-        # is no way to provide a different label for each such component unless
-        # `relabeling` is a sequence.
+        # Order is preserved when there is no (de)flattening.
+        def agg(rl: Iterator[tuple[str | int, str | int, Obj]]):
+            m: dict[str | int, list[tuple[str | int, Obj]]] = defaultdict(list)
+            for old, new, obj in rl:
+                m[new].append((old, obj))
+
+            res = [(
+                label,
+                objs[0][1] if len(objs) == 1
+                else self.vproduct(objs, no_repeat=True),
+            ) for label, objs in m.items() if label != '']
+
+            if '' in m:
+                res.extend(('', obj) for _, obj in m[''])
+
+            return res
+
+        # This allows flattening product components potentially introducing
+        # overlaps (which we avoid by setting `no_repeat=True`). Otherwise,
+        # this does not introduce overlaps, but instead aggregates all
+        # repeated relabeling into a single product component.
         if isinstance(relabeling, dict):
             for label in relabeling:
                 if label not in self.components:
                     raise ValueError("Can't relabel `{label}` in product")
 
-            return self.vproduct([
-                (relabeling.get(label, label), component)
-                for label, component in self.components.full_items()
-            ])
+            return self.vproduct(agg(
+                (label, relabeling.get(label, label), component)
+                for label, component in self.components.items()
+            ), no_repeat=True)
 
         if len(relabeling) > len(self.components):
             raise ValueError("Product relabeling list is too long.")
 
-        return self.vproduct([
-            (relabeling[i], component)
-            for i, (_, component) in enumerate(self.components.full_items())
-        ])
+        # This works because if the labels are a range of numbers (from 0), then
+        # they will be ordered when initializing components, so that labeling
+        # based on the order of labels is the same as labeling based on their
+        # values.
+        return self.vproduct(agg(
+            (label, relabeling[i], component)
+            for i, (label, component) in enumerate(self.components.items())
+        ), no_repeat=True)
 
     l = with_labels
+
+    def relabel(self, relabeling: dict[str | int, str | int] | Sequence[str | int]):
+        # TODO: Does this actually work? It seems too easy.
+        def agg(rl: Iterator[tuple[str | int, str | int, Mor]]):
+            m: dict[str | int, list[tuple[str | int, Mor]]] = defaultdict(list)
+            for old, new, mor in rl:
+                m[new].append((old, mor))
+
+            res = [(
+                label,
+                mors[0][1] if len(mors) == 1
+                else self.vproduct_mor(mors),
+            ) for label, mors in m.items() if label != '']
+
+            if '' in m:
+                res.extend(('', mor) for _, mor in m[''])
+
+            return res
+
+        # This should work with empty labels.
+        if isinstance(relabeling, dict):
+            for label in relabeling:
+                if label not in self.components:
+                    raise ValueError("Can't relabel `{label}` in product")
+
+            return self.vproduct_mor(agg(
+                (label, relabeling.get(label, label), self.proj(label))
+                for label in self.components
+            ))
+
+        if len(relabeling) > len(self.components):
+            raise ValueError("Product relabeling list is too long.")
+
+        return self.vproduct_mor(agg(
+            (label, relabeling[i], self.proj(label))
+            for i, label in enumerate(self.components)
+        ))
+
+    def invert_relabeling(self, relabeling: dict[str | int, str | int] | Sequence[str | int]):
+        res: dict[str | int, str | int] = {}
+
+        if isinstance(relabeling, dict):
+            it = relabeling.items()
+        else:
+            it = enumerate(relabeling)
+
+        for k, v in it:
+            if v == '':
+                # The idea is that `self` can be considered as the product to be
+                # relabeled with `relabeling`, so that the new product would end
+                # up having the labels of the flattened component.
+                c = self.components[k]
+                if not isinstance(c, Product):
+                    raise ValueError("Empty relabeling requires product component.")
+
+                for l in c.components:
+                    if l in res:
+                        raise ValueError("Can't introduce overlap")
+
+                    res[l] = k
+            elif v in res:
+                res[v] = ''
+            else:
+                res[v] = k
+
+        return res
 
     def __init__(self, components: Sequence[tuple[str | int, Obj]], no_repeat: bool = False):
         # Repeated component labels are allowed. This is based on the fact that
@@ -270,6 +358,7 @@ class Product(CartObj):
                     self._add_component(agg, l, c, no_repeat)
 
         self.components = ComponentMap(list(agg.items()))
+        assert len(self.components) == self.components.full_len()
 
     def identical(self, x: Obj):
         return super().identical(x) or (
@@ -434,16 +523,16 @@ class ProductMor(CartMor):
         for label, component in self.components.full_items():
             yield label, component.compose(mor)
 
-    def with_labels(self, relabeling: dict[str | int, str | int] | Sequence[str | int]):
-        if isinstance(relabeling, dict):
-            for label in relabeling:
-                if label not in self.components:
-                    raise ValueError("Can't relabel `{label}`")
+    def idx_to_labels(self, relabeling: Sequence[str | int]):
+        # if isinstance(relabeling, dict):
+        #     for label in relabeling:
+        #         if label not in self.components:
+        #             raise ValueError("Can't relabel `{label}`")
 
-            return self.source.vproduct_mor([
-                (relabeling.get(label, label), component)
-                for label, component in self.components.items()
-            ])
+        #     return self.source.vproduct_mor([
+        #         (relabeling.get(label, label), component)
+        #         for label, component in self.components.items()
+        #     ])
 
         if len(relabeling) > len(self.components):
             raise ValueError("Relabeling list is too long.")
@@ -453,7 +542,7 @@ class ProductMor(CartMor):
             for i, component in enumerate(self.components.values())
         ])
 
-    l = with_labels
+    l = idx_to_labels
 
     def __new__(
         cls, source: Obj,

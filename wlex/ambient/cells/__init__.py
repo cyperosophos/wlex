@@ -347,6 +347,23 @@ class Obj(metaclass=ABCMeta):
 
         raise ValueError("No labels")
 
+    def with_labels(
+        self, relabeling: dict[str | int, str | int] | Sequence[str | int],
+    ) -> 'Obj':
+        raise TypeError("Requires Product")
+
+    l = with_labels
+
+    def relabel(
+        self, relabeling: dict[str | int, str | int] | Sequence[str | int],
+    ) -> 'Mor':
+        raise TypeError("Requires Product")
+
+    def invert_relabeling(
+        self, relabeling: dict[str | int, str | int] | Sequence[str | int],
+    ) -> dict[str | int, str | int]:
+        raise TypeError("Requires Product")
+
     def fork(self, ssource: 'Mor', starget: 'Mor') -> 'Eq':
         """Requirement of subobject"""
         raise TypeError("Requires Subobject")
@@ -356,20 +373,20 @@ class Obj(metaclass=ABCMeta):
 
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
-    __slots__ = 'name', 'source', 'target', '_hat'
+    __slots__ = 'name', 'source', 'target'#, '_hat'
     name: Name
     source: Obj
     target: Obj
-    _hat: tuple['Mor', 'Mor']
+    #_hat: tuple['Mor', 'Mor']
     depth = 0 # Used in LazyComposition
 
-    @property
-    def hat(self):
-        """Hat equality associated to morphism"""
-        # This raises AttributeError in the case of morphisms lacking a hat
-        # equality.
-        hat_source, hat_target = self._hat
-        return Eq(hat_source, hat_target.compose(self))
+    # @property
+    # def hat(self):
+    #     """Hat equality associated to morphism"""
+    #     # This raises AttributeError in the case of morphisms lacking a hat
+    #     # equality.
+    #     hat_source, hat_target = self._hat
+    #     return Eq(hat_source, hat_target.compose(self))
 
     def expanded(self):
         """Underlying composition in the case of LazyComposition"""

@@ -1,6 +1,6 @@
 # pylint: disable=C0103, R0902, R0914, C0115, C0114
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import Self
 
 from wlex.ambient.category import (
     Obj as MetaObj, Mor as MetaMor, Eq as MetaEq, Theory, TheoryStub,
@@ -11,7 +11,7 @@ from .quiver import Quiver, QuiverStub, BasicQuiverStub
 from .posetoid import Posetoid, PosetoidStub, Congruence, CongruenceStub, SetoidStub
 
 @dataclass
-class CategoryStub:
+class CategoryStub(TheoryStub):
     Q: QuiverStub | None = None
     P: PosetoidStub | None = None
     S: CongruenceStub | None = None
@@ -84,6 +84,7 @@ class Category(Theory):
         req = ctx.req
         proj = ctx.proj
         i = ctx.id
+        l = ctx.l
 
         Q = ctx.sub('Q', Quiver, _(prim.Q))
         P = ctx.sub('P', Posetoid, _(prim.P), PosetoidStub(
@@ -109,15 +110,66 @@ class Category(Theory):
         compose = P.trans
         compose_hat = P_trans_hat
 
-        proof_lil = ... # This is just an Eq
-        # TODO: There has to be a way to do compositions that preserve the source (don't restrict it)!!
+        ctx.eq(c(
+            c(proj(0), prod(Obj, Obj)).ref(),
+            identity_hat, target,
+        ))
         left_identity_law = ctx.mor(
             'left_identity_law', _(prim.left_identity_law), (
-            c(p(c(
+            Mor, Eq,
+            p(c(
                 compose,
-                p(c(i, target), i),
-            ), i), Mor),
+                p(c(identity, target), i),
+            ), i),
             eq,
+        ))
+
+        ctx.eq(c(
+            c(proj(1), prod(Obj, Obj)).ref(),
+            identity_hat, source,
+        ))
+        right_identity_law = ctx.mor(
+            'right_identity_law', _(prim.right_identity_law), (
+            Mor, Eq,
+            p(c(
+                compose,
+                p(i, c(identity, source)),
+            ), i),
+            eq,
+        ))
+
+        Comp3 = prod(('', Composable), ('', l(Composable, ('g', 'h'))))
+        f, g, h = (c(proj(n), Comp3) for n in 'fgh')
+        ctx.eq(t(
+            c(
+                c(proj(1), compose_hat),
+                p(g, h),
+            ),
+            f,
+        ))
+        ctx.eq(t(
+            h,
+            c(proj(0), compose_hat),
+        ))
+        associativity = ctx.mor(
+            'associativity', _(prim.associativity), (
+            Comp3, Eq,
+            p(
+                c(compose, p(f, c(compose, p(g, h)))),
+                c(compose, p(c(compose, p(f, g)), h)),
+            ),
+            eq,
+        ))
+
+        ComposableEq = req(
+            prod(('d', Eq), ('e', Eq)),
+            (c(source, S.source), proj('d')),
+            (c(target, S.target), proj('e'))
+        )
+        d, e = (c(proj(n), ComposableEq) for n in 'de')
+        ctx.eq(t(
+            c(Q.target_globular_cond, e),
+            th.req(0),
         ))
 
         return cls(

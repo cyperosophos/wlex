@@ -1,12 +1,12 @@
 """Lex cell classes"""
 from abc import ABCMeta
-from collections.abc import Collection, Callable
+from collections.abc import Collection, Callable, Sequence
 from typing import Self, override
 from itertools import chain
 
 from ..cells import Obj, Mor, Eq, PrimEq
 from .cart import (
-    CartObj, CartMor, CartPrimMor, CartEq, CartComposition,
+    CartObj, CartMor, CartPrimMor, CartEq, CartComposition, Product,
 )
 
 class LexObj(CartObj, metaclass=ABCMeta):
@@ -139,6 +139,11 @@ class LazySubobject(LiftingObj):
 
     def proj(self, label: str | int) -> Mor:
         return self.expanded().proj(label)
+
+    def with_labels(self, relabeling: dict[str | int, str | int] | Sequence[str | int]):
+        return self.expanded().with_labels(relabeling)
+
+    l = with_labels
 
 class Subobject(LiftingObj):
     __slots__ = ('_requirements',)

@@ -22,6 +22,22 @@ class LexContext(cart.CartContext):
     equalizer_pairing_unique = staticmethod(public.equalizer_pairing_unique)
     equalizer_pairing_eq = staticmethod(public.equalizer_pairing_eq)
 
+    def with_labels(self, obj: Obj, relabeling: dict[str | int, str | int] | Sequence[str | int]):
+        prod = obj.sup.with_labels(relabeling)
+        # No assumption about order of labels in relabeling being the same as in
+        # the components of prod.
+
+        r = prod.relabel(obj.sup.invert_relabeling(relabeling))
+        assert r.target.identical(obj.sup)
+        return self.req(
+            prod, *((
+                self.c(s, r),
+                self.c(t, r),
+            ) for s, t in obj.requirements),
+        )
+
+    l = with_labels
+
     def _straighten_mors(self, factors: Iterator[Mor]):
         # Polish order
         it = iter(factors)

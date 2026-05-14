@@ -98,6 +98,8 @@ class Quiver(Theory):
             Node=Q0.Edge,
         ))
 
+        # TODO: Store the whole theory (not just equalities) in Context??
+        # TODO: Name equalities in TheoryStub as before for easier access??
         prim_source_globular_cond, prim_target_globular_cond = prim.eqs
 
         # It the future, naming equalities may become optional.

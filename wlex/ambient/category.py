@@ -32,6 +32,13 @@ class UnprovenEq(Exception):
 #     # This will be just `cell` when `tconv` as `sconv` are identities.
 #     return tconv.compose(cell).compose(sconv)
 
+def check_signature(source: Obj, target: Obj, cell: Mor):
+    if not source.identical(cell.source):
+        raise cells.SourceUnfit("Wrong source", source, cell.source)
+
+    if not target.identical(cell.target):
+        raise cells.TargetUnfit("Wrong target", cell.target, target)
+
 def _source_fit_mor_like(source: Obj, cell: MorLike):
     if isinstance(cell, Callable):
         cell = cell(source)
@@ -226,8 +233,12 @@ class Context:
     # isinstance(x, Obj), etc. Include only the actually publicly used cells of category.
     # The problem of using dataclass is that one ends up having to repeat all the function signatures.
 
-    def __init__(self):
+    def __init__(self, proven_eqs: set[tuple[Mor, Mor]] | None = None):
         self.name_stack = ()
+        if proven_eqs is None:
+            self.proven_eqs = set()
+        else:
+            self.proven_eqs = proven_eqs
 
     @property
     def id(self):
@@ -235,8 +246,8 @@ class Context:
         return self.identity
 
     def with_name(self, name: str):
-        """Copy of `self` with name added to its `name_stack`"""
-        ctx = Context()
+        """Shallow copy of `self` with name added to its `name_stack`"""
+        ctx = Context(proven_eqs=self.proven_eqs)
         ctx.name_stack = (*self.name_stack, name)
         return ctx
 
@@ -250,7 +261,7 @@ class Context:
             raise TypeError("Wrong stub class")
 
         if base:
-            prim = prim.with_base(base)
+            prim = prim.with_base(base)def sub
 
         # There is checking for keeping attributes of `prim` from remaining
         # unused. Also, checking that the resulting theory has no empty
@@ -268,12 +279,10 @@ class Context:
         self._set_name(name, cell)
         return cell
 
-    # TODO: Make overloading more fine-grained? (espcially to avoid
-    # callable cell without signature).
     @overload
     def mor(
         self, name: str, cell: MorLike | MorStub,
-        signature: tuple[Obj, Obj] | None = None,
+        signature: tuple[Obj, Obj],
     ) -> Mor: ...
     @overload
     def mor(
@@ -285,12 +294,40 @@ class Context:
         self, name: str, cell: MorLike | MorStub,
         signature: tuple[Mor | Transformation, Mor | Transformation],
     ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
+    @overload
+    def mor(
+        self, name: str, cell: MorLike | MorStub,
+        signature: tuple[Obj, Obj, Obj, Mor | Transformation],
+    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
+    @overload
+    def mor(
+        self, name: str, cell: MorLike | MorStub,
+        signature: tuple[Obj, Obj, Mor | Transformation, Mor | Transformation],
+    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
+    @overload
+    def mor(
+        self, name: str, cell: Obj | MorStub,
+        signature: None = None,
+    ) -> Mor: ...
 
     def mor(
         self, name: str, cell: MorLike | MorStub,
-        signature: tuple[MorLike, MorLike] | None = None,
+        signature: tuple[MorLike, MorLike] | tuple[Obj, Obj, MorLike, MorLike] | None = None,
     ):
         """Sets name on morphism and checks signature"""
+        final_source: Obj | None = None
+        final_target: Obj | None = None
+        if signature and len(signature) == 4:
+            final_source, final_target, s_s, s_t = signature
+
+            if isinstance(s_s, Callable):
+                s_s = s_s(final_source)
+
+            if isinstance(s_t, Callable):
+                s_t = s_t(final_target)
+
+            signature = s_s, s_t
+
         # Object `target` is disallowed here, because it would have the same
         # effect as setting the value of the morphism being created to
         # `source`. There must preferably be only one way to do things.
@@ -323,6 +360,7 @@ class Context:
 
                 #cell = _fit_mor(source, target, cell)
                 cell = self.c(target, cell, source)
+                check_signature(source, target, cell)
                 self._set_name(name, cell)
                 return cell
 
@@ -336,6 +374,10 @@ class Context:
                 target = target(cell.target)
             elif isinstance(cell, PrimEv):
                 cell = cell.to_mor(source, target.source)
+
+            if final_source:
+                assert final_target
+                check_signature(final_source, final_target, cell)
 
             return self._hat_mor(
                 name, cell, (source, target.source),
@@ -372,6 +414,10 @@ class Context:
         assert not isinstance(target, Obj)
         if isinstance(cell, PrimEv):
             cell = cell.to_mor(source.source, target.source)
+
+        if final_source:
+            assert final_target
+            check_signature(final_source, final_target, cell)
 
         return self._hat_mor(
             name, cell, (source.source, target.source), (source, target),

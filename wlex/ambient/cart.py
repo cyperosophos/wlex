@@ -3,7 +3,7 @@ from collections.abc import Sequence, Iterator
 from typing import overload, Callable, TypeGuard
 from itertools import chain, permutations
 
-from .cells import Obj, Mor, Eq
+from .cells import Obj, Mor, Eq, MorStub
 from . import category
 from .category import EqLike, MorLike, Transformation, reduce, UnprovenEq
 from .public import cart as public
@@ -18,6 +18,11 @@ class CartContext(category.Context):
     pairing = staticmethod(public.pairing)
     pairing_unique = staticmethod(public.pairing_unique)
     pairing_eq = staticmethod(public.pairing_eq)
+
+    def with_labels(self, obj: Obj, relabeling: dict[str | int, str | int] | Sequence[str | int]):
+        return obj.with_labels(relabeling)
+
+    l = with_labels
 
     def _prove_pairing_eq(self, ssource: ProductMor, starget: ProductMor) -> Eq:
         # First step is to prove each component equality.
@@ -91,15 +96,30 @@ class CartContext(category.Context):
 
         return _proj
 
-    def el(self, name: str, cell: MorLike, target: Obj | None = None):
+    @overload
+    def el(
+        self, name: str, cell: MorLike, target: Obj,
+    ) -> Mor: ...
+    @overload
+    def el(
+        self, name: str, cell: Obj | MorStub, target: None = None,
+    ) -> Mor: ...
+
+    def el(
+        self, name: str, cell: MorLike | MorStub, target: Obj | None = None,
+    ):
         """Sets name on element and checks its type
 
         An element is a morphism from the terminal object.
         """
-        return self.mor(
-            name, cell,
-            target and (self.terminal(type(target)), target),
-        )
+        if target:
+            return self.mor(
+                name, cell,
+                (self.terminal(type(target)), target),
+            )
+
+        assert not isinstance(cell, Callable)
+        return self.mor(name, cell)
 
     def _pair(self, mors: tuple[Mor, Mor]):
         # Wrap `public.pairing` so that it can be used as binary `comp` in
