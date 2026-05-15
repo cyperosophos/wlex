@@ -5,11 +5,11 @@ from itertools import chain, permutations
 
 from .cells import Obj, Mor, Eq, MorStub
 from . import category
-from .category import EqLike, MorLike, Transformation, reduce, UnprovenEq, Once
+from .category import EqLike, MorLike, Transformation, reduce, UnprovenEq, Once, Theory
 from .public import cart as public
 from .cells.cart import ProductMor
 
-class CartContext(category.Context):
+class CartContext[T: Theory](category.Context[T]):
     """Handles cells of a theory with ambient cart"""
     __slots__ = ()
 

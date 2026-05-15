@@ -5,7 +5,7 @@ from collections.abc import Iterator, Sequence, Callable
 
 from .cells import Obj, Mor, Eq
 from . import cart
-from .category import EqLike, MorLike, reduce, UnprovenEq, Transformation
+from .category import EqLike, MorLike, reduce, UnprovenEq, Transformation, Theory
 from .cells.cart import Product
 from .cells.lex import EqualizerMor
 from .public import lex as public
@@ -13,7 +13,7 @@ from .public import lex as public
 # TODO: When implementing extensive context recall the relation between
 #       restriction and overloading.
 
-class LexContext(cart.CartContext):
+class LexContext[T: Theory](cart.CartContext[T]):
     """Handles cells of a theory with ambient lex"""
     __slots__ = ()
 

@@ -35,6 +35,13 @@ class BasicQuiverTheory(Theory):
             target=ctx.mor_refs['target'],
         )
 
+    # TODO: define this as an abstract method of Theory!
+    def stub_update(self, stub: BasicQuiverStub):
+        stub.Node.value = self.Node
+        stub.Edge.value = self.Edge
+        stub.source.value = self.source
+        stub.target.value = self.target
+
 @dataclass(frozen=True)
 class QuiverStub:
     Q0: _s[BasicQuiverStub]

@@ -212,6 +212,7 @@ class Once[T]:
         if v is None:
             raise ValueError("No value was provided.")
 
+        self._used = True
         return v
 
     @value.setter
@@ -228,10 +229,10 @@ class Once[T]:
     @staticmethod
     def prim[V](stub: 'OnceUpdate[V]') -> V:
         if isinstance(stub, OnceStub):
-            return stub.updated()
+            return stub.use()
 
         stub, update = stub
-        return stub.updated(update)
+        return stub.use(update)
 
 def of_type[T](x: object, typ: type[T]) -> T:
     assert isinstance(x, typ)
@@ -270,21 +271,22 @@ def of_type[T](x: object, typ: type[T]) -> T:
 # OnceUpdate = tuple[OnceStub[T, U], Callable[[T], None]] | OnceStub[T, U]
 
 class OnceStub[T]:
-    __slots__ = '_stub', '_used'
-    _stub: T | None
+    __slots__ = 'stub', '_used'
+    stub: T
     _used: bool
 
-    def __init__(self, stub: T | None = None):
-        self._stub = stub
+    def __init__(self, stub: T):
+        # The underlying stub can be accessed many times when updating its
+        # attibutes, but only once (by calling `use`) when using it as the
+        # argument from creating the theory.
+        self.stub = stub
         self._used = False
 
-    def updated(self, update: Callable[[T], None] | None = None) -> T:
+    def use(self, update: Callable[[T], None] | None = None) -> T:
         if self._used:
             raise ValueError("Can only be used once")
 
-        stub = self._stub
-        if stub is None:
-            raise ValueError("No stub")
+        stub = self.stub
 
         if isinstance(stub, Theory):
             raise TypeError("Expected stub")
@@ -292,6 +294,7 @@ class OnceStub[T]:
         if update:
             update(stub)
 
+        self._used = True
         return stub
 
 T = TypeVar('T')
