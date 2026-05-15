@@ -330,6 +330,7 @@ class Product(CartObj):
         return res
 
     def __init__(self, components: Sequence[tuple[str | int, Obj]], no_repeat: bool = False):
+        super().__init__()
         # Repeated component labels are allowed. This is based on the fact that
         # AxBxC is the pullback of the projections AxB->B and BxC->B.
 

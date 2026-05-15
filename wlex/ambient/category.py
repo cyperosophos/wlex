@@ -1,10 +1,11 @@
 """High level interface to category ambient"""
 from collections.abc import Callable, Iterator, Sequence
 from abc import ABCMeta, abstractmethod
-from typing import Any, Self, TypeGuard, TypeVar, overload
+from typing import Any, Self, TypeGuard, TypeVar, overload #, NoReturn
 from itertools import chain
+import dataclasses
 
-from .cells import Obj, Mor, Eq, MorStub, EqStub, PrimEv, PrimEq, Axiom
+from .cells import Obj, Mor, Eq, MorStub, EqStub, PrimEv, PrimEq, Axiom, Name
 from .cells.category import Composition
 from . import cells
 from .public import category as public
@@ -160,64 +161,207 @@ def _mor_like_to_mor_ssignature(ssignature: tuple[MorLike, MorLike]):
     # except (ValueError, TypeError):
     #     return False
 
-def one[T](*args: T | None) -> T:
-    """Returns the unique argument that is not None"""
-    res: T | None = None
-    for a in args:
-        if a is not None:
-            if res is None:
-                res = a
-            elif res is not a:
-                if isinstance(res, TheoryStub):
-                    res = res.with_base(a)
-                else:
-                    raise ValueError("More than one value was provided.")
+# def one2[T](*args: T | None) -> T:
+#     """Returns the unique argument that is not None"""
+#     res: T | None = None
+#     for a in args:
+#         if a is not None:
+#             if res is None:
+#                 res = a
+#             elif res is not a:
+#                 if isinstance(res, TheoryStub):
+#                     res = res.with_base(a)
+#                 else:
+#                     raise ValueError("More than one value was provided.")
 
-    if res is None:
-        raise ValueError("No value was provided.")
+#     if res is None:
+#         raise ValueError("No value was provided.")
 
-    return res
+#     return res
 
-class TheoryStub(metaclass=ABCMeta):
-    """Base class for the theory stub"""
+# TODO: Use special field in Stub to make sure each field is only
+# accessed once? This still allows cheating. It's better to handle
+# this at the level of PrimEv and Axiom. Even better: make a Stub
+# wrapper around these that also handles Obj, so that even if the
+# underlying value is a true cell (as when providing cells of a subtheory)
+# it can only be used once. This wrapper should also handle the None
+# value (when no value has been provided) and overriding cells when
+# defining subtheory.
+# TODO: Use frozen
+# def one[T](x: T) -> T:
+#     if x is None:
+#         raise ValueError("No value was provided.")
 
-    @abstractmethod
-    def with_base(self, base: Any) -> Self:
-        """Combine `self` and `base`"""
+#     return x
 
-    @abstractmethod
-    @classmethod
-    def from_theory(cls, theory: Any) -> Self:
-        """Create stub from theory"""
+class Once[T]:
+    __slots__ = '_value', '_used'
+    _value: T | None
+    _used: bool
+
+    def __init__(self, value: T | None = None):
+        self._value = value
+        self._used = False
+
+    @property
+    def value(self):
+        if self._used:
+            raise ValueError("Can only be used once")
+
+        v = self._value
+        if v is None:
+            raise ValueError("No value was provided.")
+
+        return v
+
+    @value.setter
+    def value(self, v: T | None):
+        #if v is None:
+        #    return
+
+        # TODO: Is this needed?
+        #if not isinstance(v, (Obj, Mor, Eq, Theory)):
+        #    raise ValueError("Expected cell or theory")
+
+        self._value = v
+
+    @staticmethod
+    def prim[V](stub: 'OnceUpdate[V]') -> V:
+        if isinstance(stub, OnceStub):
+            return stub.updated()
+
+        stub, update = stub
+        return stub.updated(update)
+
+def of_type[T](x: object, typ: type[T]) -> T:
+    assert isinstance(x, typ)
+    return x
+
+# class OnceStub[T, U: 'Theory']:
+#     __slots__ = '_stub', '_used'
+#     _stub: T | U | None
+#     _used: bool
+
+#     def __init__(self, stub: T | U | None = None):
+#         self._stub = stub
+#         self._used = False
+
+#     def updated(self, update: U | Callable[[T], None] | None = None) -> T:
+#         if self._used:
+#             raise ValueError("Can only be used once")
+
+#         stub = self._stub
+#         if stub is None:
+#             raise ValueError("No stub")
+
+#         if isinstance(stub, Theory):
+#             raise TypeError("Expected stub")
+
+#         if update:
+#             if isinstance(update, Callable):
+#                 update(stub)
+#             else:
+#                 self._stub = update
+
+#         return stub
+
+# T = TypeVar('T')
+# U = TypeVar('U', bound='Theory')
+# OnceUpdate = tuple[OnceStub[T, U], Callable[[T], None]] | OnceStub[T, U]
+
+class OnceStub[T]:
+    __slots__ = '_stub', '_used'
+    _stub: T | None
+    _used: bool
+
+    def __init__(self, stub: T | None = None):
+        self._stub = stub
+        self._used = False
+
+    def updated(self, update: Callable[[T], None] | None = None) -> T:
+        if self._used:
+            raise ValueError("Can only be used once")
+
+        stub = self._stub
+        if stub is None:
+            raise ValueError("No stub")
+
+        if isinstance(stub, Theory):
+            raise TypeError("Expected stub")
+
+        if update:
+            update(stub)
+
+        return stub
+
+T = TypeVar('T')
+OnceUpdate = tuple[OnceStub[T], Callable[[T], None]] | OnceStub[T]
+
+# class TheoryStub(metaclass=ABCMeta):
+#     """Base class for the theory stub"""
+
+#     @abstractmethod
+#     def with_base(self, base: Any) -> Self:
+#         """Combine `self` and `base`"""
+
+#     @abstractmethod
+#     @classmethod
+#     def from_theory(cls, theory: Any) -> Self:
+#         """Create stub from theory"""
+
+# class Theory2(metaclass=ABCMeta):
+#     """Base class for theories"""
+
+#     Stub: type[TheoryStub]
+
+#     @abstractmethod
+#     @classmethod
+#     def from_prim(cls, ctx: Any, prim: Any) -> Self:
+#         """Create theory from primitives"""
+#         # Some rules must be followed in the implementation, which are not
+#         # enforced through code. Attributes of `prim` must be used exactly once
+#         # to define variables of the same name. These variables must then be
+#         # used instead of accessing the attributes.
+#         # TODO: primitives can't be changed through conversion
+#         #       (including Obj -> Mor through identity, etc.)!
+#         # TODO: primitives shouldn't be used (e.g. in composition, identity, etc.)
+#         #       before being named.
+
+#     @classmethod
+#     def is_own_stub(cls, stub: TheoryStub):
+#         """Stub corresponds to theory"""
+#         return isinstance(stub, cls.Stub)
 
 class Theory(metaclass=ABCMeta):
-    """Base class for theories"""
-
-    Stub: type[TheoryStub]
+    name: Name
 
     @abstractmethod
     @classmethod
-    def from_prim(cls, ctx: Any, prim: Any) -> Self:
-        """Create theory from primitives"""
-        # Some rules must be followed in the implementation, which are not
-        # enforced through code. Attributes of `prim` must be used exactly once
-        # to define variables of the same name. These variables must then be
-        # used instead of accessing the attributes.
-        # TODO: primitives can't be changed through conversion
-        #       (including Obj -> Mor thorugh identity, etc.)!
-        # TODO: primitives shouldn't be used (e.g. in composition, identity, etc.)
-        #       before being named.
+    def from_ctx(cls, ctx: 'Context[Any]') -> Self:
+        """Creates theory from context"""
 
-    @classmethod
-    def is_own_stub(cls, stub: TheoryStub):
-        """Stub corresponds to theory"""
-        return isinstance(stub, cls.Stub)
+    def __post_init__(self):
+        if not dataclasses.is_dataclass(self):
+            raise TypeError("Subclass must be dataclass")
 
-class Context:
+        for field in dataclasses.fields(self):
+            v = getattr(self, field.name)
+            if isinstance(v, (Obj, Mor, Theory)):
+                v.name.parent = self.name
+
+# TODO: When implementing theories, type is already handled by context,
+# and pylance type-checking is too limited and makes implementation cumbersome.
+# The difficulty of tracking types arrises with subtheories.
+
+class Context[V: Theory]:
     """Handles cells of a theory with ambient category"""
-    __slots__ = 'name_stack', 'proven_eqs'
-    name_stack: tuple[str, ...]
+    __slots__ = 'proven_eqs', 'obj_refs', 'mor_refs', 'sub_refs', 'theory_cls'
+    #name_stack: tuple[str, ...]
     proven_eqs: set[tuple[Mor, Mor]] # set of ssignatures
+    obj_refs: dict[str, Obj]
+    mor_refs: dict[str, Mor]
+    sub_refs: dict[str, Theory]
+    theory_cls: type[V]
 
     compose = staticmethod(public.compose)
     compose_eq = staticmethod(public.compose_eq)
@@ -233,88 +377,143 @@ class Context:
     # isinstance(x, Obj), etc. Include only the actually publicly used cells of category.
     # The problem of using dataclass is that one ends up having to repeat all the function signatures.
 
-    def __init__(self, proven_eqs: set[tuple[Mor, Mor]] | None = None):
-        self.name_stack = ()
-        if proven_eqs is None:
-            self.proven_eqs = set()
-        else:
-            self.proven_eqs = proven_eqs
+    def __init__(self, theory_cls: type[V]): # TODO: forbid subclasses of V?
+        #proven_eqs: set[tuple[Mor, Mor]] | None = None):
+        #self.name_stack = ()
+
+        # if proven_eqs is None:
+        #     self.proven_eqs = set()
+        # else:
+        #     self.proven_eqs = proven_eqs
+
+        self.proven_eqs = set()
+        self.obj_refs = {}
+        self.mor_refs = {}
+        self.sub_refs = {}
+        self.theory_cls = theory_cls
+
+    # @classmethod
+    # def theory[T: 'Theory', U](cls, theory_cls: type[T], stub_cls: type[U]):
+    #     def decorator(func: Callable[[Context, U], None]):
+    #         @functools.wraps(func)
+    #         def wrapper(prim: Once[U | T]):
+    #             ctx = cls(theory_cls)
+    #             v = prim.value
+    #             if isinstance(v, theory_cls):
+    #                 raise ValueError("Expected stub")
+
+    #             assert isinstance(v, stub_cls)
+    #             func(ctx, v)
+    #             return ctx
+
+    #         return wrapper
+
+    #     return decorator
 
     @property
     def id(self):
         """`public.identity` as `Transformation`"""
         return self.identity
 
-    def with_name(self, name: str):
-        """Shallow copy of `self` with name added to its `name_stack`"""
-        ctx = Context(proven_eqs=self.proven_eqs)
-        ctx.name_stack = (*self.name_stack, name)
-        return ctx
+    # def with_name(self, theory: T, name: str):
+    #     """Shallow copy of `self` with name added to its `name_stack`"""
+    #     ctx = Context(theory)
+    #     ctx.name_stack = (*self.name_stack, name)
+    #     return ctx
 
-    def sub[S: TheoryStub, T: Theory](
-        self, name: str, theory: type[T], prim: S,
-        base: S | None = None,
-    ):
-        """Sets name on subtheory"""
-        # Pylance type checking does not catch this!
-        if not theory.is_own_stub(prim):
-            raise TypeError("Wrong stub class")
+    def sub[T: Theory](
+        self, name: str,
+        prog: 'Context[T]',
+    ) -> T:
+        # Notice that `sub` and `obj` deal only with primitives (stubs).
+        # `prog` is a completed context.
+        theory = prog.theory_cls.from_ctx(prog)
+        self.proven_eqs.update(prog.proven_eqs)
+        return self.define(name, theory)
 
-        if base:
-            prim = prim.with_base(base)def sub
+    # def sub2[S: TheoryStub, T: Theory](
+    #     self, name: str, theory: type[T], prim: S,
+    #     base: S | None = None,
+    # ):
+    #     """Sets name on subtheory"""
+    #     # Pylance type checking does not catch this!
+    #     if not theory.is_own_stub(prim):
+    #         raise TypeError("Wrong stub class")
 
-        # There is checking for keeping attributes of `prim` from remaining
-        # unused. Also, checking that the resulting theory has no empty
-        # attributes.
-        # TODO: Check that context arg is of the right type!
-        return theory.from_prim(self.with_name(name), prim)
+    #     if base:
+    #         prim = prim.with_base(base)
 
-    def _set_name(self, name: str, cell: cells.Cell):
-        # An empty `name` may occur in the case of equalities.
-        if not (hasattr(cell, 'name') and cell.name[-1]):
-            cell.name = (*self.name_stack, name)
+    #     # There is checking for keeping attributes of `prim` from remaining
+    #     # unused. Also, checking that the resulting theory has no empty
+    #     # attributes.
+    #     # TODO: Check that context arg is of the right type!
+    #     return theory.from_prim(self.with_name(name), prim)
 
-    def obj(self, name: str, cell: Obj):
+    # def _set_name(self, name: str, cell: Obj | Mor):
+    #     # An empty `name` may occur in the case of equalities.
+    #     #if not (hasattr(cell, 'name') and cell.name[-1]):
+    #     cell.name = (*self.name_stack, name)
+
+    def define[T: Obj | Mor | Theory](self, name: str, cell: T) -> T:
+        # Create reference and rename.
+        cell.name.base = name
+        if isinstance(cell, Obj):
+            self.obj_refs[name] = cell
+        elif isinstance(cell, Mor):
+            self.mor_refs[name] = cell
+        else:
+            self.sub_refs[name] = cell
+
+        return cell
+
+    def obj(self, name: str, stub: Once[Obj]):
         """Sets name on object"""
-        self._set_name(name, cell)
+        cell = stub.value
+        self.define(name, cell)
         return cell
 
     @overload
     def mor(
-        self, name: str, cell: MorLike | MorStub,
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Obj, Obj],
     ) -> Mor: ...
     @overload
     def mor(
-        self, name: str, cell: MorLike | MorStub,
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Obj, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]: ...
     @overload
     def mor(
-        self, name: str, cell: MorLike | MorStub,
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Mor | Transformation, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]: ...
     @overload
     def mor(
-        self, name: str, cell: MorLike | MorStub,
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Obj, Obj, Obj, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]: ...
     @overload
     def mor(
-        self, name: str, cell: MorLike | MorStub,
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Obj, Obj, Mor | Transformation, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]: ...
+    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]: ...
     @overload
     def mor(
-        self, name: str, cell: Obj | MorStub,
+        self, name: str, cell_or_stub: Obj | Mor,
         signature: None = None,
     ) -> Mor: ...
 
     def mor(
-        self, name: str, cell: MorLike | MorStub,
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[MorLike, MorLike] | tuple[Obj, Obj, MorLike, MorLike] | None = None,
     ):
         """Sets name on morphism and checks signature"""
+        if isinstance(cell_or_stub, Once):
+            cell = cell_or_stub.value
+            assert isinstance(cell, MorStub)
+        else:
+            cell = cell_or_stub
+
         final_source: Obj | None = None
         final_target: Obj | None = None
         if signature and len(signature) == 4:
@@ -345,7 +544,7 @@ class Context:
                     "If `cell` is callable, signature is needed.",
                 )
 
-            self._set_name(name, cell)
+            self.define(name, cell)
             return cell
 
         source, target = signature
@@ -361,7 +560,7 @@ class Context:
                 #cell = _fit_mor(source, target, cell)
                 cell = self.c(target, cell, source)
                 check_signature(source, target, cell)
-                self._set_name(name, cell)
+                self.define(name, cell)
                 return cell
 
             if isinstance(target, Callable):
@@ -375,12 +574,10 @@ class Context:
             elif isinstance(cell, PrimEv):
                 cell = cell.to_mor(source, target.source)
 
-            if final_source:
-                assert final_target
-                check_signature(final_source, final_target, cell)
-
             return self._hat_mor(
-                name, cell, (source, target.source),
+                name, cell,
+                (source, target.source),
+                (final_source, final_target),
                 (source.identity(), target),
             )
 
@@ -415,32 +612,41 @@ class Context:
         if isinstance(cell, PrimEv):
             cell = cell.to_mor(source.source, target.source)
 
-        if final_source:
-            assert final_target
-            check_signature(final_source, final_target, cell)
-
         return self._hat_mor(
-            name, cell, (source.source, target.source), (source, target),
+            name, cell,
+            (source.source, target.source),
+            (final_source, final_target),
+            (source, target),
         )
 
     def _hat_mor(
         self, name: str, cell: Mor,
-        signature: tuple[Obj, Obj], hat_signature: tuple[Mor, Mor],
-    ) -> tuple[Mor, Callable[[EqLike | EqStub | None], Eq]]:
+        signature: tuple[Obj, Obj],
+        final_signature: tuple[Obj | None, Obj | None],
+        hat_signature: tuple[Mor, Mor],
+    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]:
         """Sets name on morphism and checks signature"""
+        final_source, final_target = final_signature
         source, target = signature
         #cell = _fit_mor(source, target, cell)
         cell = self.c(target, cell, source)
+
+        if final_source:
+            assert final_target
+            check_signature(final_source, final_target, cell)
+        else:
+            check_signature(source, target, cell)
+
         hat_source, hat_target = hat_signature
 
-        def _hat(c: EqLike | EqStub | None):
+        def _hat(c: EqLike | Once[EqStub] | None):
             # We defer assigning hat, because we may end up needing cell in its
             # definition.
             return self.eq(
                 c, (hat_source, hat_target.compose(cell)),
             )
 
-        self._set_name(name, cell)
+        self.define(name, cell)
         return cell, _hat
 
     # def _prove(self, ssource: Mor, starget: Mor):
@@ -511,10 +717,16 @@ class Context:
     #     return self._prove(ssource, starget)
 
     def eq(
-        self, cell: EqLike | EqStub | None,
+        self, cell_or_stub: EqLike | Once[EqStub] | None,
         ssignature: tuple[MorLike, MorLike] | None = None,
     ):
         """Sets name on equality and checks signature"""
+        if isinstance(cell_or_stub, Once):
+            cell = cell_or_stub.value
+            assert isinstance(cell, EqStub)
+        else:
+            cell = cell_or_stub
+
         # `name` may be empty since the equality can still be accessed through
         # its signature. Some equalities don't have names and can't be
         # reproduced through operations (e.g. subobject requirements). Such

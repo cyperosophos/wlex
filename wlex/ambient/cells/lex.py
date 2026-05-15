@@ -6,7 +6,7 @@ from itertools import chain
 
 from ..cells import Obj, Mor, Eq, PrimEq
 from .cart import (
-    CartObj, CartMor, CartPrimMor, CartEq, CartComposition, Product,
+    CartObj, CartMor, CartPrimMor, CartEq, CartComposition,
 )
 
 class LexObj(CartObj, metaclass=ABCMeta):
@@ -90,6 +90,7 @@ class LazySubobject(LiftingObj):
         requirement: tuple[Mor, Mor],
         expand: Callable[[Obj, tuple[Mor, Mor]], Obj],
     ):
+        super().__init__()
         self._sup = sup
         self._requirement = requirement
         self._expand = expand
@@ -200,6 +201,7 @@ class Subobject(LiftingObj):
         return super().__new__(cls)
 
     def __init__(self, sup: Obj, requirements: Collection[tuple[Mor, Mor]]):
+        super().__init__()
         # High-level does not only handle type checking, it also makes sure that
         # there are requirements and that the requirements are not tautologies
         # (proven equalities), so that the resulting subobject does not end up

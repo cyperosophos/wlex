@@ -5,7 +5,7 @@ from itertools import chain, permutations
 
 from .cells import Obj, Mor, Eq, MorStub
 from . import category
-from .category import EqLike, MorLike, Transformation, reduce, UnprovenEq
+from .category import EqLike, MorLike, Transformation, reduce, UnprovenEq, Once
 from .public import cart as public
 from .cells.cart import ProductMor
 
@@ -98,15 +98,15 @@ class CartContext(category.Context):
 
     @overload
     def el(
-        self, name: str, cell: MorLike, target: Obj,
+        self, name: str, cell_or_stub: MorLike | Once[MorStub], target: Obj,
     ) -> Mor: ...
     @overload
     def el(
-        self, name: str, cell: Obj | MorStub, target: None = None,
+        self, name: str, cell_or_stub: Obj | Mor, target: None = None,
     ) -> Mor: ...
 
     def el(
-        self, name: str, cell: MorLike | MorStub, target: Obj | None = None,
+        self, name: str, cell_or_stub: MorLike | Once[MorStub], target: Obj | None = None,
     ):
         """Sets name on element and checks its type
 
@@ -114,12 +114,12 @@ class CartContext(category.Context):
         """
         if target:
             return self.mor(
-                name, cell,
+                name, cell_or_stub,
                 (self.terminal(type(target)), target),
             )
 
-        assert not isinstance(cell, Callable)
-        return self.mor(name, cell)
+        assert isinstance(cell_or_stub, (Obj, Mor))
+        return self.mor(name, cell_or_stub)
 
     def _pair(self, mors: tuple[Mor, Mor]):
         # Wrap `public.pairing` so that it can be used as binary `comp` in

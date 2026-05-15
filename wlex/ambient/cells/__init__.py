@@ -1,5 +1,5 @@
 """Base classes for cells and cell exceptions"""
-from collections.abc import Callable, Sequence, Collection
+from collections.abc import Callable, Sequence, Collection, Iterator
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import Optional
@@ -178,13 +178,31 @@ class Defensive:
         x.stack.append(mor)
         return x
 
-Name = tuple[str, ...]
+class Name:
+    __slots__ = 'parent', 'base'
+    parent: Optional['Name']
+    base: str
+
+    def __init__(self):
+        self.parent = None
+        self.base = ''
+
+    def __iter__(self) -> Iterator[str]:
+        yield self.base
+        if self.parent:
+            yield from iter(self.parent)
+
+    def __str__(self):
+        return '.'.join(reversed(list(self)))
 
 class Obj(metaclass=ABCMeta):
     """Base class for objects (0-cells)"""
     __slots__ = ('name',)
     name: Name
     eqs: dict['Obj', list[tuple['Eq', bool]]] = defaultdict(list)
+
+    def __init__(self):
+        self.name = Name()
 
     def trim(self, obj: 'Obj') -> Optional['Mor']:
         """Gives morphism that converts `self` into `obj`"""
@@ -478,12 +496,16 @@ class Mor(metaclass=ABCMeta):
 
 class PrimEv:
     __slots__ = ('func',)
+    func: Callable[[object], object]
 
     def __init__(self, func: Callable[[object], object]):
         self.func = func
 
     def to_mor(self, source: Obj, target: Obj):
         return PrimMor(source, target, self.func)
+
+    def __hash__(self):
+        return hash(self.func)
 
 class PrimMor(Mor):
     """Base of primitive morphisms
@@ -564,8 +586,7 @@ class Eq:
     # equality signatures, even loose ones, since globular conditions are not
     # yet checked at this stage. Recall that setoids are categories enriched
     # over TV.
-    __slots__ = 'name', 'ssource', 'starget', 'proven'
-    name: Name
+    __slots__ = 'ssource', 'starget', 'proven'
     ssource: Mor
     starget: Mor
     proven: bool
@@ -625,10 +646,10 @@ class Eq:
             and self.starget == proof.starget
         )
 
-    def __str__(self):
-        if hasattr(self, 'name'):
-            return '.'.join(self.name)
-        return NotImplemented
+    # def __str__(self):
+    #     # if hasattr(self, 'name'):
+    #     #     return '.'.join(self.name)
+    #     return NotImplemented
 
     def __repr__(self):
         return f'Eq("{self!s}: {self.ssource} == {self.starget}")'

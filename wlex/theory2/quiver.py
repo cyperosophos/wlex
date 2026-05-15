@@ -92,6 +92,8 @@ class Quiver(Theory):
 
     @classmethod
     def from_prim(cls, ctx: Context, prim: QuiverStub):
+        # Don't use Axiom directly here, provide it through a stub, since in the
+        # case of `sub` an actual proof may be required.
         c = ctx.c
         Q0 = ctx.sub('Q0', BasicQuiver, _(prim.Q0))
         Q1 = ctx.sub('Q1', BasicQuiver, _(prim.Q1), BasicQuiverStub(
