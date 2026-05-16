@@ -703,7 +703,9 @@ class Context[V: Theory]:
                     # ```
                     # but type-checked.
                     fork = self.c(e, *ssource.factors[-hlen:])
-                    # Memoize it
+                    # Memoize it by adding directly to `proven_eqs`, since the
+                    # point of doing so is that we expect to perhaps use the
+                    # exact same equality again.
                     self.proven_eqs.add((fork.ssource, fork.starget))
                     return fork
 
@@ -769,7 +771,7 @@ class Context[V: Theory]:
                 )
 
             if cell.proven:
-                self.proven_eqs.add((cell.ssource, cell.starget))
+                self.register_equality(cell.ssource, cell.starget)
             else:
                 cell = self.prove(cell.ssource, cell.starget)
 
@@ -791,11 +793,16 @@ class Context[V: Theory]:
         cell = self.t(starget, cell, ssource)
 
         if cell.proven:
-            self.proven_eqs.add((ssource, starget))
+            self.register_equality(ssource, starget)
         else:
             cell = self.prove(ssource, starget)
 
         return cell
+
+    def register_equality(self, ssource: Mor, starget: Mor):
+        # One overrides this so that e.g. pairing equalities get split,
+        # i.e. composed with all possible projections.
+        self.proven_eqs.add((ssource, starget))
 
     def comp_op_mor(
         self, first: MorLike, factors: Sequence[MorLike],

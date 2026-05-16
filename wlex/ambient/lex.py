@@ -22,6 +22,22 @@ class LexContext[T: Theory](cart.CartContext[T]):
     equalizer_pairing_unique = staticmethod(public.equalizer_pairing_unique)
     equalizer_pairing_eq = staticmethod(public.equalizer_pairing_eq)
 
+    @override
+    def register_equality(self, ssource: Mor, starget: Mor):
+        super().register_equality(ssource, starget)
+
+        if (
+            isinstance(ssource, EqualizerMor)
+            and isinstance(starget, EqualizerMor)
+        ):
+            target = ssource.target
+            assert target.identical(starget.target)
+            incl = target.incl()
+            self.register_equality(
+                incl.compose(ssource),
+                incl.compose(starget),
+            )
+
     def with_labels(self, obj: Obj, relabeling: dict[str | int, str | int] | Sequence[str | int]):
         prod = obj.sup.with_labels(relabeling)
         # No assumption about order of labels in relabeling being the same as in

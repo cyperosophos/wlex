@@ -1,6 +1,6 @@
 """High level interface for cartesian ambient"""
 from collections.abc import Sequence, Iterator
-from typing import overload, Callable, TypeGuard
+from typing import overload, Callable, TypeGuard, override
 from itertools import chain, permutations
 
 from .cells import Obj, Mor, Eq, MorStub
@@ -18,6 +18,25 @@ class CartContext[T: Theory](category.Context[T]):
     pairing = staticmethod(public.pairing)
     pairing_unique = staticmethod(public.pairing_unique)
     pairing_eq = staticmethod(public.pairing_eq)
+
+    @override
+    def register_equality(self, ssource: Mor, starget: Mor):
+        super().register_equality(ssource, starget)
+
+        # Only compose with projections that simplify both morphisms.
+        # Register the whole equality regardless, since some projections may not
+        # simplify. Register component equalities recursively, i.e. by calling
+        # `self.register_equality`.
+        if isinstance(ssource, ProductMor) and isinstance(starget, ProductMor):
+            target = ssource.target
+            assert target.identical(starget.target)
+            labels = set(ssource.components) & set(starget.components)
+            for label in labels:
+                proj = target.proj(label)
+                self.register_equality(
+                    proj.compose(ssource),
+                    proj.compose(starget),
+                )
 
     def with_labels(self, obj: Obj, relabeling: dict[str | int, str | int] | Sequence[str | int]):
         return obj.with_labels(relabeling)
