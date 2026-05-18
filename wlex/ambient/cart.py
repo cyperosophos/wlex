@@ -14,10 +14,14 @@ class CartContext[T: Theory](category.Context[T]):
     __slots__ = ()
 
     terminal = staticmethod(public.terminal)
+    terminal_mor = staticmethod(public.terminal_mor)
+    terminal_mor_unique = staticmethod(public.terminal_mor_unique)
     product = staticmethod(public.product)
     pairing = staticmethod(public.pairing)
     pairing_unique = staticmethod(public.pairing_unique)
     pairing_eq = staticmethod(public.pairing_eq)
+
+    tm = terminal_mor
 
     @override
     def register_equality(self, ssource: Mor, starget: Mor):

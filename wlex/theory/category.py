@@ -117,7 +117,7 @@ class Category:
         d, e = (th.proj(n) for n in 'de')
         # (Q.target_globular_cond @ $e) & !0
         proof_compsrc = t(c(Q.target_globular_cond, e), th.req(0))
-        # !1 @ (Q.source_globular_cond @ $d)
+        # !0 @ (Q.source_globular_cond @ $d)
         proof_comptgt = t(th.req(0), c(Q.source_globular_cond, d))
         th.mor(
             'compose_eq',

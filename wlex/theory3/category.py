@@ -103,7 +103,7 @@ def Category(stub: _u[CategoryStub]):
 
     S = ctx.sub('S', Congruence((prim.S, S_update)))
 
-    Obj = ctx.define('Obj', P.El)
+    _ = ctx.define('Obj', P.El)
     Mor = ctx.define('Mor', P.Rel)
     Eq = ctx.define('Eq', S.Eq)
     eq = ctx.define('eq', S.eq)
@@ -119,12 +119,8 @@ def Category(stub: _u[CategoryStub]):
     # each component separately. Same applies for EqualizerMor.
     # The idea is that in one case one composes with projs and in the other with incls.
 
-    ctx.eq(c(
-        c(proj(0), prod(Obj, Obj)).ref(),
-        identity_hat, target,
-    ))
-    left_identity_law = ctx.mor(
-        'left_identity_law', _(prim.left_identity_law), (
+    ctx.eq(c(t(c(source, identity), i), target))
+    _, _left_identity_law_hat = ctx.mor('left_identity_law', prim.left_identity_law, (
         Mor, Eq,
         p(c(
             compose,
@@ -132,13 +128,10 @@ def Category(stub: _u[CategoryStub]):
         ), i),
         eq,
     ))
+    _left_identity_law_hat(prim.left_identity_law_hat)
 
-    ctx.eq(c(
-        c(proj(1), prod(Obj, Obj)).ref(),
-        identity_hat, source,
-    ))
-    right_identity_law = ctx.mor(
-        'right_identity_law', _(prim.right_identity_law), (
+    ctx.eq(c(t(c(target, identity), i), source))
+    _, _right_identity_law_hat = ctx.mor('right_identity_law', prim.right_identity_law, (
         Mor, Eq,
         p(c(
             compose,
@@ -146,22 +139,22 @@ def Category(stub: _u[CategoryStub]):
         ), i),
         eq,
     ))
+    _right_identity_law_hat(prim.right_identity_law_hat)
 
     Comp3 = prod(('', Composable), ('', l(Composable, ('g', 'h'))))
-    f, g, h = (c(proj(n), Comp3) for n in 'fgh')
+    f, g, h = (proj(n) for n in 'fgh')
     ctx.eq(t(
         c(
-            c(proj(1), compose_hat),
-            p(g, h),
+            t(c(target, compose), c(target, f)),
+            p(('f', g), ('g', h)),
         ),
         f,
     ))
     ctx.eq(t(
         h,
-        c(proj(0), compose_hat),
+        t(c(source, compose), c(target, g)),
     ))
-    associativity = ctx.mor(
-        'associativity', _(prim.associativity), (
+    _, _associativity_hat = ctx.mor('associativity', prim.associativity, (
         Comp3, Eq,
         p(
             c(compose, p(f, c(compose, p(g, h)))),
@@ -169,14 +162,38 @@ def Category(stub: _u[CategoryStub]):
         ),
         eq,
     ))
+    _associativity_hat(prim.associativity_hat)
 
+    d, e = (proj(n) for n in 'de')
     ComposableEq = req(
-        prod(('d', Eq), ('e', Eq)),
-        (c(source, S.source), proj('d')),
-        (c(target, S.target), proj('e'))
-    )
-    d, e = (c(proj(n), ComposableEq) for n in 'de')
-    ctx.eq(t(
-        c(Q.target_globular_cond, e),
-        th.req(0),
+        prod(('d', Eq), ('e', Eq)), (
+        c(source, S.source, d),
+        c(target, S.target, e),
     ))
+    ctx.eq(t(
+        c(t(
+            c(target, S.source),
+            c(target, S.target),
+        ), e),
+        c(target, S.target, e),
+        c(source, S.source, d),
+    ))
+    ctx.eq(t(
+        c(target, S.target, e),
+        c(source, S.source, d),
+        c(t(
+            c(source, S.source),
+            c(source, S.target),
+        ), d),
+    ))
+    _, _compose_eq_hat = ctx.mor('compose_eq', prim.compose_eq, (
+        ComposableEq, Eq,
+        p(
+            c(compose, p(c(S.source, d), c(S.source, e))),
+            c(compose, p(c(S.target, d), c(S.target, e))),
+        ),
+        eq,
+    ))
+    _compose_eq_hat(prim.compose_eq_hat)
+
+    return ctx

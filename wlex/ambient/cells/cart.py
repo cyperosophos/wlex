@@ -53,7 +53,7 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
         # Handle case of unlabeled morphism with product target.
         if len(params) == 1:
             l, c = params[0]
-            if not l and isinstance(c.target, Product):
+            if l == '' and isinstance(c.target, Product):
                 return c
 
         return self._product_mor_cls(self, params)

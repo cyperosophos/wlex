@@ -297,8 +297,8 @@ class OnceStub[T]:
         self._used = True
         return stub
 
-T = TypeVar('T')
-OnceUpdate = tuple[OnceStub[T], Callable[[T], None]] | OnceStub[T]
+S = TypeVar('S')
+OnceUpdate = tuple[OnceStub[S], Callable[[S], None]] | OnceStub[S]
 
 # class TheoryStub(metaclass=ABCMeta):
 #     """Base class for the theory stub"""
@@ -413,10 +413,12 @@ class Context[V: Theory]:
 
     #     return decorator
 
-    @property
-    def id(self):
-        """`public.identity` as `Transformation`"""
-        return self.identity
+    # @property
+    # def id(self):
+    #     """`public.identity` as `Transformation`"""
+    #     return self.identity
+
+    id = identity
 
     # def with_name(self, theory: T, name: str):
     #     """Shallow copy of `self` with name added to its `name_stack`"""
@@ -946,10 +948,10 @@ def _mor_compose(comp: Composer[Mor], factors: Iterator[Mor]):
 
     return res.expanded()
 
-def _all_eq_or_law(
+def _any_eq(
     factors: Sequence[EqLike],
-) -> TypeGuard[Sequence[Eq]]:
-    return all(isinstance(f, Eq) for f in factors)
+) -> bool:
+    return any(isinstance(f, Eq) for f in factors)
 
 def _all_mor_like(
     factors: Sequence[EqLike],
@@ -990,6 +992,24 @@ def _compose(
 
     return _mor_compose(comp, straighten(_gen_fit_mors(source, factor_it)))
 
+def cell_source(cell: cells.Cell):
+    if isinstance(cell, Obj):
+        return cell
+
+    if isinstance(cell, Mor):
+        return cell.source
+
+    return cell.ssource.source
+
+def cell_target(cell: cells.Cell):
+    if isinstance(cell, Obj):
+        return cell
+
+    if isinstance(cell, Mor):
+        return cell.target
+
+    return cell.ssource.target
+
 def _compose_eq(
     comp: Composer[Eq],
     first: EqLike,
@@ -1004,12 +1024,7 @@ def _compose_eq(
     if isinstance(last, Callable):
         raise ValueError("Last factor can't be transformation.")
 
-    if isinstance(last, Obj):
-        source = last
-    elif isinstance(last, Mor):
-        source = last.source
-    else:
-        source = last.ssource.source
+    source = cell_source(last)
 
     factor_it = chain(reversed(factors), (first,))
     return reduce(comp, straighten(_gen_fit_eqs(source, factor_it)))
@@ -1023,7 +1038,7 @@ def operate_mor_or_eq(
     if isinstance(first, Eq):
         return op_eq(first, factors)
 
-    if _all_eq_or_law(factors):
+    if _any_eq(factors):
         return op_eq(first, factors)
 
     assert _all_mor_like(factors)
@@ -1088,7 +1103,20 @@ def operate_eq_common_source(
         )
         return op(factor_it)
 
-    raise ValueError("Requires cells with the same source")
+    def _t(source: Obj):
+        factor_it = (
+            eq_like_to_eq(source, x)
+            for x in _sequence_to_iterator(first, factors, rev)
+        )
+        return op(factor_it)
+
+    for cell in chain((first,), factors):
+        if isinstance(cell, cells.Cell):
+            return _t(cell_source(cell))
+
+    raise ValueError(
+        "At least one factor must be a cell, not a transformation.",
+    )
 
 def _sequence_to_iterator[T](
     first: T, factors: Sequence[T], rev: bool,

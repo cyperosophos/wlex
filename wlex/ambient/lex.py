@@ -5,7 +5,9 @@ from collections.abc import Iterator, Sequence, Callable
 
 from .cells import Obj, Mor, Eq
 from . import cart
-from .category import EqLike, MorLike, reduce, UnprovenEq, Transformation, Theory
+from .category import (
+    EqLike, MorLike, reduce, UnprovenEq, Transformation, Theory, cell_target,
+)
 from .cells.cart import Product
 from .cells.lex import EqualizerMor
 from .public import lex as public
@@ -387,12 +389,7 @@ class LexContext[T: Theory](cart.CartContext[T]):
                 components.append(None)
                 return label, wrap_transformation(idx, label, factor)
 
-            if isinstance(factor, Obj):
-                target = factor
-            elif isinstance(factor, Mor):
-                target = factor.target
-            else:
-                target = factor.ssource.target
+            target = cell_target(factor)
 
             components.append((label, target))
             return label, self.c(target.incl(), factor)
