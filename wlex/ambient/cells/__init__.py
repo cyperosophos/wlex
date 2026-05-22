@@ -323,6 +323,12 @@ class Obj(metaclass=ABCMeta):
 
         raise ValueError("Can't lift")
 
+    # def extend(self, mor: 'Mor') -> 'Mor':
+    #     if self.identical(mor.target):
+    #         return mor
+
+    #     raise ValueError("Can't extend")
+
     # TODO: Why not Sequence['Mor']?
     @classmethod
     def vcomposition(cls, *factors: 'Mor') -> 'Mor':
@@ -360,10 +366,10 @@ class Obj(metaclass=ABCMeta):
 
     def proj(self, label: str | int) -> 'Mor':
         """Projection, that is leg of product span"""
-        if label == '':
-            return self.identity()
+        # if label == '':
+        #     return self.identity()
 
-        raise ValueError("No labels")
+        return self.terminal_mor()
 
     def with_labels(
         self, relabeling: dict[str | int, str | int] | Sequence[str | int],
@@ -388,6 +394,9 @@ class Obj(metaclass=ABCMeta):
 
     def subobject(self, requirements: Collection[tuple['Mor', 'Mor']],) -> 'Obj':
         raise TypeError("Requires LexObj")
+
+    def join(self, obj: 'Obj') -> tuple['Mor', 'Mor']:
+        raise TypeError("Requires CartObj")
 
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
@@ -493,6 +502,12 @@ class Mor(metaclass=ABCMeta):
     def pairing_unique(self, p: 'Mor', q: 'Mor') -> 'Eq':
         """Models morphism `cart.pairing_unique`"""
         raise TypeError("Requires CartMor")
+
+    def exfit(self, source: Obj):
+        if self.source.identical(source):
+            return self
+
+        return source.terminal_mor()
 
 class PrimEv:
     __slots__ = ('func',)

@@ -23,6 +23,26 @@ class CartContext[T: Theory](category.Context[T]):
 
     tm = terminal_mor
 
+    def imp(
+        self, first: tuple[str | int, MorLike],
+        *factors: tuple[str | int, MorLike],
+    ):
+        """Imperative composition"""
+        # Polish order
+        it = iter(reversed(list(chain((first,), factors))))
+
+        fs: list[MorLike] = []
+        for label, factor in it:
+            fs.append(self.pair((label, factor)))
+            break
+
+        fs.extend(
+            self.pair(('', self.identity), (l, f))
+            for l, f in it
+        )
+
+        return self.c(*iter(fs))
+
     @override
     def register_equality(self, ssource: Mor, starget: Mor):
         super().register_equality(ssource, starget)
@@ -239,9 +259,6 @@ class CartContext[T: Theory](category.Context[T]):
         # A consistent even if somewhat cumbersome way of providing factors
         # (namely as tuples containing the label and the factor) makes sense,
         # since theories written in python are just transpilations of wlex.
-        if not factors:
-            raise ValueError("At least two components must be provided.")
-
         res = category.operate_mor_or_eq(
             self._pair_op_mor, self._pair_op_eq, first[1], [f for _, f in factors],
         )

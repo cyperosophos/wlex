@@ -18,21 +18,6 @@ Prover = Callable[[Mor, Mor], Eq]
 class UnprovenEq(Exception):
     pass
 
-# def _fit_mor(source: Obj, target: Obj, cell: Mor):
-#     # Subclasses of `Obj` can support specific type conversions. Handling of
-#     # transformations occurs before this (in which case no fitting is
-#     # needed).
-#     sconv = source.trim(cell.source)
-#     if not sconv:
-#         raise cells.SourceUnfit("Can't convert", source, cell.source)
-
-#     tconv = cell.target.trim(target)
-#     if not tconv:
-#         raise cells.TargetUnfit("Can't convert", cell.target, target)
-
-#     # This will be just `cell` when `tconv` as `sconv` are identities.
-#     return tconv.compose(cell).compose(sconv)
-
 def check_signature(source: Obj, target: Obj, cell: Mor):
     if not source.identical(cell.source):
         raise cells.SourceUnfit("Wrong source", source, cell.source)
@@ -85,40 +70,6 @@ def _ssource_fit_eq(ssource: Mor, cell: Eq, prove: Prover):
 
     return cell.trans(sconv)
 
-# def _target_fit_eq(target: Obj, cell: Eq):
-#     tconv = cell.ssource.target.trim(target)
-#     if not tconv:
-#         raise cells.TargetUnfit(
-#             "Can't convert for fitting target", cell.ssource.target, target,
-#         )
-
-#     return tconv.ref().compose_eq(cell)
-
-# def _fit_eq(ssource: Mor, starget: Mor, cell: Eq, prove: Prover):
-#     prev_err = None
-#     for i in range(2):
-#         try:
-#             sconv = prove(ssource, cell.ssource)
-#             if not sconv:
-#                 raise cells.SSourceUnfit("Can't convert", ssource, cell.ssource)
-
-#             tconv = prove(cell.starget, starget)
-#             if not tconv:
-#                 raise cells.STargetUnfit("Can't convert", cell.starget, starget)
-#         except cells.MorUnfit as err:
-#             if i == 0:
-#                 # Use of `sym` is justified here, because it doesn't get
-#                 # handled by `prove`.
-#                 cell = cell.sym()
-#                 prev_err = err
-#                 continue
-
-#             raise err from prev_err
-
-#         return tconv.trans(cell).trans(sconv)
-
-#     assert False
-
 def _mor_like_to_mor_ssignature(ssignature: tuple[MorLike, MorLike]):
     ssource, starget = ssignature
     ssource, starget = (
@@ -138,47 +89,6 @@ def _mor_like_to_mor_ssignature(ssignature: tuple[MorLike, MorLike]):
 
     return ssource, starget
 
-# def _is_proven_eq(
-#     proven_eqs: set[tuple[Mor, Mor]],
-#     ssource: Mor, starget: Mor,
-# ) -> bool:
-#     if (ssource, starget) in proven_eqs or (starget, ssource) in proven_eqs:
-#         return True
-
-#     return False
-
-    # Handling all possible ways in which an equality can arise would be
-    # unfeasible. Composition split based equalities are useful for liftings.
-    # TODO: Are they?
-    # TODO: Provide instead the specific equality! Move this to `def _prove`.
-    # try:
-    #     tail_s, head_s = ssource.split()
-    #     tail_t, head_t = starget.split()
-    #     return (
-    #         _is_proven_eq(proven_eqs, tail_s, tail_t)
-    #         and _is_proven_eq(proven_eqs, head_s, head_t)
-    #     )
-    # except (ValueError, TypeError):
-    #     return False
-
-# def one2[T](*args: T | None) -> T:
-#     """Returns the unique argument that is not None"""
-#     res: T | None = None
-#     for a in args:
-#         if a is not None:
-#             if res is None:
-#                 res = a
-#             elif res is not a:
-#                 if isinstance(res, TheoryStub):
-#                     res = res.with_base(a)
-#                 else:
-#                     raise ValueError("More than one value was provided.")
-
-#     if res is None:
-#         raise ValueError("No value was provided.")
-
-#     return res
-
 # TODO: Use special field in Stub to make sure each field is only
 # accessed once? This still allows cheating. It's better to handle
 # this at the level of PrimEv and Axiom. Even better: make a Stub
@@ -187,12 +97,6 @@ def _mor_like_to_mor_ssignature(ssignature: tuple[MorLike, MorLike]):
 # it can only be used once. This wrapper should also handle the None
 # value (when no value has been provided) and overriding cells when
 # defining subtheory.
-# TODO: Use frozen
-# def one[T](x: T) -> T:
-#     if x is None:
-#         raise ValueError("No value was provided.")
-
-#     return x
 
 class Once[T]:
     __slots__ = '_value', '_used'
@@ -238,38 +142,6 @@ def of_type[T](x: object, typ: type[T]) -> T:
     assert isinstance(x, typ)
     return x
 
-# class OnceStub[T, U: 'Theory']:
-#     __slots__ = '_stub', '_used'
-#     _stub: T | U | None
-#     _used: bool
-
-#     def __init__(self, stub: T | U | None = None):
-#         self._stub = stub
-#         self._used = False
-
-#     def updated(self, update: U | Callable[[T], None] | None = None) -> T:
-#         if self._used:
-#             raise ValueError("Can only be used once")
-
-#         stub = self._stub
-#         if stub is None:
-#             raise ValueError("No stub")
-
-#         if isinstance(stub, Theory):
-#             raise TypeError("Expected stub")
-
-#         if update:
-#             if isinstance(update, Callable):
-#                 update(stub)
-#             else:
-#                 self._stub = update
-
-#         return stub
-
-# T = TypeVar('T')
-# U = TypeVar('U', bound='Theory')
-# OnceUpdate = tuple[OnceStub[T, U], Callable[[T], None]] | OnceStub[T, U]
-
 class OnceStub[T]:
     __slots__ = 'stub', '_used'
     stub: T
@@ -299,18 +171,6 @@ class OnceStub[T]:
 
 S = TypeVar('S')
 OnceUpdate = tuple[OnceStub[S], Callable[[S], None]] | OnceStub[S]
-
-# class TheoryStub(metaclass=ABCMeta):
-#     """Base class for the theory stub"""
-
-#     @abstractmethod
-#     def with_base(self, base: Any) -> Self:
-#         """Combine `self` and `base`"""
-
-#     @abstractmethod
-#     @classmethod
-#     def from_theory(cls, theory: Any) -> Self:
-#         """Create stub from theory"""
 
 # class Theory2(metaclass=ABCMeta):
 #     """Base class for theories"""
@@ -395,36 +255,7 @@ class Context[V: Theory]:
         self.sub_refs = {}
         self.theory_cls = theory_cls
 
-    # @classmethod
-    # def theory[T: 'Theory', U](cls, theory_cls: type[T], stub_cls: type[U]):
-    #     def decorator(func: Callable[[Context, U], None]):
-    #         @functools.wraps(func)
-    #         def wrapper(prim: Once[U | T]):
-    #             ctx = cls(theory_cls)
-    #             v = prim.value
-    #             if isinstance(v, theory_cls):
-    #                 raise ValueError("Expected stub")
-
-    #             assert isinstance(v, stub_cls)
-    #             func(ctx, v)
-    #             return ctx
-
-    #         return wrapper
-
-    #     return decorator
-
-    # @property
-    # def id(self):
-    #     """`public.identity` as `Transformation`"""
-    #     return self.identity
-
     id = identity
-
-    # def with_name(self, theory: T, name: str):
-    #     """Shallow copy of `self` with name added to its `name_stack`"""
-    #     ctx = Context(theory)
-    #     ctx.name_stack = (*self.name_stack, name)
-    #     return ctx
 
     def sub[T: Theory](
         self, name: str,
@@ -435,29 +266,6 @@ class Context[V: Theory]:
         theory = prog.theory_cls.from_ctx(prog)
         self.proven_eqs.update(prog.proven_eqs)
         return self.define(name, theory)
-
-    # def sub2[S: TheoryStub, T: Theory](
-    #     self, name: str, theory: type[T], prim: S,
-    #     base: S | None = None,
-    # ):
-    #     """Sets name on subtheory"""
-    #     # Pylance type checking does not catch this!
-    #     if not theory.is_own_stub(prim):
-    #         raise TypeError("Wrong stub class")
-
-    #     if base:
-    #         prim = prim.with_base(base)
-
-    #     # There is checking for keeping attributes of `prim` from remaining
-    #     # unused. Also, checking that the resulting theory has no empty
-    #     # attributes.
-    #     # TODO: Check that context arg is of the right type!
-    #     return theory.from_prim(self.with_name(name), prim)
-
-    # def _set_name(self, name: str, cell: Obj | Mor):
-    #     # An empty `name` may occur in the case of equalities.
-    #     #if not (hasattr(cell, 'name') and cell.name[-1]):
-    #     cell.name = (*self.name_stack, name)
 
     def define[T: Obj | Mor | Theory](self, name: str, cell: T) -> T:
         # Create reference and rename.
@@ -654,14 +462,6 @@ class Context[V: Theory]:
         self.define(name, cell)
         return cell, _hat
 
-    # def _prove(self, ssource: Mor, starget: Mor):
-    #     if (ssource, starget) in self.proven_eqs:
-    #         e = Eq(ssource, starget)
-    #         e.proven = True
-    #         return e
-
-    #     return None
-
     def prove(self, ssource: Mor, starget: Mor, _fork: bool = True) -> Eq:
         # Reflexivity
         if ssource.same(starget):
@@ -714,14 +514,6 @@ class Context[V: Theory]:
                 hlen -= 1
 
         raise UnprovenEq(f"No equality for {ssource} and {starget}")
-
-    # def prove(self, ssignature: tuple[MorLike, MorLike]) -> Eq | None:
-    #     """Produce a proven equality from a setoid signature"""
-    #     # This is used in `eq` when no `cell` is provided, in ssignature based
-    #     # trans (trans with morphisms), in conversions for filling gaps.
-    #     # TODO: Get rid of morphism conversions.
-    #     ssource, starget = _mor_like_to_mor_ssignature(ssignature)
-    #     return self._prove(ssource, starget)
 
     def eq(
         self, cell_or_stub: EqLike | Once[EqStub] | None,
@@ -806,29 +598,21 @@ class Context[V: Theory]:
         # i.e. composed with all possible projections.
         self.proven_eqs.add((ssource, starget))
 
+    def straighten_mors(self, factors: Iterator[Mor]):
+        return factors
+
+    def straighten_eqs(self, factors: Iterator[Eq]):
+        return factors
+
     def comp_op_mor(
         self, first: MorLike, factors: Sequence[MorLike],
-        straighten: Callable[[Iterator[Mor]], Iterator[Mor]] | None = None,
     ) -> Mor | Transformation:
-        def noop(x: Iterator[Mor]):
-            return x
-
-        if straighten is None:
-            straighten = noop
-
-        return _compose(self.compose, first, factors, straighten)
+        return _compose(self.compose, first, factors, self.straighten_mors)
 
     def comp_op_eq(
         self, first: EqLike, factors: Sequence[EqLike],
-        straighten: Callable[[Iterator[Eq]], Iterator[Eq]] | None = None,
     ) -> Eq:
-        def noop(x: Iterator[Eq]):
-            return x
-
-        if straighten is None:
-            straighten = noop
-
-        return _compose_eq(self.compose_eq, first, factors, straighten)
+        return _compose_eq(self.compose_eq, first, factors, self.straighten_eqs)
 
     @overload
     def c(self, first: MorLike, *factors: Mor | Obj) -> Mor: ...

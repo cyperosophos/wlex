@@ -343,6 +343,11 @@ class EqualizerMor(LexMor):
     __slots__ = ('sup',)
     sup: Mor
 
+    # `exfit` would have to change both `sup` (therefore `source`) and `target`
+    # (by exfitting requirements). Therefore we don't modify the inherited
+    # exfit and instead provide a context level exfit that handles the new
+    # requirements.
+
     def after_incl(self, mor: Inclusion) -> tuple[Mor, Mor]:
         """Get supermorphism by composing with the inclusion"""
         target = mor.target

@@ -45,8 +45,10 @@ class LexContext[T: Theory](cart.CartContext[T]):
         # No assumption about order of labels in relabeling being the same as in
         # the components of prod.
 
+        # When the relabeling is not iso some requirements may end up getting
+        # discarded.
         r = prod.relabel(obj.sup.invert_relabeling(relabeling))
-        assert r.target.identical(obj.sup)
+        assert r.target.identical(obj.sup) # TODO: handle non iso case
         return self.req(
             prod, *((
                 self.c(s, r),
@@ -56,7 +58,15 @@ class LexContext[T: Theory](cart.CartContext[T]):
 
     l = with_labels
 
-    def _straighten_mors(self, factors: Iterator[Mor]):
+    def exfit(self, mor: Mor, source: Obj):
+        if not isinstance(mor, EqualizerMor):
+            return mor.exfit(source)
+
+        sup = mor.sup.exfit(source)
+        target = self.req(sup.target, *mor.target.requirements)
+        return target.lift(sup)
+
+    def straighten_mors(self, factors: Iterator[Mor]):
         # Polish order
         it = iter(factors)
         straight: list[Mor] = []
@@ -71,6 +81,7 @@ class LexContext[T: Theory](cart.CartContext[T]):
             if f.source.identical(source):
                 straight.append(f)
             else:
+                # This assertion is justified by the use of `trim`.
                 assert f.source.sup.identical(source.sup)
                 straight = [
                     self.fit(f.source.vcomposition(
@@ -82,7 +93,7 @@ class LexContext[T: Theory](cart.CartContext[T]):
 
         return iter(straight)
 
-    def _straighten_eqs(self, factors: Iterator[Eq]):
+    def straighten_eqs(self, factors: Iterator[Eq]):
         # Polish order
         it = iter(factors)
         straight: list[Eq] = []
@@ -107,24 +118,6 @@ class LexContext[T: Theory](cart.CartContext[T]):
             source = f.ssource.target
 
         return iter(straight)
-
-    def comp_op_mor(
-        self, first: MorLike, factors: Sequence[MorLike],
-        straighten: Callable[[Iterator[Mor]], Iterator[Mor]] | None = None,
-    ):
-        return super().comp_op_mor(
-            first, factors,
-            straighten=straighten or self._straighten_mors,
-        )
-
-    def comp_op_eq(
-        self, first: EqLike, factors: Sequence[EqLike],
-        straighten: Callable[[Iterator[Eq]], Iterator[Eq]] | None = None,
-    ):
-        return super().comp_op_eq(
-            first, factors,
-            straighten=straighten or self._straighten_eqs,
-        )
 
     def _restricted_source(self, mor: Mor, target: Obj):
         missing = target.requirements - mor.target.requirements
@@ -256,6 +249,14 @@ class LexContext[T: Theory](cart.CartContext[T]):
             # `obj`.
             ssource = self.c(ssource, obj)
             starget = self.c(starget, obj)
+
+            # `exfit` imposes a predertmined source, but the target depends on
+            # the morphism. We must therefore make sure that precomposition with
+            # `obj` preserves parallelism with respect to the target.
+            # The `equalizer` check is still relevant for the source.
+            sx, tx = ssource.target.join(starget.target)
+            ssource = sx.compose(ssource)
+            starget = tx.compose(starget)
 
             try:
                 self.prove(ssource, starget)

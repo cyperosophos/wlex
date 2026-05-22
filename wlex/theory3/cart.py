@@ -91,6 +91,7 @@ def Cart(stub: _u[CartStub]):
     proj = ctx.proj
     i = ctx.id
     l = ctx.l
+    imp = ctx.imp
 
     C = ctx.sub('C', Category(prim.C))
     Obj = ctx.define('Obj', C.Obj)
@@ -177,7 +178,7 @@ def Cart(stub: _u[CartStub]):
     )))
 
     # TODO: This requires imperative composition.
-    pmy = c(p(
+    _ = c(p(
         ('mor', mor), ('', y),
         ('p_eq', c(C.S.S.P.trans, p(
             c(p_eq, SpanEq),
@@ -188,3 +189,7 @@ def Cart(stub: _u[CartStub]):
             c(q_eq, ProductMor),
         ))),
     ), pairing, x)
+
+    pmy = imp(
+        ('', l(c(pairing, x), {}))
+    )
