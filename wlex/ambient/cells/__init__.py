@@ -1,8 +1,9 @@
 """Base classes for cells and cell exceptions"""
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Sequence, Collection, Iterator, Iterable
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import Optional
+from enum import Enum
 
 class Error(Exception):
     """Base class for cell exceptions"""
@@ -177,7 +178,22 @@ class Defensive:
         x.stack.append(mor)
         return x
 
-Name = tuple[str, ...]
+class Name:
+    __slots__ = 'parent', 'base'
+    parent: Optional['Name']
+    base: str
+
+    def __init__(self):
+        self.parent = None
+        self.base = ''
+
+    def __iter__(self) -> Iterator[str]:
+        yield self.base
+        if self.parent:
+            yield from iter(self.parent)
+
+    def __str__(self):
+        return '.'.join(reversed(list(self)))
 
 class Obj(metaclass=ABCMeta):
     """Base class for objects (0-cells)"""
@@ -185,10 +201,12 @@ class Obj(metaclass=ABCMeta):
     name: Name
     eqs: dict['Obj', list[tuple['Eq', bool]]] = defaultdict(list)
 
-    def conversion(self, obj: 'Obj') -> Optional['Mor']:
+    def __init__(self):
+        self.name = Name()
+
+    def trim(self, obj: 'Obj') -> Optional['Mor']:
         """Gives morphism that converts `self` into `obj`"""
         # Inclusion conversions always make sense.
-        # TODO: Is there any case where implicit weakening conversion is useful?
         if self.identical(obj):
             return self.identity()
 
@@ -263,7 +281,7 @@ class Obj(metaclass=ABCMeta):
         """
         return id(self)
 
-    def identical(self, x: 'Obj'):
+    def identical(self, x: 'Obj') -> bool:
         """`x` is admitted instead of `self` as source or target.
 
         This is possible because `self.accepts` (resp. `self.same`) is in this
@@ -272,27 +290,49 @@ class Obj(metaclass=ABCMeta):
         is a reflexive and symmetric relation. The identity morphism acts as an
         isomorphism from `self` to `x`.
         """
-        return self is x
+        return (
+            self is x
+            or (bool(getattr(x, 'identity_priority', False)) and x.identical(self))
+        )
 
-    def diff(self, x: 'Obj') -> int:
-        """>= 0 when `x` includes `self`.
 
-        This means that any value accepted by `self` is also accepted by `x`.
-        """
-        if self.identical(x):
-            return 0
+    @property
+    def sup(self):
+        """Superobject, i.e. largest object containing `self`"""
+        return self
 
-        return -1
+    @property
+    def requirements(self) -> frozenset[tuple['Mor', 'Mor']]:
+        return frozenset()
 
     def identity(self) -> 'Mor':
         """Models morphism `category.identity`"""
         raise TypeError("Requires CategoryObj")
 
-    def inclusion(self) -> 'Mor':
-        return self.identity()
+    def incl(self, obj: Optional['Obj'] = None) -> 'Mor':
+        """Inclusion morphism"""
+        # Analogous to `proj`
+        if obj is None or self.identical(obj):
+            return self.identity()
 
+        raise ValueError("Not included")
+
+    def lift(self, mor: 'Mor') -> 'Mor':
+        if self.identical(mor.target):
+            return mor
+
+        raise ValueError("Can't lift")
+
+    # def extend(self, mor: 'Mor') -> 'Mor':
+    #     if self.identical(mor.target):
+    #         return mor
+
+    #     raise ValueError("Can't extend")
+
+    # TODO: Why not Sequence['Mor']?
     @classmethod
     def vcomposition(cls, *factors: 'Mor') -> 'Mor':
+        """Variadic composition"""
         raise TypeError("Requires CategoryObj")
 
     @classmethod
@@ -311,51 +351,91 @@ class Obj(metaclass=ABCMeta):
     @classmethod
     def vproduct(
         cls,
-        params: Sequence[tuple[str | tuple[str, ...], 'Obj']],
-        flattened: bool = True,
+        params: Sequence[tuple[str | int, 'Obj']],
+        no_repeat: bool = False,
     ) -> 'Obj':
+        """Variadic product"""
         raise TypeError("Requires CartObj")
 
     def vproduct_mor(
         self,
-        params: Sequence[tuple[str | tuple[str, ...], 'Mor']],
-        consistency: Sequence['Eq'] = (), flattened: bool = True,
+        params: Sequence[tuple[str | int, 'Mor']],
     ) -> 'Mor':
-        # TODO: It be nicer to have the right params type here so as to avoid
-        # extra dynamic type checking. To accomplish this place all cells modules
-        # into a single module.
+        """Variadic product morphism"""
         raise TypeError("Requires CartObj")
 
-    def proj(self, name: object) -> 'Mor':
+    def proj(self, label: str | int) -> 'Mor':
         """Projection, that is leg of product span"""
+        # if label == '':
+        #     return self.identity()
+
+        return self.terminal_mor()
+
+    def iso_relabeling(
+        self, relabeling: Iterable[tuple[str | int, str | int]],
+    ) -> Iterator[tuple[str | int, str | int]]:
         raise TypeError("Requires Product")
 
-    def ireq(self, idx: int) -> 'Eq':
+    def sequence_relabeling(
+        self, relabeling: Sequence[str | int],
+    ) -> Iterator[tuple[str | int, str | int]]:
+        raise TypeError("Requires Product")
+
+    def with_labels(
+        self, relabeling: Iterable[tuple[str | int, str | int]],
+    ) -> 'Obj':
+        raise TypeError("Requires Product")
+
+    def relabel(
+        self, relabeling: Iterable[tuple[str | int, str | int]],
+    ) -> 'Mor':
+        raise TypeError("Requires Product")
+
+    @staticmethod
+    def inverse_relabeling(relabeling: Iterable[tuple[str | int, str | int]]):
+        # The goal is that the target of
+        # `self.with_labels(relabeling).relabel(self.inverse_relabeling(relabeling))`
+        # is just `self` in the case of an iso relabeling. Otherwise, it is just
+        # a "multicomponent".
+
+        for k, v in relabeling:
+            yield v, k
+
+    @staticmethod
+    def sublabeling(relabeling: Iterable[str | int]):
+        for k in relabeling:
+            yield k, k
+
+    def fork(self, ssource: 'Mor', starget: 'Mor') -> 'Eq':
         """Requirement of subobject"""
         raise TypeError("Requires Subobject")
 
-    def req(self, name: str) -> 'Eq':
-        """Requirement of subobject"""
-        raise TypeError("Requires Subobject")
+    def subobject(self, requirements: Collection[tuple['Mor', 'Mor']],) -> 'Obj':
+        raise TypeError("Requires LexObj")
+
+    def join(self, obj: 'Obj') -> tuple['Mor', 'Mor']:
+        raise TypeError("Requires CartObj")
 
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
-    __slots__ = 'name', 'source', 'target'
+    __slots__ = 'name', 'source', 'target'#, '_hat'
     name: Name
     source: Obj
     target: Obj
+    #_hat: tuple['Mor', 'Mor']
     depth = 0 # Used in LazyComposition
+
+    # @property
+    # def hat(self):
+    #     """Hat equality associated to morphism"""
+    #     # This raises AttributeError in the case of morphisms lacking a hat
+    #     # equality.
+    #     hat_source, hat_target = self._hat
+    #     return Eq(hat_source, hat_target.compose(self))
 
     def expanded(self):
         """Underlying composition in the case of LazyComposition"""
         return self
-
-    def conversion(self, mor: 'Mor') -> Optional['Eq']:
-        """Gives equality that converts `self` into `mor`"""
-        if self.same(mor):
-            return self.ref()
-
-        return None
 
     @abstractmethod
     def ev(self, x: object) -> object:
@@ -421,6 +501,10 @@ class Mor(metaclass=ABCMeta):
     def __repr__(self):
         return f'Mor("{self!s}: {self.source} -> {self.target}")'
 
+    # def split(self) -> tuple['Mor', 'Mor']:
+    #     """Separate comoposition into the first factors and last factor"""
+    #     raise TypeError("Requires Composition")
+
     def ref(self) -> 'Eq':
         """Models morphism `category.ref`"""
         raise TypeError("Requires CategoryMor")
@@ -437,6 +521,25 @@ class Mor(metaclass=ABCMeta):
         """Models morphism `cart.pairing_unique`"""
         raise TypeError("Requires CartMor")
 
+    def exfit(self, source: Obj):
+        if self.source.identical(source):
+            return self
+
+        return source.terminal_mor()
+
+class PrimEv:
+    __slots__ = ('func',)
+    func: Callable[[object], object]
+
+    def __init__(self, func: Callable[[object], object]):
+        self.func = func
+
+    def to_mor(self, source: Obj, target: Obj):
+        return PrimMor(source, target, self.func)
+
+    def __hash__(self):
+        return hash(self.func)
+
 class PrimMor(Mor):
     """Base of primitive morphisms
 
@@ -444,11 +547,13 @@ class PrimMor(Mor):
     after initialization, that is during execution of the theory, to which the
     primitive morphisms belong.
     """
-    __slots__ = ()
+    __slots__ = ('raw_ev')
 
-    @abstractmethod
-    def raw_ev(self, x: object) -> object:
-        """Raw evaluation (no type checking)"""
+    raw_ev: Callable[[object], object]
+
+    def __init__(self, source: Obj, target: Obj, raw_ev: Callable[[object], object]):
+        super().__init__(source, target)
+        self.raw_ev = raw_ev
 
     def ev(self, x: object) -> object:
         # TargetInvalid can only get caught outside the call stack, so there is
@@ -497,12 +602,12 @@ class PrimMor(Mor):
             return x.exit(res)
         raise TargetMismatch("Not accepted by target:", x, res)
 
-MorStub = Mor | Callable[[Obj, Obj], PrimMor]
+MorStub = Mor | PrimEv
 
 class Eq:
     """Base class for equalities (2-cells)"""
     # There is no distinction between proven and unproven equalities. All that
-    # matters is that the equality constructed through the operations provided
+    # matters is that the equality be constructed through the operations provided
     # by the theory. Something similar would happen with morphisms if no `ev`
     # was needed. In this case we would forget the construction and just retain
     # the signature. `Mor` would have no need to be abstract. An unproven
@@ -514,8 +619,7 @@ class Eq:
     # equality signatures, even loose ones, since globular conditions are not
     # yet checked at this stage. Recall that setoids are categories enriched
     # over TV.
-    __slots__ = 'name', 'ssource', 'starget', 'proven'
-    name: Name
+    __slots__ = 'ssource', 'starget', 'proven'
     ssource: Mor
     starget: Mor
     proven: bool
@@ -564,6 +668,8 @@ class Eq:
         that is their signature."""
         return (self.ssource, self.starget)
 
+    ssignature = hint
+
     def parallel(self, proof: 'Eq'):
         """Equalities that coincide in their signature are parallel."""
         if proof is self:
@@ -573,10 +679,10 @@ class Eq:
             and self.starget == proof.starget
         )
 
-    def __str__(self):
-        if hasattr(self, 'name'):
-            return '.'.join(self.name)
-        return NotImplemented
+    # def __str__(self):
+    #     # if hasattr(self, 'name'):
+    #     #     return '.'.join(self.name)
+    #     return NotImplemented
 
     def __repr__(self):
         return f'Eq("{self!s}: {self.ssource} == {self.starget}")'
@@ -605,17 +711,24 @@ class Eq:
         """Models morphism `lex.equalizer_pairing_unique`"""
         raise TypeError("Requires LexEq")
 
+class Axiom(Enum):
+    PRIVATE = False
+    PUBLIC = True
+
 class PrimEq(Eq):
     """Base of primitive equalities"""
     __slots__ = ()
-    public = False
 
-    def __init__(self, ssource: Mor, starget: Mor):
+    def __init__(self, ssource: Mor, starget: Mor, public: bool | Axiom):
         # Trusting the target of a primitive morphism is analogous to not
         # providing a proof when assuming a primitive equality (especially a non
         # public one).
         super().__init__(ssource, starget)
-        self.ssource.source.require_eq(self, self.public)
+        if isinstance(public, Axiom):
+            public = public.value
+
+        self.ssource.source.require_eq(self, public)
+        self.proven = True
 
 Cell = Obj | Mor | Eq
-EqStub = Eq | Callable[[Mor, Mor], PrimEq]
+EqStub = Eq | Axiom

@@ -44,7 +44,7 @@ def is_span_eq(se: SpanEq):
     return (
         category.is_eq(p_eq) and category.is_eq(q_eq)
         and is_span(x) and is_span(y)
-        and source(x_p).identical(source(y_p))
+        and source(x_p).identical(source(y_p)) # TODO: these may be superfluous
         and target(x_p).identical(target(y_p))
         and x_p.same(p_s) and y_p.same(p_t)
         and x_q.same(q_s) and y_q.same(q_t)

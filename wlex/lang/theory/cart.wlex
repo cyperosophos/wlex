@@ -44,11 +44,12 @@ fn pairing_unique: Mor @ (pairing, $) @ ProductMor -> eq;
 # Theorem: pairing preserves equality.
 type SpanEq := (
     x: Span, y: Span, p_eq: Eq, q_eq: Eq,
-    source @ (x == y),
-    target @ (x == y),
+    source @ ($x == $y), # TODO: these may be superfluous
+    target @ ($x == $y),
     ($p, $q) @ ($x, $y) == eq @ ($p_eq, $q_eq),
 );
 fn pairing_eq: Mor @ pairing @ SpanEq -> eq;
+# TODO: Notice that this seems to requires preserving oroduct components as if they were variables.
 fn pairing_eq = C.S.S.sym @ pairing_unique @ (
     Mor, $y,
     *C.S.S.P.trans @ (

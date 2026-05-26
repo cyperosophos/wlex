@@ -122,6 +122,7 @@ class LazyComposition(CategoryMor):
     def same(self, x: Mor):
         if isinstance(x, type(self)):
             x = x.expanded()
+
         return self.expanded().same(x)
 
 class Composition(CategoryMor):
@@ -135,11 +136,47 @@ class Composition(CategoryMor):
         super().__init__(source, target)
         self.factors = factors
 
-    def split(self) -> tuple[Mor, Mor]:
-        """Separate comoposition into the first factors and last factor"""
+    def split(self):
         if len(self.factors) <= 1:
             raise ValueError("Requires at least two factors")
+
         return self.simplified(self.factors[:-1]), self.factors[-1]
+
+    def drop_tail(self, tail_length: int = -1) -> Mor:
+        if not self.factors:
+            raise ValueError("Requires at least one factors")
+
+        if tail_length < 0:
+            return self.factors[-1]
+
+        if tail_length == 0:
+            return self
+
+        if tail_length > len(self.factors):
+            raise ValueError("`tail_length` can't be greater than `len(self.factors)`.")
+
+        if tail_length == len(self.factors):
+            return self.identity(self.source)
+
+        return self.simplified(self.factors[tail_length:])
+
+    def drop_head(self, head_length: int = -1) -> Mor:
+        if not self.factors:
+            raise ValueError("Requires at least one factors")
+
+        if head_length < 0:
+            return self.simplified(self.factors[:-1])
+
+        if head_length == 0:
+            return self
+
+        if head_length > len(self.factors):
+            raise ValueError("`head_length` can't be greater than `len(self.factors)`.")
+
+        if head_length == len(self.factors):
+            return self.identity(self.target)
+
+        return self.simplified(self.factors[-head_length:])
 
     @classmethod
     def simplified(cls, factors: Sequence[Mor]):
@@ -176,7 +213,7 @@ class Composition(CategoryMor):
 
     def ev(self, x: object):
         res = x
-        for factor in self.factors:
+        for factor in reversed(self.factors):
             res = factor.ev(res)
 
         return res

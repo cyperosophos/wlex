@@ -215,4 +215,5 @@ ev and accept work with tuples not dictionaries. The way to handle
 this is with a conversion.
 
 TODO: In high-level composition convert Obj to projection?
+Use special @! composition for weakening?
 

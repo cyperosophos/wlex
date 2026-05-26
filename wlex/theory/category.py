@@ -1,132 +1,200 @@
-from ..ambient import Obj as MObj, Mor as MMor
-from .quiver import Quiver
-from .posetoid import Posetoid, Congruence
+# pylint: disable=C0103, R0902, C0115, C0114
+from dataclasses import dataclass
+from typing import Self
 
-class Category:
-    Q: Quiver
-    P: Posetoid
-    S: Congruence
-    Obj: MObj
-    Mor: MObj
-    Eq: MObj
-    eq: MMor
-    source: MMor
-    target: MMor
-    Composable: MObj # Limit
-    identity: MMor
-    compose: MMor
+from wlex.ambient.cells import (
+    Obj as MetaObj, Mor as MetaMor, MorStub, EqStub,
+)
+from wlex.ambient.category import (
+    Context, Theory, Once as _o, OnceStub as _s, OnceUpdate as _u,
+    of_type as _ot,
+)
+from wlex.ambient.lex import LexContext
 
-    left_identity_law: MMor
-    right_identity_law: MMor
-    associativity: MMor
+from .quiver import (
+    QuiverStub, QuiverTheory, Quiver,
+)
+from .posetoid import (
+    PosetoidStub, PosetoidTheory, Posetoid,
+    CongruenceStub, CongruenceTheory, Congruence,
+)
 
-    ComposableEq: MObj
+@dataclass(frozen=True)
+class CategoryStub:
+    Q: _s[QuiverStub]
+    P: _s[PosetoidStub]
+    S: _s[CongruenceStub]
 
-    compose_eq: MMor
+    left_identity_law: _o[MorStub]
+    right_identity_law: _o[MorStub]
+    associativity: _o[MorStub]
+    left_identity_law_hat: _o[EqStub]
+    right_identity_law_hat: _o[EqStub]
+    associativity_hat: _o[EqStub]
 
-    def __init__(self, ambient):
-        th = ambient.lex(self)
-        c = th.compose
-        t = th.trans
-        p = th.pair
-        th.sub('Q', Quiver)
-        Q = self.Q
-        th.sub('P', Posetoid, Q=Q.Q0)
-        th.sub('S', Congruence, **{'S.P.Q': Q.Q1})
-        P = self.P
-        S = self.S
-        self.Obj = P.El
-        self.Mor = P.Rel
-        self.Eq = S.Eq
-        self.eq = S.eq
-        self.source = P.source
-        self.target = P.target
-        self.Composable = P.Path
-        self.identity = P.ref
-        self.compose = P.trans
-        Mor = self.Mor
-        Eq = self.Eq
-        eq = self.eq
-        source = self.source
-        target = self.target
-        Composable = self.Composable
-        identity = self.identity
-        compose = self.compose
+    compose_eq: _o[MorStub]
+    compose_eq_hat: _o[EqStub]
 
-        # TODO: Too many implicit steps? (e.g. assoc, id laws, sym, p_eq)
-        # $0 @ ^identity @ target
-        proof_lil = c(th.proj(0), identity.hat, target)
-        th.mor(
-            'left_identity_law',
-            c(p(c(
-                compose,
-                p(c(identity, target), th.id).where(proof_lil),
-            ), th.id), Mor),
-            eq,
-        )
-        # $1 @ ^identity @ source
-        proof_ril = c(th.proj(1), identity.hat, source)
-        th.mor(
-            'right_identity_law',
-            c(p(c(
-                compose,
-                p(th.id, c(identity, source)).where(proof_ril),
-            ), th.id), Mor),
-            eq,
-        )
-        f, g, h = (th.proj(n) for n in 'fgh')
-        # $1
-        # ($1 @ ^compose @ (g, h)) & !0
-        # $0
-        # !1 & ($0 @ ^compose) # Automatically uses (f, g).
-        proof_assocl = t(
-            c(
-                c(th.proj(1), compose.hat),
-                p(g, h).where(th.req(1)),
-            ),
-            th.req(0),
-        )
-        proof_assocr = t(
-            th.req(1),
-            c(th.proj(0), compose.hat),
-        )
-        th.mor(
-            'associativity',
-            c(p(
-                c(compose, p(f, c(compose, p(g, h).where(
-                    th.req(1),
-                ))).where(proof_assocl)),
-                c(compose, p(c(compose, p(f, g).where(
-                    th.req(0),
-                )), h).where(proof_assocr)),
-            ), th.product(
-                Composable,
-                (('g', 'h'), Composable),
-            )),
-            eq,
+@dataclass(frozen=True)
+class CategoryTheory(Theory):
+    Q: QuiverTheory
+    P: PosetoidTheory
+    S: CongruenceTheory
+    Obj: MetaObj
+    Mor: MetaObj
+    Eq: MetaObj
+    eq: MetaMor
+    source: MetaMor
+    target: MetaMor
+    Composable: MetaObj
+    identity: MetaMor
+    compose: MetaMor
+
+    left_identity_law: MetaMor
+    right_identity_law: MetaMor
+    associativity: MetaMor
+
+    ComposableEq: MetaObj
+    compose_eq: MetaMor
+
+    @classmethod
+    def from_ctx(cls, ctx: Context[Self]):
+        return cls(
+            Q=_ot(ctx.sub_refs['Q'], QuiverTheory),
+            P=_ot(ctx.sub_refs['P'], PosetoidTheory),
+            S=_ot(ctx.sub_refs['S'], CongruenceTheory),
+            Obj=ctx.obj_refs['Obj'],
+            Mor=ctx.obj_refs['Mor'],
+            Eq=ctx.obj_refs['Eq'],
+            eq=ctx.mor_refs['eq'],
+            source=ctx.mor_refs['source'],
+            target=ctx.mor_refs['target'],
+            Composable=ctx.obj_refs['Composable'],
+            identity=ctx.mor_refs['identity'],
+            compose=ctx.mor_refs['compose'],
+            left_identity_law=ctx.mor_refs['left_identity_law'],
+            right_identity_law=ctx.mor_refs['right_identity_law'],
+            associativity=ctx.mor_refs['associativity'],
+            ComposableEq=ctx.obj_refs['ComposableEq'],
+            compose_eq=ctx.mor_refs['compose_eq'],
         )
 
-        self.ComposableEq = th.product(d=Eq, e=Eq).requiring(
-            (
-                c(source, S.source), ('d',),
-                c(target, S.target), ('e',),
-            ),
-        )
-        ComposableEq = self.ComposableEq
+def Category(stub: _u[CategoryStub]):
+    ctx = LexContext(CategoryTheory)
+    prim = _o.prim(stub)
+    c = ctx.c
+    t = ctx.t
+    p = ctx.pair
+    prod = ctx.prod
+    req = ctx.req
+    proj = ctx.proj
+    i = ctx.id
+    l = ctx.l
+    ix = ctx.ix
 
-        d, e = (th.proj(n) for n in 'de')
-        # (Q.target_globular_cond @ $e) & !0
-        proof_compsrc = t(c(Q.target_globular_cond, e), th.req(0))
-        # !1 @ (Q.source_globular_cond @ $d)
-        proof_comptgt = t(th.req(0), c(Q.source_globular_cond, d))
-        th.mor(
-            'compose_eq',
-            c(p(
-                c(compose, p(c(S.source, d), c(S.source, e)).where(proof_compsrc)),
-                c(compose, p(c(S.target, d), c(S.target, e)).where(proof_comptgt)),
-            ), ComposableEq),
-            eq,
-        )
+    Q = ctx.sub('Q', Quiver(prim.Q))
 
+    def P_update(stub: PosetoidStub):
+        Q.Q0.stub_update(stub.Q.stub)
 
+    P = ctx.sub('P', Posetoid((prim.P, P_update)))
 
+    def S_update(stub: CongruenceStub):
+        Q.Q1.stub_update(stub.S.stub.P.stub.Q.stub)
+
+    S = ctx.sub('S', Congruence((prim.S, S_update)))
+
+    _ = ctx.define('Obj', P.El)
+    Mor = ctx.define('Mor', P.Rel)
+    Eq = ctx.define('Eq', S.Eq)
+    eq = ctx.define('eq', S.eq)
+    source = ctx.define('source', P.source)
+    target = ctx.define('target', P.target)
+    Composable = ctx.define('Composable', P.Path)
+    identity = ctx.define('identity', P.ref)
+    compose = ctx.define('compose', P.trans)
+
+    # TODO: There is overlap of eq and t (and prove).
+    # There is overlap of el and define, and of mor and define.
+    # TODO: When registering equalities of pairings, register instead
+    # each component separately. Same applies for EqualizerMor.
+    # The idea is that in one case one composes with projs and in the other with incls.
+
+    ctx.eq(c(t(c(source, identity), i), target))
+    _, _left_identity_law_hat = ctx.mor('left_identity_law', prim.left_identity_law, (
+        Mor, Eq,
+        p(c(
+            ix(compose),
+            p(c(identity, target), i),
+        ), i),
+        eq,
+    ))
+    _left_identity_law_hat(prim.left_identity_law_hat)
+
+    ctx.eq(c(t(c(target, identity), i), source))
+    _, _right_identity_law_hat = ctx.mor('right_identity_law', prim.right_identity_law, (
+        Mor, Eq,
+        p(c(
+            ix(compose),
+            p(i, c(identity, source)),
+        ), i),
+        eq,
+    ))
+    _right_identity_law_hat(prim.right_identity_law_hat)
+
+    Comp3 = prod(('', Composable), ('', l(Composable, ('g', 'h'))))
+    f, g, h = (proj(n) for n in 'fgh')
+    ctx.eq(t(
+        c(
+            t(c(target, compose), c(target, f)),
+            p(('f', g), ('g', h)),
+        ),
+        f,
+    ))
+    ctx.eq(t(
+        h,
+        t(c(source, compose), c(target, g)),
+    ))
+    _, _associativity_hat = ctx.mor('associativity', prim.associativity, (
+        Comp3, Eq,
+        p(
+            c(ix(compose), p(f, c(ix(compose), p(g, h)))),
+            c(ix(compose), p(c(ix(compose), p(f, g)), h)),
+        ),
+        eq,
+    ))
+    _associativity_hat(prim.associativity_hat)
+
+    d, e = (proj(n) for n in 'de')
+    ComposableEq = req(
+        prod(('d', Eq), ('e', Eq)), (
+        c(source, S.source, d),
+        c(target, S.target, e),
+    ))
+    ctx.eq(t(
+        c(t(
+            c(target, S.source),
+            c(target, S.target),
+        ), e),
+        c(target, S.target, e),
+        c(source, S.source, d),
+    ))
+    ctx.eq(t(
+        c(target, S.target, e),
+        c(source, S.source, d),
+        c(t(
+            c(source, S.source),
+            c(source, S.target),
+        ), d),
+    ))
+    _, _compose_eq_hat = ctx.mor('compose_eq', prim.compose_eq, (
+        ComposableEq, Eq,
+        p(
+            c(ix(compose), p(c(S.source, d), c(S.source, e))),
+            c(ix(compose), p(c(S.target, d), c(S.target, e))),
+        ),
+        eq,
+    ))
+    _compose_eq_hat(prim.compose_eq_hat)
+
+    return ctx

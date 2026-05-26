@@ -6,6 +6,7 @@ from .category import source, target
 Parallel = tuple[Mor, Mor]
 Fork = tuple[Mor, Mor, Mor, Eq]
 EqualizerMor = tuple[Mor, Mor, Mor, Mor, Eq, Eq]
+ForkEq = tuple[Mor, Mor, Mor, Eq, Mor, Eq, Eq]
 
 def is_parallel(par: Parallel):
     """Models requirement of `lex.Parallel"""
@@ -41,12 +42,24 @@ def is_equalizer_mor(em: EqualizerMor):
         and fmor.same(eq_t)
     )
 
+def is_fork_eq(fe: ForkEq):
+    x, i, j, c, y, d, e = fe
+    e_s, e_t = category.eq_signature(e)
+    return (
+        is_fork((x, i, j,c)) and is_fork((y, i, j, d))
+        and category.is_eq(e)
+        # TODO: these source/target checks may be superfluous
+        and source(x).identical(source(y))
+        and target(x).identical(target(y))
+        and x.same(e_s) and y.same(e_t)
+    )
+
 def equalizer(par: Parallel) -> Fork:
     # Using Eq for parallel is possible because globular conditions are public
     # equalities.
     i, j = par
     mor = Eq(i, j).equalizer()
-    eq = mor.source.ireq(0)
+    eq = mor.source.fork(i, j)
     return mor, i, j, eq
 
 # TODO: equalizer_hat
@@ -63,3 +76,14 @@ def equalizer_pairing_unique(em: EqualizerMor) -> Eq:
     return Eq(i, j).equalizer_pairing_unique(mor, fmor)
 
 # TODO: equalizer_pairing_unique_hat
+
+def _emy(fe: ForkEq) -> EqualizerMor:
+    x, i, j, c, y, d, e = fe
+    em_mor, _, _, _, _, em_eq = equalizer_pairing((x, i, j, c))
+    return (
+        em_mor, y, i, j, d,
+        category.trans((e, em_eq)),
+    )
+
+def equalizer_pairing_eq(fe: ForkEq) -> Eq:
+    return category.sym(equalizer_pairing_unique(_emy(fe)))
