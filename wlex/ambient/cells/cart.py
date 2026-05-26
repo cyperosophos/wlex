@@ -1,6 +1,6 @@
 """Cart cell classes"""
 from typing import Self, TypeGuard, override
-from collections.abc import Sequence, Mapping
+from collections.abc import Sequence, Mapping, Iterable
 from abc import ABCMeta
 
 from ..cells import Obj, Mor, Eq, PrimMor
@@ -275,18 +275,31 @@ class Product(CartObj):
         else:
             agg[label] = component
 
-    def iso_relabeling(self, relabeling: dict[str | int, str | int]):
-        """Filling missing relabeling keys inplace"""
-        for key in self.components:
-            if key not in relabeling:
-                relabeling[key] = key
+    def iso_relabeling(self, relabeling: Iterable[tuple[str | int, str | int]]):
+        used: set[str | int] = set()
+        for k, v in relabeling:
+            yield k, v
+            used.add(k)
 
-        return relabeling
+        for key in self.components:
+            if key not in used:
+                yield key, key
+
+    def sequence_relabeling(self, relabeling: Sequence[str | int]):
+        # This works because if the labels are a range of numbers (from 0), then
+        # they will be ordered when initializing components, so that labeling
+        # based on the order of labels is the same as labeling based on their
+        # values.
+
+        # We don't check the length of `relabeling`.
+        for i, label in enumerate(self.components):
+            if label != '':
+                yield label, relabeling[i]
 
     def with_labels(
-        self, relabeling: dict[str | int, str | int] | Sequence[str | int] | str | int,
+        self, relabeling: Iterable[tuple[str | int, str | int]],
     ):
-        # `Sequence` relabeling is based on the order of labels.
+        # This doesn't check that there are no empty or repeated labels.
 
         # `with_labels` is the method to access specific components. We allow
         # accessing several components at once because this is required for
@@ -297,92 +310,22 @@ class Product(CartObj):
         # etc. This means that deep relabeling is not supported by `with_labels`
         # and would have to be done through manual restating of some
         # requirements.
+
         terminal = self.terminal()
-        if isinstance(relabeling, (str, int)):
-            return self.components.get(relabeling, terminal)
-
-        if isinstance(relabeling, dict):
-            # To be consistent with the way we handle projections, checking that
-            # all keys correspond to components is handled at a higher level.
-            if not all(k != '' and v != '' for k, v in relabeling.items()):
-                raise ValueError("Empty labels not allowed")
-
-            return self.vproduct([
-                (new, self.components.get(old, terminal))
-                for old, new in relabeling.items()
-            ], no_repeat=True)
-
-        if len(relabeling) != len(self.components):
-            raise ValueError(
-                "Product relabeling list length does not match components.",
-            )
-
-        # This works because if the labels are a range of numbers (from 0), then
-        # they will be ordered when initializing components, so that labeling
-        # based on the order of labels is the same as labeling based on their
-        # values.
+        # To be consistent with the way we handle projections, checking that
+        # all keys correspond to components is handled at a higher level.
         return self.vproduct([
-            (relabeling[i], component)
-            for i, component in enumerate(self.components.values())
+            (new, self.components.get(old, terminal))
+            for old, new in relabeling
         ], no_repeat=True)
 
-    l = with_labels
-
     def relabel(
-        self, relabeling: dict[str | int, str | int] | Sequence[str | int] | str | int,
+        self, relabeling: Iterable[tuple[str | int, str | int]],
     ):
-        if isinstance(relabeling, (str, int)):
-            return self.proj(relabeling)
-
-        if isinstance(relabeling, dict):
-            if not all(k != '' and v != '' for k, v in relabeling.items()):
-                raise ValueError("Empty labels not allowed")
-
-            return self.vproduct_mor([
-                (new, self.proj(old))
-                for old, new in relabeling.items()
-            ])
-
-        if len(relabeling) != len(self.components):
-            raise ValueError(
-                "Product relabeling list length does not match components.",
-            )
-
         return self.vproduct_mor([
-            (relabeling[i], self.proj(label))
-            for i, label in enumerate(self.components)
+            (new, self.proj(old))
+            for old, new in relabeling
         ])
-
-    def invert_relabeling(
-        self, relabeling: dict[str | int, str | int] | Sequence[str | int]
-    ):
-        # This does some validation of relabeling. `self` can be considered as
-        # the product to be relabeled with `relabeling`. The goal is that the
-        # target of
-        # `self.with_labels(relabeling).relabel(self.invert_relabeling(relabeling))`
-        # is just `self` in the case of an iso relabeling.
-        res: dict[str | int, str | int] = {}
-
-        if isinstance(relabeling, dict):
-            it = relabeling.items()
-        else:
-            if len(relabeling) != len(self.components):
-                raise ValueError(
-                    "Product relabeling list length does not match components.",
-                )
-
-            it = ((label, relabeling[i]) for i, label in enumerate(self.components))
-
-        for k, v in it:
-            if k == '' or v == '':
-                raise ValueError("Empty labels not allowed")
-
-            if v in res:
-                raise ValueError("Repeated label")
-
-            res[v] = k
-
-        return res
 
     def __init__(self, components: Sequence[tuple[str | int, Obj]], no_repeat: bool = False):
         super().__init__()
@@ -628,25 +571,13 @@ class ProductMor(CartMor):
             yield label, component.compose(mor)
 
     def idx_to_labels(self, relabeling: Sequence[str | int]):
-        # if isinstance(relabeling, dict):
-        #     for label in relabeling:
-        #         if label not in self.components:
-        #             raise ValueError("Can't relabel `{label}`")
-
-        #     return self.source.vproduct_mor([
-        #         (relabeling.get(label, label), component)
-        #         for label, component in self.components.items()
-        #     ])
-
-        if len(relabeling) > len(self.components):
-            raise ValueError("Relabeling list is too long.")
+        if len(relabeling) != len(self.components):
+            raise ValueError("Wrong relabeling list length")
 
         return self.source.vproduct_mor([
             (relabeling[i], component)
             for i, component in enumerate(self.components.values())
         ])
-
-    l = idx_to_labels
 
     def __new__(
         cls, source: Obj,

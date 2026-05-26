@@ -90,6 +90,7 @@ def Category(stub: _u[CategoryStub]):
     proj = ctx.proj
     i = ctx.id
     l = ctx.l
+    ix = ctx.ix
 
     Q = ctx.sub('Q', Quiver(prim.Q))
 
@@ -123,7 +124,7 @@ def Category(stub: _u[CategoryStub]):
     _, _left_identity_law_hat = ctx.mor('left_identity_law', prim.left_identity_law, (
         Mor, Eq,
         p(c(
-            compose,
+            ix(compose),
             p(c(identity, target), i),
         ), i),
         eq,
@@ -134,7 +135,7 @@ def Category(stub: _u[CategoryStub]):
     _, _right_identity_law_hat = ctx.mor('right_identity_law', prim.right_identity_law, (
         Mor, Eq,
         p(c(
-            compose,
+            ix(compose),
             p(i, c(identity, source)),
         ), i),
         eq,
@@ -157,8 +158,8 @@ def Category(stub: _u[CategoryStub]):
     _, _associativity_hat = ctx.mor('associativity', prim.associativity, (
         Comp3, Eq,
         p(
-            c(compose, p(f, c(compose, p(g, h)))),
-            c(compose, p(c(compose, p(f, g)), h)),
+            c(ix(compose), p(f, c(ix(compose), p(g, h)))),
+            c(ix(compose), p(c(ix(compose), p(f, g)), h)),
         ),
         eq,
     ))
@@ -189,8 +190,8 @@ def Category(stub: _u[CategoryStub]):
     _, _compose_eq_hat = ctx.mor('compose_eq', prim.compose_eq, (
         ComposableEq, Eq,
         p(
-            c(compose, p(c(S.source, d), c(S.source, e))),
-            c(compose, p(c(S.target, d), c(S.target, e))),
+            c(ix(compose), p(c(S.source, d), c(S.source, e))),
+            c(ix(compose), p(c(S.target, d), c(S.target, e))),
         ),
         eq,
     ))

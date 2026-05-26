@@ -1,5 +1,5 @@
 """Base classes for cells and cell exceptions"""
-from collections.abc import Callable, Sequence, Collection, Iterator
+from collections.abc import Callable, Sequence, Collection, Iterator, Iterable
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import Optional
@@ -371,22 +371,40 @@ class Obj(metaclass=ABCMeta):
 
         return self.terminal_mor()
 
+    def iso_relabeling(
+        self, relabeling: Iterable[tuple[str | int, str | int]],
+    ) -> Iterator[tuple[str | int, str | int]]:
+        raise TypeError("Requires Product")
+
+    def sequence_relabeling(
+        self, relabeling: Sequence[str | int],
+    ) -> Iterator[tuple[str | int, str | int]]:
+        raise TypeError("Requires Product")
+
     def with_labels(
-        self, relabeling: dict[str | int, str | int] | Sequence[str | int],
+        self, relabeling: Iterable[tuple[str | int, str | int]],
     ) -> 'Obj':
         raise TypeError("Requires Product")
 
-    l = with_labels
-
     def relabel(
-        self, relabeling: dict[str | int, str | int] | Sequence[str | int],
+        self, relabeling: Iterable[tuple[str | int, str | int]],
     ) -> 'Mor':
         raise TypeError("Requires Product")
 
-    def invert_relabeling(
-        self, relabeling: dict[str | int, str | int] | Sequence[str | int],
-    ) -> dict[str | int, str | int]:
-        raise TypeError("Requires Product")
+    @staticmethod
+    def inverse_relabeling(relabeling: Iterable[tuple[str | int, str | int]]):
+        # The goal is that the target of
+        # `self.with_labels(relabeling).relabel(self.inverse_relabeling(relabeling))`
+        # is just `self` in the case of an iso relabeling. Otherwise, it is just
+        # a "multicomponent".
+
+        for k, v in relabeling:
+            yield v, k
+
+    @staticmethod
+    def sublabeling(relabeling: Iterable[str | int]):
+        for k in relabeling:
+            yield k, k
 
     def fork(self, ssource: 'Mor', starget: 'Mor') -> 'Eq':
         """Requirement of subobject"""

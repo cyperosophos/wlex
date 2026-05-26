@@ -92,6 +92,7 @@ def Cart(stub: _u[CartStub]):
     i = ctx.id
     l = ctx.l
     imp = ctx.imp
+    ix = ctx.ix
 
     C = ctx.sub('C', Category(prim.C))
     Obj = ctx.define('Obj', C.Obj)
@@ -110,11 +111,12 @@ def Cart(stub: _u[CartStub]):
         Obj, c(source, TerminalMor),
     ))
     _terminal_mor_hat(prim.terminal_mor_hat)
-    terminal_mor_unique = ctx.mor('terminal_mor_unique', prim.terminal_mor_unique, (
+    _, _terminal_mor_unique_hat = ctx.mor('terminal_mor_unique', prim.terminal_mor_unique, (
         TerminalMor, Eq,
         p(c(Mor, terminal_mor, source), Mor),
         eq,
     ))
+    _terminal_mor_unique_hat(prim.terminal_mor_unique_hat)
     p_, q = (proj(n) for n in 'pq')
     Span = req(prod(('p', Mor), ('q', Mor)), (
         c(source, p_),
@@ -125,7 +127,7 @@ def Cart(stub: _u[CartStub]):
         i, p(c(target, p_), c(target, q)),
     ))
     _product_hat(prim.product_hat)
-    pt = c(product, p(c(target, p_), c(target, q)), Span)
+    pt = c(ix(product), p(c(target, p_), c(target, q)), Span)
     p_eq, q_eq, mor = (proj(n) for n in ('p_eq', 'q_eq', 'mor'))
     # `source @ $mor = source @ $p` is implied by the requirement.
     # `target @ $mor = source @ $p @ pt` is a requirement of the first
@@ -134,7 +136,7 @@ def Cart(stub: _u[CartStub]):
         ('mor', Mor), ('p', Mor),
         ('p_eq', Eq),
     ), (
-        p(c(compose, p(c(p_, pt), mor)), p_),
+        p(c(ix(compose), p(c(p_, pt), mor)), p_),
         c(eq, p_eq),
     ))
     ctx.eq(t(
@@ -151,7 +153,7 @@ def Cart(stub: _u[CartStub]):
         ('', ProductMorP), ('', Span),
         ('q_eq', Eq),
     ), (
-        p(c(compose, p(c(q, pt), mor)), q),
+        p(c(ix(compose), p(c(q, pt), mor)), q),
         c(eq, q_eq),
     )))
 
@@ -159,11 +161,12 @@ def Cart(stub: _u[CartStub]):
         Span, c(Span, ProductMor),
     ))
     _pairing_hat(prim.pairing_hat)
-    pairing_unique = ctx.mor('pairing_unique', prim.pairing_unique, (
+    pairing_unique, _pairing_unique_hat = ctx.mor('pairing_unique', prim.pairing_unique, (
         ProductMor, Eq,
         p(c(mor, pairing), mor),
         eq,
     ))
+    _pairing_unique_hat(prim.pairing_unique_hat)
 
     x, y = (ctx.proj(n) for n in 'xy')
     SpanEq = ctx.define('SpanEq', req(prod(
@@ -177,19 +180,44 @@ def Cart(stub: _u[CartStub]):
         c(eq, q_eq),
     )))
 
-    # TODO: This requires imperative composition.
-    _ = c(p(
-        ('mor', mor), ('', y),
-        ('p_eq', c(C.S.S.P.trans, p(
-            c(p_eq, SpanEq),
-            c(p_eq, ProductMor),
-        ))),
-        ('q_eq', c(C.S.S.P.trans, p(
-            c(q_eq, SpanEq),
-            c(q_eq, ProductMor),
-        ))),
-    ), pairing, x)
-
+    pm_mor, pm_p_eq, pm_q_eq = (proj(n) for n in ('pm_mor', 'pm_p_eq', 'pm_q_eq'))
+    # Notice that relabeling does not preserve equivalence, so it must never be implicit.
     pmy = imp(
-        ('', l(c(pairing, x), {}))
+        ('', l(c(pairing, x), ('pm_mor', '', '', 'pm_p_eq', 'q_eq', 'pm_q_eq'))),
+        ('', p(
+            ('mor', pm_mor), ('', y),
+            ('p_eq', c(ix(C.S.S.P.trans), p(p_eq, pm_p_eq))),
+            ('q_eq', c(ix(C.S.S.P.trans), p(q_eq, pm_q_eq))),
+        )),
     )
+
+    _, _pairing_eq_hat = ctx.mor(
+        'pairing_eq',
+        c(C.S.S.sym, pairing_unique, pmy),
+        (
+            SpanEq, Eq,
+            p(c(mor, pairing, x), c(mor, pairing, y)),
+            eq,
+        ),
+    )
+    # Implicit application of p_eq for mor @ pmy = mor @ pairing @ x
+    _pairing_eq_hat(c(
+        t(
+            c(
+                p(
+                    t(c(C.S.source, C.S.S.sym), C.S.target),
+                    t(c(C.S.target, C.S.S.sym), C.S.source),
+                ),
+                pairing_unique,
+            ),
+            c(
+                p(C.S.target, C.S.source),
+                pairing_unique,
+            ),
+            mor,
+        ),
+        pmy,
+        SpanEq, # TODO: Check that taking out this arg will produce an error (due to pmy being a transformation).
+    ))
+
+    return ctx

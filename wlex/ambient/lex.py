@@ -40,23 +40,44 @@ class LexContext[T: Theory](cart.CartContext[T]):
                 incl.compose(starget),
             )
 
-    def with_labels(self, obj: Obj, relabeling: dict[str | int, str | int] | Sequence[str | int]):
-        prod = obj.sup.with_labels(relabeling)
+    def with_labels(
+        self, obj: Obj,
+        relabeling: Sequence[tuple[str | int, str | int]] | Sequence[str | int] | str | int,
+    ):
+        new = super().with_labels(obj, relabeling)
         # No assumption about order of labels in relabeling being the same as in
         # the components of prod.
 
         # When the relabeling is not iso some requirements may end up getting
         # discarded.
-        r = prod.relabel(obj.sup.invert_relabeling(relabeling))
-        assert r.target.identical(obj.sup) # TODO: handle non iso case
+        r = self.relabel(new, self.inverse_relabeling(obj, relabeling))
+
+        if isinstance(obj.sup, Product):
+            if isinstance(relabeling, (str, int)):
+                assert r.target.identical(self.prod((relabeling, obj.proj(relabeling).target)))
+            elif relabeling and isinstance(relabeling[0], (str, int)):
+                assert r.target.identical(obj.sup.with_labels(obj.sublabeling(
+                    l for l, k in zip(obj.sup.components, relabeling) if k # type: ignore
+                )))
+            elif relabeling and isinstance(relabeling[0], tuple):
+                assert r.target.identical(obj.sup.with_labels(obj.sublabeling(
+                    k for k, _ in relabeling # type: ignore
+                )))
+            else:
+                assert r.target.identical(obj.terminal())
+        elif isinstance(relabeling, (str, int)):
+            assert r.target.identical(obj.terminal())
+        elif len(relabeling) == 1 and isinstance(relabeling[0], (str | int)):
+            assert r.target.identical(obj.sup)
+        else:
+            assert r.target.identical(obj.terminal())
+
         return self.req(
-            prod, *((
+            new, *((
                 self.c(s, r),
                 self.c(t, r),
             ) for s, t in obj.requirements),
         )
-
-    l = with_labels
 
     def exfit(self, mor: Mor, source: Obj):
         if not isinstance(mor, EqualizerMor):

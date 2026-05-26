@@ -1,6 +1,6 @@
 """Lex cell classes"""
 from abc import ABCMeta
-from collections.abc import Collection, Callable, Sequence
+from collections.abc import Collection, Callable, Iterable, Sequence
 from typing import Self, override
 from itertools import chain
 
@@ -141,14 +141,37 @@ class LazySubobject(LiftingObj):
     def proj(self, label: str | int) -> Mor:
         return self.expanded().proj(label)
 
-    def with_labels(self, relabeling: dict[str | int, str | int] | Sequence[str | int]):
+    def iso_relabeling(self, relabeling: Iterable[tuple[str | int, str | int]]):
+        return self.expanded().iso_relabeling(relabeling)
+
+    def sequence_relabeling(self, relabeling: Sequence[str | int]):
+        return self.expanded().sequence_relabeling(relabeling)
+
+    def with_labels(self, relabeling: Iterable[tuple[str | int, str | int]]):
         return self.expanded().with_labels(relabeling)
 
-    l = with_labels
+    def relabel(
+        self, relabeling: Iterable[tuple[str | int, str | int]],
+    ):
+        return self.expanded().relabel(relabeling)
 
 class Subobject(LiftingObj):
     __slots__ = ('_requirements',)
     _requirements: frozenset[tuple[Mor, Mor]]
+
+    def iso_relabeling(self, relabeling: Iterable[tuple[str | int, str | int]]):
+        return self.sup.iso_relabeling(relabeling)
+
+    def sequence_relabeling(self, relabeling: Sequence[str | int]):
+        return self.sup.sequence_relabeling(relabeling)
+
+    def with_labels(self, relabeling: Iterable[tuple[str | int, str | int]]):
+        return self.sup.with_labels(relabeling)
+
+    def relabel(
+        self, relabeling: Iterable[tuple[str | int, str | int]],
+    ):
+        return self.sup.relabel(relabeling)
 
     def trim(self, obj: Obj):
         res = super().trim(obj)
