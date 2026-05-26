@@ -1,95 +1,206 @@
-from ..ambient import Obj as MObj, Mor as MMor
-from .cart import Cart
+# pylint: disable=C0103, R0902, C0115, C0114
+from dataclasses import dataclass
+from typing import Self
 
-class Lex:
-    C: Cart
-    Obj: MObj
-    Mor: MObj
-    Eq: MObj
-    eq: MMor
-    source: MMor
-    target: MMor
-    compose: MMor
+from wlex.ambient.cells import (
+    Obj as MetaObj, Mor as MetaMor, MorStub, EqStub,
+)
+from wlex.ambient.category import (
+    Context, Theory, Once as _o, OnceStub as _s, OnceUpdate as _u,
+    of_type as _ot,
+)
+from wlex.ambient.lex import LexContext
 
-    Parallel: MObj
-    Fork: MObj
+from .cart import (
+    CartStub, CartTheory, Cart,
+)
 
-    equalizer: MMor
+@dataclass(frozen=True)
+class LexStub:
+    C: _s[CartStub]
 
-    meqp: MMor
-    EqualizerMor: MObj
+    equalizer: _o[MorStub]
+    equalizer_hat: _o[EqStub]
+    equalizer_pairing: _o[MorStub]
+    equalizer_pairing_hat: _o[EqStub]
+    equalizer_pairing_unique: _o[MorStub]
+    equalizer_pairing_unique_hat: _o[EqStub]
 
-    equalizer_pairing: MMor
-    equalizer_pairing_unique: MMor
+@dataclass(frozen=True)
+class LexTheory(Theory):
+    C: CartTheory
+    Obj: MetaObj
+    Mor: MetaObj
+    Eq: MetaObj
+    eq: MetaMor
+    source: MetaMor
+    target: MetaMor
+    compose: MetaMor
 
-    def __init__(self, theory):
-        th = theory.lex(self)
-        c = th.compose
-        t = th.trans
-        p = th.pair
-        th.sub('C', Cart)
-        C = self.C
-        self.Obj = C.Obj
-        self.Mor = C.Mor
-        self.Eq = C.Eq
-        self.eq = C.eq
-        self.source = C.source
-        self.target = C.target
-        self.compose = C.compose
+    Parallel: MetaObj
+    Fork: MetaObj
 
-        Mor = self.Mor
-        source = self.source
-        target = self.target
-        i, j = (th.proj(n) for n in 'ij')
-        self.Parallel = th.product(i=Mor, j=Mor).requiring(
-            (
-                c(p(source, target), i),
-                c(p(source, target), j),
-            ),
-        )
-        Parallel = self.Parallel
-        Eq = self.Eq
-        eq = self.eq
-        compose = self.compose
-        self.Fork = th.product(Mor, Parallel, Eq).requiring(
-            (c(source, i), c(target, Mor)),
-            (p(
-                c(compose, p(i, Mor).where(th.req(0))),
-                c(compose, p(j, Mor).where(t(
-                    c(th.proj(0), th.req(Parallel, 0)),
-                    th.req(0),
-                ))),
-            ), eq),
-        )
+    equalizer: MetaMor
 
-        Fork = self.Fork
-        th.mor(
-            'equalizer',
-            Parallel,
-            c(Parallel, Fork),
-        )
+    EqualizerMor: MetaObj
 
-        equalizer = self.equalizer
-        self.meqp = c(Mor, equalizer, Parallel)
-        meqp = self.meqp
-        self.EqualizerMor = th.product(Mor, Fork, Eq).requiring(
-            (c(source, Mor), c(source, Mor, Fork)),
-            (c(target, Mor), c(source, meqp)),
-            (p(c(
-                compose,
-                p(meqp, Mor).where(th.req(1)),
-            ), c(Mor, Fork)), eq)
+    equalizer_pairing: MetaMor
+    equalizer_pairing_unique: MetaMor
+
+    ForkEq: MetaObj
+    equalizer_pairing_eq: MetaMor
+
+    @classmethod
+    def from_ctx(cls, ctx: Context[Self]):
+        return cls(
+            C=_ot(ctx.sub_refs['C'], CartTheory),
+            Obj=ctx.obj_refs['Obj'],
+            Mor=ctx.obj_refs['Mor'],
+            Eq=ctx.obj_refs['Eq'],
+            eq=ctx.mor_refs['eq'],
+            source=ctx.mor_refs['source'],
+            target=ctx.mor_refs['target'],
+            compose=ctx.mor_refs['compose'],
+            Parallel=ctx.obj_refs['Parallel'],
+            Fork=ctx.obj_refs['Fork'],
+            equalizer=ctx.mor_refs['equalizer'],
+            EqualizerMor=ctx.obj_refs['EqualizerMor'],
+            equalizer_pairing=ctx.mor_refs['equalizer_pairing'],
+            equalizer_pairing_unique=ctx.mor_refs['equalizer_pairing_unique'],
+            ForkEq=ctx.obj_refs['ForkEq'],
+            equalizer_pairing_eq=ctx.mor_refs['equalizer_pairing_eq'],
         )
 
-        EqualizerMor = self.EqualizerMor
-        th.mor(
-            'equalizer_pairing',
-            Fork,
-            c(Fork, EqualizerMor),
+def Lex(stub: _u[LexStub]):
+    ctx = LexContext(LexTheory)
+    prim = _o.prim(stub)
+    c = ctx.c
+    t = ctx.t
+    p = ctx.pair
+    prod = ctx.prod
+    req = ctx.req
+    proj = ctx.proj
+    i = ctx.id
+    l = ctx.l
+    imp = ctx.imp
+    ix = ctx.ix
+
+    C = ctx.sub('C', Cart(prim.C))
+    _ = ctx.define('Obj', C.Obj)
+    Mor = ctx.define('Mor', C.Mor)
+    Eq = ctx.define('Eq', C.Eq)
+    eq = ctx.define('eq', C.eq)
+    source = ctx.define('source', C.source)
+    target = ctx.define('target', C.target)
+    compose = ctx.define('compose', C.compose)
+
+    i_, j = (proj(n) for n in 'ij')
+    Parallel = ctx.define('Parallel', req(
+        prod(('i', Mor), ('j', Mor)),
+        (
+            c(p(source, target), i_),
+            c(p(source, target), j),
         )
-        equalizer_pairing = self.equalizer_pairing
-        th.mor(
-            'equalizer_pairing_unique',
-            c(p(c(Mor, equalizer_pairing), Mor), EqualizerMor),
+    ))
+    p_, fe, mor, eq_ = (proj(n) for n in ('p', 'fe', 'mor', 'eq'))
+    Fork0 = ctx.define('Fork', req(
+        prod(('p', Mor), ('', Parallel)),
+        (c(source, i_), c(target, p_)),
+    ))
+    ctx.eq(t(
+        c(source, j, Fork0), c(source, i_),
+        c(target, p_),
+    ))
+    Fork = ctx.define('Fork', req(
+        prod(('', Fork0), ('fe', Eq)),
+        (p(
+            c(ix(compose), p(i, p_)),
+            c(ix(compose), p(j, p_)),
+        ), c(eq, fe)),
+    ))
+
+    equalizer, _equalizer_hat = ctx.mor('equalizer', prim.equalizer, (
+        Parallel, c(Parallel, Fork),
+    ))
+    _equalizer_hat(prim.equalizer_hat)
+
+    meqp = c(p_, equalizer)
+    EqualizerMor = ctx.define('EqualizerMor', ctx.req(
+        prod(('mor', Mor), ('', Fork), ('eq', Eq)),
+        (c(source, mor), c(source, p)),
+        (c(target, mor), c(source, meqp)),
+        (
+            p(c(ix(compose), p(meqp, mor)), p_),
+            c(eq, eq_),
+        ),
+    ))
+
+    equalizer_pairing, _equalizer_pairing_hat = ctx.mor(
+        'equalizer_pairing', prim.equalizer_pairing,
+        (
+            Fork, c(Fork, EqualizerMor),
+        ),
+    )
+    _equalizer_pairing_hat(prim.equalizer_pairing_hat)
+
+    equalizer_pairing_unique, _equalizer_pairing_unique_hat = ctx.mor(
+        'equalizer_pairing_unique', prim.equalizer_pairing_unique,
+        (
+            EqualizerMor, Eq,
+            p(c(mor, equalizer_pairing), mor),
             eq,
+        ),
+    )
+
+    x, y, c_, d, e = (proj(n) for n in 'xycde')
+    ForkEq = ctx.define('ForkEq', req(prod(
+        ('', l(Fork, ('x', 'i', 'j', 'c'))),
+        ('', l(Fork, ('y', 'i', 'j', 'd'))),
+        ('e', Eq),
+    ), (
+        p(x, y),
+        c(eq, e),
+    )))
+
+    em_mor, em_eq = (proj(n) for n in ('em_mor', 'em_eq'))
+    emy = imp(
+        ('', l(c(ix(equalizer_pairing), p(x, i, j, c_)), ('em_mor', '', '', '', '', 'em_eq'))),
+        ('', p(
+            ('mor', em_mor), ('p', y), ('i', i), ('j', j), ('fe', d),
+            ('eq', c(ix(C.C.S.S.P.trans), p(e, em_eq))),
+        ))
+    )
+
+    _, _equalizer_pairing_eq_hat = ctx.mor(
+        'equalizer_pairing_eq',
+        c(C.C.S.S.sym, equalizer_pairing_unique, emy),
+        (
+            ForkEq, Eq,
+            p(
+                c(mor, equalizer_pairing, p(x, i, j, c_)),
+                c(mor, equalizer_pairing, p(y, i, j, d)),
+            ),
+            eq
         )
+    )
+
+    _equalizer_pairing_eq_hat(c(
+        t(
+            c(
+                p(
+                    t(c(C.C.S.source, C.C.S.S.sym), C.C.S.target),
+                    t(c(C.C.S.target, C.C.S.S.sym), C.C.S.source),
+                ),
+                equalizer_pairing_unique,
+            ),
+            c(
+                p(C.C.S.target, C.C.S.source),
+                equalizer_pairing_unique,
+            ),
+            mor,
+        ),
+        emy,
+        ForkEq,
+    ))
+
+    return ctx

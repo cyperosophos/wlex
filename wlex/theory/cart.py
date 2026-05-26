@@ -1,260 +1,223 @@
-from ..ambient import Obj as MObj, Mor as MMor
-from .category import Category
+# pylint: disable=C0103, R0902, C0115, C0114
+from dataclasses import dataclass
+from typing import Self
 
-class Cart:
-    C: Category
-    Obj: MObj
-    Mor: MObj
-    Eq: MObj
-    eq: MMor
-    source: MMor
-    target: MMor
-    compose: MMor
-    terminal: MMor
-    TerminalMor: MObj
-    terminal_mor: MMor
-    terminal_mor_unique: MMor
+from wlex.ambient.cells import (
+    Obj as MetaObj, Mor as MetaMor, MorStub, EqStub,
+)
+from wlex.ambient.category import (
+    Context, Theory, Once as _o, OnceStub as _s, OnceUpdate as _u,
+    of_type as _ot,
+)
+from wlex.ambient.lex import LexContext
 
-    Span: MObj
+from .category import (
+    CategoryStub, CategoryTheory, Category,
+)
 
-    product: MMor
-    pt: MMor
-    ProductMor: MObj
+@dataclass(frozen=True)
+class CartStub:
+    C: _s[CategoryStub]
 
-    pairing: MMor
-    pairing_unique: MMor
+    terminal: _o[MorStub]
+    terminal_mor: _o[MorStub]
+    terminal_mor_hat: _o[EqStub]
+    terminal_mor_unique: _o[MorStub]
+    terminal_mor_unique_hat: _o[EqStub]
+    product: _o[MorStub]
+    product_hat: _o[EqStub]
+    pairing: _o[MorStub]
+    pairing_hat: _o[EqStub]
+    pairing_unique: _o[MorStub]
+    pairing_unique_hat: _o[EqStub]
 
-    SpanEq: MObj
-    pairing_eq: MMor
+@dataclass(frozen=True)
+class CartTheory(Theory):
+    C: CategoryTheory
+    Obj: MetaObj
+    Mor: MetaObj
+    Eq: MetaObj
+    eq: MetaMor
+    source: MetaMor
+    target: MetaMor
+    compose: MetaMor
+    terminal: MetaMor
+    TerminalMor: MetaObj
+    terminal_mor: MetaMor
+    terminal_mor_unique: MetaMor
 
-    def __init__(self, ambient):
-        th = ambient.lex(self)
-        c = th.compose
-        t = th.trans
-        p = th.pair
-        th.sub('C', Category)
-        C = self.C
-        self.Obj = C.Obj
-        self.Mor = C.Mor
-        self.Eq = C.Eq
-        self.eq = C.eq
-        self.source = C.source
-        self.target = C.target
-        self.compose = C.compose
-        Obj = self.Obj
-        th.el('terminal', Obj)
-        Mor = self.Mor
-        target = self.target
-        terminal = self.terminal
-        self.TerminalMor = th.product(Mor).requiring(
-            (target, terminal),
+    Span: MetaObj
+    product: MetaMor
+    ProductMor: MetaObj
+
+    pairing: MetaMor
+    pairing_unique: MetaMor
+
+    SpanEq: MetaObj
+    pairing_eq: MetaMor
+
+    @classmethod
+    def from_ctx(cls, ctx: Context[Self]):
+        return cls(
+            C=_ot(ctx.sub_refs['C'], CategoryTheory),
+            Obj=ctx.obj_refs['Obj'],
+            Mor=ctx.obj_refs['Mor'],
+            Eq=ctx.obj_refs['Eq'],
+            eq=ctx.mor_refs['Mor'],
+            source=ctx.mor_refs['source'],
+            target=ctx.mor_refs['target'],
+            compose=ctx.mor_refs['compose'],
+            terminal=ctx.mor_refs['terminal'],
+            TerminalMor=ctx.obj_refs['TerminalMor'],
+            terminal_mor=ctx.mor_refs['terminal_mor'],
+            terminal_mor_unique=ctx.mor_refs['terminal_mor_unique'],
+            Span=ctx.obj_refs['Span'],
+            product=ctx.mor_refs['product'],
+            ProductMor=ctx.obj_refs['ProductMor'],
+            pairing=ctx.mor_refs['pairing'],
+            pairing_unique=ctx.mor_refs['pairing_unique'],
+            SpanEq=ctx.obj_refs['SpanEq'],
+            pairing_eq=ctx.mor_refs['pairing_eq']
         )
-        Obj = self.Obj
-        source = self.source
-        TerminalMor = self.TerminalMor
-        th.mor(
-            'terminal_mor',
-            Obj,
-            c(source, TerminalMor),
-        )
-        terminal_mor = self.terminal_mor
-        eq = self.eq
-        th.mor(
-            'terminal_mor_unique',
-            c(p(c(Mor, c(terminal_mor, source)), Mor), TerminalMor),
+
+def Cart(stub: _u[CartStub]):
+    ctx = LexContext(CartTheory)
+    prim = _o.prim(stub)
+    c = ctx.c
+    t = ctx.t
+    p = ctx.pair
+    prod = ctx.prod
+    req = ctx.req
+    proj = ctx.proj
+    i = ctx.id
+    l = ctx.l
+    imp = ctx.imp
+    ix = ctx.ix
+
+    C = ctx.sub('C', Category(prim.C))
+    Obj = ctx.define('Obj', C.Obj)
+    Mor = ctx.define('Mor', C.Mor)
+    Eq = ctx.define('Eq', C.Eq)
+    eq = ctx.define('eq', C.eq)
+    source = ctx.define('source', C.source)
+    target = ctx.define('target', C.target)
+    compose = ctx.define('compose', C.compose)
+    terminal = ctx.el('terminal', prim.terminal, Obj)
+    TerminalMor = ctx.define('TerminalMor', req(Mor, (
+        target,
+        c(terminal, ctx.tm),
+    )))
+    terminal_mor, _terminal_mor_hat = ctx.mor('terminal_mor', prim.terminal_mor, (
+        Obj, c(source, TerminalMor),
+    ))
+    _terminal_mor_hat(prim.terminal_mor_hat)
+    _, _terminal_mor_unique_hat = ctx.mor('terminal_mor_unique', prim.terminal_mor_unique, (
+        TerminalMor, Eq,
+        p(c(Mor, terminal_mor, source), Mor),
+        eq,
+    ))
+    _terminal_mor_unique_hat(prim.terminal_mor_unique_hat)
+    p_, q = (proj(n) for n in 'pq')
+    Span = req(prod(('p', Mor), ('q', Mor)), (
+        c(source, p_),
+        c(source, q),
+    ))
+    product, _product_hat = ctx.mor('product', prim.product, (
+        prod(('x', Obj), ('y', Obj)), Span,
+        i, p(c(target, p_), c(target, q)),
+    ))
+    _product_hat(prim.product_hat)
+    pt = c(ix(product), p(c(target, p_), c(target, q)), Span)
+    p_eq, q_eq, mor = (proj(n) for n in ('p_eq', 'q_eq', 'mor'))
+    # `source @ $mor = source @ $p` is implied by the requirement.
+    # `target @ $mor = source @ $p @ pt` is a requirement of the first
+    # requirement.
+    ProductMorP = req(prod(
+        ('mor', Mor), ('p', Mor),
+        ('p_eq', Eq),
+    ), (
+        p(c(ix(compose), p(c(p_, pt), mor)), p_),
+        c(eq, p_eq),
+    ))
+    ctx.eq(t(
+        c(target, mor), c(source, p_, pt),
+        c(t(c(source, p_, Span), c(source, q)), pt),
+    ))
+    # TODO: Rewrite private/cart.py based on this approach of
+    # summarized requirements. For example, instead of checking the
+    # superfluous Composable requirements use the actual public compose
+    # function, which handles the type-checking.
+    # TODO: Is there a problem with not using labels in `private`, since
+    # cart obj uses labels for elements (dict instead of tuple)?
+    ProductMor = ctx.define('ProductMor', req(prod(
+        ('', ProductMorP), ('', Span),
+        ('q_eq', Eq),
+    ), (
+        p(c(ix(compose), p(c(q, pt), mor)), q),
+        c(eq, q_eq),
+    )))
+
+    pairing, _pairing_hat = ctx.mor('pairing', prim.pairing, (
+        Span, c(Span, ProductMor),
+    ))
+    _pairing_hat(prim.pairing_hat)
+    pairing_unique, _pairing_unique_hat = ctx.mor('pairing_unique', prim.pairing_unique, (
+        ProductMor, Eq,
+        p(c(mor, pairing), mor),
+        eq,
+    ))
+    _pairing_unique_hat(prim.pairing_unique_hat)
+
+    x, y = (ctx.proj(n) for n in 'xy')
+    SpanEq = ctx.define('SpanEq', req(prod(
+        ('x', Span), ('y', Span),
+        ('p_eq', Eq), ('q_eq', Eq),
+    ), (
+        p(c(p_, x), c(p_, y)),
+        c(eq, p_eq),
+    ), (
+        p(c(q, x), c(q, y)),
+        c(eq, q_eq),
+    )))
+
+    pm_mor, pm_p_eq, pm_q_eq = (proj(n) for n in ('pm_mor', 'pm_p_eq', 'pm_q_eq'))
+    # Notice that relabeling does not preserve equivalence, so it must never be implicit.
+    pmy = imp(
+        ('', l(c(pairing, x), ('pm_mor', '', '', 'pm_p_eq', 'q_eq', 'pm_q_eq'))),
+        ('', p(
+            ('mor', pm_mor), ('', y),
+            ('p_eq', c(ix(C.S.S.P.trans), p(p_eq, pm_p_eq))),
+            ('q_eq', c(ix(C.S.S.P.trans), p(q_eq, pm_q_eq))),
+        )),
+    )
+
+    _, _pairing_eq_hat = ctx.mor(
+        'pairing_eq',
+        c(C.S.S.sym, pairing_unique, pmy),
+        (
+            SpanEq, Eq,
+            p(c(mor, pairing, x), c(mor, pairing, y)),
             eq,
-        )
-
-        Span = th.product(p=Mor, q=Mor).requiring(
-            (source, ('p',), source, ('q',)),
-        )
-
-        p_, q = (th.proj(n) for n in 'pq')
-        th.mor(
-            'product',
-            th.product(x=Obj, y=Obj),
-            c(p(c(target, p_), c(target, q)), Span),
-        )
-        product = self.product
-        # TODO: Span is not needed below and elsewhere.
-        self.pt = c(product, p(c(target, p_), c(target, q)), Span)
-        pt = self.pt
-        Eq = self.Eq
-        compose = self.compose
-        p_eq = th.proj('p_eq')
-        q_eq = th.proj('q_eq')
-        self.ProductMor = th.product(Mor, Span, p_eq=Eq, q_eq=Eq).requiring(
-            (c(source, Mor), c(source, p_, Span)),
-            (c(target, Mor), c(source, p_, pt)),
-            (
-                # TODO: th.req(1): Obj -> Eq in `where` induces a callable Obj -> Mor
-                # (transformation). The Obj arg is the the `self` arg of requiring
-                # along with all previous requirements. This has to be taken into
-                # account when flattening during Subobject instantiation.
-                p(c(compose, p(c(p_, pt), Mor).where(th.req(1))), p_),
-                c(eq, p_eq),
-            ),
-            (
-                p(c(compose, p(c(q, pt), Mor).where(
-                    # !1 & Span!0
-                    t(th.req(1), th.req(Span, 0)),
-                )), q),
-                c(eq, q_eq),
-            ),
-        )
-
-        ProductMor = self.ProductMor
-        th.mor(
-            'pairing',
-            Span,
-            c(Span, ProductMor),
-        )
-        pairing = self.pairing
-        th.mor(
-            'pairing_unique',
-            c(p(c(Mor, pairing), Mor), ProductMor),
-            eq,
-        )
-
-        # !0 is short for $0 @ !<prod>
-        x, y = (th.proj(n) for n in 'xy')
-        self.SpanEq = self.product(
-            x=Span, y=Span,
-            p_eq=Eq, q_eq=Eq,
-        ).requiring(
-            (c(source, p_, x), c(source, p_, y)),
-            (c(target, p_, x), c(target, p_, y)),
-            (c(target, q, x), c(target, q, y)),
-            (p(c(p_, x), c(p_, y)), c(eq, p_eq)),
-            (p(c(q, x), c(q, y)), c(eq, q_eq)),
-        )
-
-        pairing_unique = self.pairing_unique
-        SpanEq = self.SpanEq
-        pmy = p(
-            Mor, y,
-            c(C.S.S.P.trans, p(
-                c(p_eq, SpanEq),
-                c(p_eq, ProductMor),
-            ).where(
-                # ($0 @ SpanEq!3)
-                # & ($p @ ^pairing @ $x)
-                # & ($1 @ ProductMor!2 @ pairing @ $x)
-                t(
-                    c(th.proj(0), th.req(SpanEq, 3)),
-                    c(p_, pairing.hat, x),
-                    c(th.proj(1), th.req(ProductMor, 2), pairing, x),
-                ),
-            )),
-            c(C.S.S.P.trans, p(
-                c(q_eq, SpanEq),
-                c(q_eq, ProductMor),
-            ).where(
-                t(
-                    c(th.proj(0), th.req(SpanEq, 4)),
-                    c(q, pairing.hat, x),
-                    c(th.proj(1), th.req(ProductMor, 3), pairing, x),
-                ),
-            )),
-        ).where(
-            # Notice that the requirements take the whole composition in the source and target
-            # (unless skipped as in the case of $y @ SpanEq, etc.)
-            # Notice that equality pairing does not support `where` since the source belonging to
-            # the equalizer makes the target also belong.
-            # SpanEq!0 & (source @ $p @ ^pairing @ $x) & (ProductMor!0 @ pairing @ $x)
-            t(th.req(SpanEq, 0), c(source, p, pairing.hat, x), c(th.req(ProductMor, 0), pairing, x)),
-            # (source @ $p @ product @ (SpanEq!1, SpanEq!2))
-            # & (source @ $p @ product @ (target @ $p, target @ $q) @ ^pairing @ x)
-            # & (ProductMor!1 @ pairing @ $x)
-            t(
-                c(source, p_, product, p(th.req(SpanEq, 1), th.req(SpanEq, 2))),
-                c(source, p_, product, p(c(target, p_), c(target, q)), pairing.hat, x),
-                c(th.req(ProductMor, 1), pairing, x),
-            ),
-            # S.source:
-            # ($0 @ ^trans @ (p_eq @ SpanEq, p_eq @ ProductMor) @ pairing @ $x)
-            # & ($0 @ ProductMor!2 @ pairing @ $x)
-            # & (compose @ ($p @ product @ (target @ $p, target @ $q) @ ^pairing, Mor @ pairing) @ $x)
-            # & (compose @ ($p @ product @ (SpanEq!1, SpanEq!2), Mor @ pairing @ $x))
-            # S.target:
-            # $1 @ ^trans @ pairing @ $x
-            p(
-                t(
-                    c(th.proj(0), C.S.S.P.trans.hat, p(
-                        c(p_eq, SpanEq),
-                        c(p_eq, ProductMor),
-                    ), pairing, x),
-                    c(th.proj(0), th.req(ProductMor, 2), pairing, x),
-                    c(
-                        compose,
-                        p(
-                            c(p_, product, p(c(target, p_), c(target, q)), pairing.hat),
-                            c(Mor, pairing),
-                        ),
-                        x,
-                    ),
-                    c(
-                        compose,
-                        p(
-                            c(p_, product, p(th.req(SpanEq, 1), th.req(SpanEq, 2))),
-                            c(Mor, pairing, x),
-                        )
-                    )
-                ),
-                c(th.proj(1), C.S.S.P.trans.hat, p(
-                    c(p_eq, SpanEq),
-                    c(p_eq, ProductMor),
-                ), pairing, x),
-            ),
-            p(
-                t(
-                    c(th.proj(0), C.S.S.P.trans.hat, p(
-                        c(q_eq, SpanEq),
-                        c(q_eq, ProductMor),
-                    ), pairing, x),
-                    c(th.proj(0), th.req(ProductMor, 3), pairing, x),
-                    c(
-                        compose,
-                        p(
-                            c(q, product, p(c(target, p_), c(target, q)), pairing.hat),
-                            c(Mor, pairing),
-                        ),
-                        x,
-                    ),
-                    c(
-                        compose,
-                        p(
-                            c(q, product, p(th.req(SpanEq, 1), th.req(SpanEq, 2))),
-                            c(Mor, pairing, x),
-                        )
-                    )
-                ),
-                c(th.proj(1), C.S.S.P.trans.hat, p(
-                    c(q_eq, SpanEq),
-                    c(q_eq, ProductMor),
-                ), pairing, x),
-            ),
-        )
-        pairing_eq = c(
-            C.S.S.sym,
-            pairing_unique,
-            pmy,
-            pairing,
-            x,
-        )
-        th.mor(
-            'pairing_eq',
-            c(p(c(Mor, pairing, x), c(Mor, pairing, y)), SpanEq),
-            eq,
-            pairing_eq,
-            # (($1 @ ^pairing_unique) & (^sym @ pairing_unique)) @ pmy @ pairing @ x
+        ),
+    )
+    # Implicit application of p_eq for mor @ pmy = mor @ pairing @ x
+    _pairing_eq_hat(c(
+        t(
             c(
-                t(
-                    c(th.proj(1), pairing_unique.hat),
-                    c(C.S.S.sym.hat, pairing_unique)
+                p(
+                    t(c(C.S.source, C.S.S.sym), C.S.target),
+                    t(c(C.S.target, C.S.S.sym), C.S.source),
                 ),
-                pmy, pairing, x,
+                pairing_unique,
             ),
-        )
+            c(
+                p(C.S.target, C.S.source),
+                pairing_unique,
+            ),
+            mor,
+        ),
+        pmy,
+        SpanEq, # TODO: Check that taking out this arg will produce an error (due to pmy being a transformation).
+    ))
 
-
+    return ctx
