@@ -188,19 +188,19 @@ def Lex(stub: _u[LexStub]):
         t(
             c(
                 p(
-                    t(c(C.S.source, C.S.S.sym), C.S.target),
-                    t(c(C.S.target, C.S.S.sym), C.S.source),
+                    t(c(C.C.S.source, C.C.S.S.sym), C.C.S.target),
+                    t(c(C.C.S.target, C.C.S.S.sym), C.C.S.source),
                 ),
-                pairing_unique,
+                equalizer_pairing_unique,
             ),
             c(
-                p(C.S.target, C.S.source),
-                pairing_unique,
+                p(C.C.S.target, C.C.S.source),
+                equalizer_pairing_unique,
             ),
             mor,
         ),
-        pmy,
-        SpanEq, # TODO: Check that taking out this arg will produce an error (due to pmy being a transformation).
+        emy,
+        ForkEq,
     ))
 
     return ctx
