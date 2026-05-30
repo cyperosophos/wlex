@@ -1,5 +1,5 @@
 """High level interface for cartesian ambient"""
-from collections.abc import Sequence, Iterator
+from collections.abc import Sequence, Iterator, Iterable
 from typing import overload, Callable, TypeGuard, override
 from itertools import chain, permutations
 
@@ -8,6 +8,41 @@ from . import category
 from .category import EqLike, MorLike, Transformation, reduce, UnprovenEq, Once, Theory
 from .public import cart as public
 from .cells.cart import Product, ProductMor
+
+def _relabel[T](
+    obj: Obj,
+    relabeling: Sequence[tuple[str | int, str | int]] | Sequence[str | int] | str | int,
+    with_label: Callable[[Product, str | int], T],
+    set_label: Callable[[Obj, str | int], T],
+    with_labels: Callable[[Product, Iterable[tuple[str | int, str | int]]], T],
+) -> T:
+    if isinstance(relabeling, (str, int)):
+        if isinstance(obj.sup, Product):
+            return with_label(obj.sup, relabeling)
+
+        raise ValueError("Expects product")
+
+    if _all_tuple_label(relabeling):
+        if isinstance(obj.sup, Product):
+            for label, _ in relabeling:
+                if label not in obj.sup.components:
+                    raise ValueError(
+                        f"Label {repr(label)} does not correspond to any "
+                        "component.",
+                    )
+
+            return with_labels(obj.sup, relabeling)
+
+        raise ValueError("Expects product")
+
+    assert _all_label(relabeling)
+    if not isinstance(obj.sup, Product):
+        if len(relabeling) == 1:
+            return set_label(obj, relabeling[0])
+
+        raise ValueError("Length must be 1.")
+
+    return with_labels(obj.sup, obj.sequence_relabeling(relabeling))
 
 class CartContext[T: Theory](category.Context[T]):
     """Handles cells of a theory with ambient cart"""
@@ -72,76 +107,46 @@ class CartContext[T: Theory](category.Context[T]):
         self, obj: Obj,
         relabeling: Sequence[tuple[str | int, str | int]] | Sequence[str | int] | str | int,
     ):
-        if isinstance(relabeling, (str, int)):
-            if isinstance(obj.sup, Product):
-                return (relabeling,)
+        def with_label(_: Product, label: str | int):
+            return (label,)
 
-            return ()
+        def with_labels(o: Product, labels: Iterable[tuple[str | int, str | int]]):
+            return list(o.inverse_relabeling(labels))
 
-        if _all_tuple_label(relabeling):
-            if isinstance(obj.sup, Product):
-                return list(obj.inverse_relabeling(relabeling))
+        def set_label(_: Obj, label: str | int):
+            return label
 
-            return ()
-
-        assert _all_label(relabeling)
-        if not isinstance(obj.sup, Product):
-            if len(relabeling) == 1:
-                return relabeling[0]
-
-            raise ValueError("Length must be 1.")
-
-        return list(obj.inverse_relabeling(obj.sequence_relabeling(relabeling)))
+        return _relabel(obj, relabeling, with_label, set_label, with_labels)
 
     def with_labels(
         self, obj: Obj,
         relabeling: Sequence[tuple[str | int, str | int]] | Sequence[str | int] | str | int,
     ):
-        if isinstance(relabeling, (str, int)):
-            if isinstance(obj.sup, Product):
-                return obj.proj(relabeling).target
+        def with_label(o: Product, label: str | int):
+            return self.copy_name(o, o.proj(label).target)
 
-            return obj.terminal()
+        def with_labels(o: Product, labels: Iterable[tuple[str | int, str | int]]):
+            return self.copy_name(o, o.with_labels(labels))
 
-        if _all_tuple_label(relabeling):
-            if isinstance(obj.sup, Product):
-                return obj.with_labels(relabeling)
+        def set_label(o: Obj, label: str | int):
+            return self.copy_name(o, self.prod((label, o)))
 
-            return obj.terminal()
-
-        assert _all_label(relabeling)
-        if not isinstance(obj.sup, Product):
-            if len(relabeling) == 1:
-                return self.prod((relabeling[0], obj))
-
-            raise ValueError("Length must be 1.")
-
-        return obj.with_labels(obj.sequence_relabeling(relabeling))
+        return _relabel(obj, relabeling, with_label, set_label, with_labels)
 
     def relabel(
         self, obj: Obj,
         relabeling: Sequence[tuple[str | int, str | int]] | Sequence[str | int] | str | int,
     ):
-        if isinstance(relabeling, (str, int)):
-            if isinstance(obj.sup, Product):
-                return obj.proj(relabeling)
+        def with_label(o: Product, label: str | int):
+            return self.copy_name_to_target(o, o.proj(label))
 
-            return obj.terminal_mor()
+        def with_labels(o: Product, labels: Iterable[tuple[str | int, str | int]]):
+            return self.copy_name_to_target(o, o.relabel(labels))
 
-        if _all_tuple_label(relabeling):
-            if isinstance(obj.sup, Product):
-                return obj.relabel(relabeling)
+        def set_label(o: Obj, label: str | int):
+            return self.copy_name_to_target(o, self.pair((label, o)))
 
-            return obj.terminal_mor()
-
-        assert _all_label(relabeling)
-        if not isinstance(obj.sup, Product):
-            if len(relabeling) == 1:
-                return self.pair((relabeling[0], obj))
-
-            raise ValueError("Length must be 1.")
-
-        return obj.relabel(obj.sequence_relabeling(relabeling))
+        return _relabel(obj, relabeling, with_label, set_label, with_labels)
 
     @overload
     def l(
@@ -305,10 +310,17 @@ class CartContext[T: Theory](category.Context[T]):
             raise
 
     @staticmethod
-    def proj(name: str | int):
+    def proj(label: str | int):
         """Create projection transformation from name"""
         def _proj(source: Obj):
-            return source.proj(name)
+            mor = source.proj(label)
+            if mor.target.identical(mor.target.terminal()):
+                raise ValueError(
+                    "Invalid projection: label does not correspond to a "
+                    "component.",
+                )
+
+            return mor
 
         return _proj
 
@@ -450,7 +462,7 @@ class CartContext[T: Theory](category.Context[T]):
 
         assert isinstance(res.ssource, ProductMor)
         assert isinstance(res.starget, ProductMor)
-        eq = Eq(
+        eq = res.ssource.source.postulate(
             res.ssource.idx_to_labels(labels),
             res.starget.idx_to_labels(labels),
         )
@@ -554,7 +566,7 @@ def _eq_pairing(comp: category.Composer[Eq], factors: Iterator[Eq]):
     args = list(factors)
     res = reduce(comp, iter(args))
     source = res.ssource.source
-    return Eq(
+    return source.postulate(
         source.vproduct_mor(_unlabeled(f.ssource for f in args)),
         source.vproduct_mor(_unlabeled(f.starget for f in args)),
     )

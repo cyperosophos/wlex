@@ -3,9 +3,10 @@ from typing import Self, TypeGuard, override
 from collections.abc import Sequence, Mapping, Iterable
 from abc import ABCMeta
 
-from ..cells import Obj, Mor, Eq, PrimMor
+from ..cells import Obj, Mor, PrimMor, TypeObj, PrimEv
 from .category import (
     CategoryObj, CategoryMor, CategoryEq, CategoryPrimEq, Composition,
+    CategoryAxiom,
 )
 
 class CartObj(CategoryObj, metaclass=ABCMeta):
@@ -17,6 +18,7 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
 
     @classmethod
     def init_cls(cls):
+        cls._eq_cls = CartEq
         cls._composition_cls = CartComposition
         cls._product_cls = Product
         cls._product_mor_cls = ProductMor
@@ -55,27 +57,41 @@ class CartObj(CategoryObj, metaclass=ABCMeta):
             if l == '' and isinstance(c.target, Product):
                 return c
 
-        return self._product_mor_cls(self, params)
+        res = self._product_mor_cls(self, params)
+        if res.is_proj() and self.identical(res.target):
+            return self.identity()
+
+        return res
+
+    # @override
+    # def join(self, obj: Obj):
+    #     # In the case of product this is the largest product that appears as the
+    #     # target of (pairing of) projections with the same labels from both
+    #     # objects. Notice that objects, treated as unlabeled single component
+    #     # products, are considered to coincide with the corresponding component
+    #     # in a product, even when this component is necessarily labeled, so that
+    #     # one morphism is the identity while the other is a projection with a
+    #     # label. This is a slight inconsistency. Also, if the object is a
+    #     # product it may also appear as several components. We try first finding
+    #     # it as a single component. `join` is commutative.
+    #     # Alternatively: avoid the inconsistency alltogether. Consider only
+    #     # (pairings of) projections and terminal morphisms. This makes more sense
+    #     # considering that an object can appear more than once as a component but
+    #     # with different labels.
+    #     if self.identical(obj):
+    #         return (self.identity(), obj.identity())
+
+    #     return (self.terminal_mor(), obj.terminal_mor())
 
     @override
-    def join(self, obj: Obj):
-        # In the case of product this is the largest product that appears as the
-        # target of (pairing of) projections with the same labels from both
-        # objects. Notice that objects, treated as unlabeled single component
-        # products, are considered to coincide with the corresponding component
-        # in a product, even when this component is necessarily labeled, so that
-        # one morphism is the identity while the other is a projection with a
-        # label. This is a slight inconsistency. Also, if the object is a
-        # product it may also appear as several components. We try first finding
-        # it as a single component. `join` is commutative.
-        # Alternatively: avoid the inconsistency alltogether. Consider only
-        # (pairings of) projections and terminal morphisms. This makes more sense
-        # considering that an object can appear more than once as a component but
-        # with different labels.
-        if self.identical(obj):
-            return (self.identity(), obj.identity())
+    def trim_join(self, obj: Obj) -> Obj:
+        if self.sup.identical(obj.sup):
+            return self.sup
 
-        return (self.terminal_mor(), obj.terminal_mor())
+        return self.terminal()
+
+class CartTypeObj(TypeObj, CartObj):
+    __slots__ = ()
 
 class CartMor(CategoryMor, metaclass=ABCMeta):
     """Models object `cart.Mor`"""
@@ -99,16 +115,23 @@ class CartMor(CategoryMor, metaclass=ABCMeta):
     @override
     def pairing_unique(self, p: Mor, q: Mor):
         mor = self
-        eq = Eq(p.pairing(q), mor)
+        eq = self.source.postulate(p.pairing(q), mor)
         eq.proven = True
         return eq
 
-class CartPrimMor(PrimMor, CartMor, metaclass=ABCMeta):
+class CartPrimMor(PrimMor, CartMor):
     """Models object `cart.Mor` as primitive"""
     __slots__ = ()
 
+class CartPrimEv(PrimEv):
+    __slots__ = ()
+
+    def to_mor(self, source: Obj, target: Obj):
+        return CartPrimMor(source, target, self.func)
+
 CartEq = CategoryEq
 CartPrimEq = CategoryPrimEq
+CartAxiom = CategoryAxiom
 
 class ComponentMap[T](Mapping[str | int, T]):
     __slots__ = '_map', '_data', 'tup'
@@ -176,6 +199,12 @@ class ComponentMap[T](Mapping[str | int, T]):
 
         return len(self._data)
 
+    def __repr__(self):
+        if self._data is None:
+            return ', '.join(repr(c) for c in self.tup)
+
+        return ', '.join(f'{l} = {c}' for l, c in self.full_items())
+
 class Product(CartObj):
     """Models object corresponding to source of span `cart.product`"""
     __slots__ = ('components',)
@@ -198,41 +227,56 @@ class Product(CartObj):
     #     # along a projection (instead of lifting along an inclusion).
     #     return self._equalizer_mor_cls(mor, self)
 
+    # @override
+    # def join(self, obj: Obj):
+    #     if self.identical(obj):
+    #         return (self.identity(), obj.identity())
+
+    #     if not isinstance(obj, Product):
+    #         return (self.terminal_mor(), obj.terminal_mor())
+
+    #     data = self.components.data & obj.components.data
+    #     res = tuple(ProductMor(o, [
+    #         (l, o.proj(l))
+    #         for l, _ in data
+    #     ]) for o in (self, obj))
+    #     assert len(res) == 2
+    #     return res
+
     @override
-    def join(self, obj: Obj):
-        if self.identical(obj):
-            return (self.identity(), obj.identity())
+    def trim_join(self, obj: Obj) -> Obj:
+        if self.identical(obj.sup):
+            return self
 
-        if not isinstance(obj, Product):
-            return (self.terminal_mor(), obj.terminal_mor())
+        if not isinstance(obj.sup, Product):
+            return self.terminal()
 
-        data = self.components.data & obj.components.data
-        res = tuple(ProductMor(o, [
-            (l, o.proj(l))
-            for l, _ in data
-        ]) for o in (self, obj))
-        assert len(res) == 2
-        return res
+        data = self.components.data & obj.sup.components.data
+        return self.vproduct(list(data))
 
     def trim(self, obj: Obj):
-        # Includes weakening
-        res = super().trim(obj)
-        if res is not None:
-            return res
+        # Includes weakening, but not weakening unlabeled X from labeleded X x Y,
+        # as this would require an inconsistent treatment of the case Y := X.
+        # The ambiguity arises as well when trimming XxYx(XxY) to XxY. Hence,
+        # for simplicity, trims must preserve labels. Also, the legs of a
+        # trim_join must be trims.
+        # TODO: At the context level, support converting through single label relabeling, i.e. projection and single component pairing.
+        # Fail when there would be an ambiguity, including the ambiguity of trimming vs
+        # projecting in the case of product components which also appear as multiple components
+        # (flattened).
+        if self.identical(obj):
+            return self.identity()
 
         if not isinstance(obj, Product):
-            return None
+            raise ValueError("Can't trim to non product")
 
         components = self.components
         conversions: list[tuple[str | int, Mor]] = []
         for label, c in obj.components.items():
             if label not in components:
-                return None
+                raise ValueError("Can't trim to product with extra labels")
 
             conv = c.trim(components[label])
-            if conv is None:
-                return None
-
             conversions.append((label, conv))
 
         return self.vproduct_mor([
@@ -378,7 +422,7 @@ class Product(CartObj):
         # No type accepts None!
         return (
             _is_product_acceptable(x)
-            and len(self.components) != len(x)
+            and len(self.components) == len(x)
             and all(
                 l in x and c.accepts(_gi(x, l))
                 for l, c in self.components.items()
@@ -395,6 +439,9 @@ class Product(CartObj):
                 for l, c in self.components.items()
             )
         )
+
+    def __repr__(self):
+        return f'{type(self).__name__}({self.components})'
 
 def _insert_or_pad(dest: list[object], idx: int, v: object):
     while idx >= len(dest):
@@ -434,19 +481,23 @@ def _gi(x: tuple[object] | dict[object, object], key: str | int):
 
     return x.get(key)
 
+ProjPath = tuple[str | int, ...]
+
 class Projection(CartMor):
     "Models morphism corresponding to projection"
     __slots__ = ('path',)
-    path: tuple[str | int, ...]
+    path: ProjPath
 
     def __init__(
         self, source: Product, target: Obj,
-        path: tuple[str | int, ...],
+        path: ProjPath,
     ):
         self.path = path # polish order
         super().__init__(source, target)
 
     def exfit(self, source: Obj):
+        # `exfit` is to `proj` (and `trim`) what `fit` is to `incl`.
+
         # TODO: What about equalities (cf. LexContext._straighten_eqs)
         # No extend method needed.
         # This need not preserve target. It can "overextend", which results in
@@ -466,6 +517,14 @@ class Projection(CartMor):
         # no equalities to prove. This makes type-checking unnecessary.
         # TODO: Make sure labels are being taken into account.
         if source.identical(self.target):
+            # This seems somewhat inconsistent with the way `trim` works,
+            # because the morphism produced by `trim` always preserves labels.
+            # The result of `trim` is never a projection (but rather a pairing
+            # of projections), which would be the morphism along which the
+            # extension occurs here. The apparent inconsistency is justified by
+            # the fact that the extending morphism can only be `self` in this
+            # case, so there is no ambiguity the way there is when weakening
+            # X x X to one of its components.
             return source.identity()
 
         if not isinstance(source, Product):
@@ -476,6 +535,7 @@ class Projection(CartMor):
 
         # If `source` and `self.source` are identical then this will be the same
         # as `self`.
+        # TODO: Context level (ex)fit must preserve name!
         return self.from_path(source, self.path)
 
     @classmethod
@@ -522,6 +582,10 @@ class Projection(CartMor):
     def hint(self):
         return self.path, self.source
 
+    def __repr__(self):
+        name = self.name or f"{''.join(f'{n}$' for n in self.path)}: {self.target}"
+        return f'{type(self).__name__}({name})'
+
 # TODO: Does this work well with terminal morphisms?
 class ProductMor(CartMor):
     """Models object corresponding to `cart.ProductMor`"""
@@ -530,8 +594,32 @@ class ProductMor(CartMor):
     components: ComponentMap[Mor]
     inplace: bool
 
+    def is_proj(self, _prefix: list[str | int] | None = None) -> bool:
+        if _prefix is None:
+            _prefix = []
+
+        for label, component in self.components.full_items():
+            if label == '':
+                return False
+
+            if isinstance(component, ProductMor):
+                _prefix.append(label)
+                ip = component.is_proj(_prefix=_prefix)
+                _prefix.pop()
+
+                if not ip:
+                    return False
+            elif isinstance(component, Projection):
+                if component.path != (*_prefix, label):
+                    return False
+            else:
+                return False
+
+        return True
+
     def exfit(self, source: Obj):
         # Call `exfit` on each component. Cf. `component_compose`.
+        # TODO: Cf. trim
         return self.source.vproduct_mor([
             (label, component.exfit(source))
             for label, component in self.components.full_items()
@@ -698,6 +786,9 @@ class ProductMor(CartMor):
                 update(res, y)
 
         return res
+
+    def __repr__(self):
+        return f'{type(self).__name__}({self.components})'
 
 # TODO: Review this!
 class CartComposition(Composition, CartMor):

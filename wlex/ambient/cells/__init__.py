@@ -3,7 +3,6 @@ from collections.abc import Callable, Sequence, Collection, Iterator, Iterable
 from collections import defaultdict
 from abc import ABCMeta, abstractmethod
 from typing import Optional
-from enum import Enum
 
 class Error(Exception):
     """Base class for cell exceptions"""
@@ -157,9 +156,9 @@ class Defensive:
 
     def copy(self):
         """Create a copy of `self`"""
-        # No need to this when evaluating pairings, because the evaluation of
+        # No need to do this when evaluating pairings, because the evaluation of
         # the components occurs sequentially.
-        res = Defensive(self.value)
+        res = type(self)(self.value)
         res.stack = [*self.stack]
         return res
 
@@ -178,22 +177,35 @@ class Defensive:
         x.stack.append(mor)
         return x
 
+    def __repr__(self):
+        return f'{type(self).__name__}({self.value!r}, {self.stack})'
+
+def named[W: 'Obj | Mor'](name: str, cell: W) -> W:
+    cell.name = Name(name)
+    return cell
+
 class Name:
     __slots__ = 'parent', 'base'
     parent: Optional['Name']
     base: str
 
-    def __init__(self):
+    def __init__(self, base: str = ''):
         self.parent = None
-        self.base = ''
+        self.base = base
 
     def __iter__(self) -> Iterator[str]:
         yield self.base
-        if self.parent:
+        if self.parent is not None:
             yield from iter(self.parent)
 
     def __str__(self):
         return '.'.join(reversed(list(self)))
+
+    def __repr__(self):
+        return f'Name({self!s})'
+
+    def __bool__(self):
+        return self.parent is not None or bool(self.base)
 
 class Obj(metaclass=ABCMeta):
     """Base class for objects (0-cells)"""
@@ -204,13 +216,13 @@ class Obj(metaclass=ABCMeta):
     def __init__(self):
         self.name = Name()
 
-    def trim(self, obj: 'Obj') -> Optional['Mor']:
+    def trim(self, obj: 'Obj') -> 'Mor':
         """Gives morphism that converts `self` into `obj`"""
         # Inclusion conversions always make sense.
         if self.identical(obj):
             return self.identity()
 
-        return None
+        raise ValueError("Can't trim")
 
     @abstractmethod
     def accepts(self, x: object) -> bool:
@@ -252,20 +264,15 @@ class Obj(metaclass=ABCMeta):
         """
         return [
             eq for eq, public in self.eqs[self]
-            if public and eq.verify(x)
+            if public and not eq.verify(x)
         ]
 
     def require_eq(self, eq: 'Eq', public: bool):
         """Associate equality `eq` to `self`"""
         self.eqs[self].append((eq, public))
 
-    def __str__(self):
-        if hasattr(self, 'name'):
-            return '.'.join(self.name)
-        return NotImplemented
-
     def __repr__(self):
-        return f'Obj("{self!s}")'
+        return f'{type(self).__name__}({self.name!s})'
 
     def __eq__(self, x: object):
         return isinstance(x, Obj) and self.identical(x)
@@ -295,7 +302,6 @@ class Obj(metaclass=ABCMeta):
             or (bool(getattr(x, 'identity_priority', False)) and x.identical(self))
         )
 
-
     @property
     def sup(self):
         """Superobject, i.e. largest object containing `self`"""
@@ -304,6 +310,10 @@ class Obj(metaclass=ABCMeta):
     @property
     def requirements(self) -> frozenset[tuple['Mor', 'Mor']]:
         return frozenset()
+
+    @classmethod
+    def postulate(cls, ssource: 'Mor', starget: 'Mor') -> 'Eq':
+        raise TypeError("Requires CategoryObj")
 
     def identity(self) -> 'Mor':
         """Models morphism `category.identity`"""
@@ -322,12 +332,6 @@ class Obj(metaclass=ABCMeta):
             return mor
 
         raise ValueError("Can't lift")
-
-    # def extend(self, mor: 'Mor') -> 'Mor':
-    #     if self.identical(mor.target):
-    #         return mor
-
-    #     raise ValueError("Can't extend")
 
     # TODO: Why not Sequence['Mor']?
     @classmethod
@@ -413,8 +417,25 @@ class Obj(metaclass=ABCMeta):
     def subobject(self, requirements: Collection[tuple['Mor', 'Mor']],) -> 'Obj':
         raise TypeError("Requires LexObj")
 
-    def join(self, obj: 'Obj') -> tuple['Mor', 'Mor']:
+    def trim_join(self, obj: 'Obj') -> 'Obj':
         raise TypeError("Requires CartObj")
+
+    def incl_join(self, obj: 'Obj') -> 'Obj':
+        raise TypeError("Requires LexObj")
+
+class TypeObj(Obj):
+    __slots__ = ('typ',)
+    typ: type
+
+    def __init__(self, typ: type):
+        super().__init__()
+        self.typ = typ
+
+    def accepts(self, x: object):
+        return isinstance(x, self.typ)
+
+    def same(self, x: object, y: object):
+        return x == y
 
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms (1-cells)"""
@@ -422,16 +443,7 @@ class Mor(metaclass=ABCMeta):
     name: Name
     source: Obj
     target: Obj
-    #_hat: tuple['Mor', 'Mor']
     depth = 0 # Used in LazyComposition
-
-    # @property
-    # def hat(self):
-    #     """Hat equality associated to morphism"""
-    #     # This raises AttributeError in the case of morphisms lacking a hat
-    #     # equality.
-    #     hat_source, hat_target = self._hat
-    #     return Eq(hat_source, hat_target.compose(self))
 
     def expanded(self):
         """Underlying composition in the case of LazyComposition"""
@@ -443,10 +455,15 @@ class Mor(metaclass=ABCMeta):
 
     def public_ev(self, x: object):
         """Checks `x` against source before evaluation"""
+        if isinstance(x, Defensive):
+            v = x.value
+        else:
+            v = x
+
         source = self.source
 
-        if source.accepts(x):
-            failed = source.failed_public_eqs(x)
+        if source.accepts(v):
+            failed = source.failed_public_eqs(v)
 
             if failed:
                 raise SourceFailure("Unfulfilled equalities:", x, failed)
@@ -456,6 +473,7 @@ class Mor(metaclass=ABCMeta):
         raise SourceMismatch("Not accepted by source:", x)
 
     def __init__(self, source: Obj, target: Obj):
+        self.name = Name()
         self.source = source
         self.target = target
 
@@ -493,13 +511,8 @@ class Mor(metaclass=ABCMeta):
             or (bool(getattr(x, 'sameness_priority', False)) and x.same(self))
         )
 
-    def __str__(self):
-        if hasattr(self, 'name'):
-            return '.'.join(self.name)
-        return NotImplemented
-
     def __repr__(self):
-        return f'Mor("{self!s}: {self.source} -> {self.target}")'
+        return f'{type(self).__name__}({self.name!s}: {self.source} -> {self.target})'
 
     # def split(self) -> tuple['Mor', 'Mor']:
     #     """Separate comoposition into the first factors and last factor"""
@@ -527,15 +540,16 @@ class Mor(metaclass=ABCMeta):
 
         return source.terminal_mor()
 
-class PrimEv:
+class PrimEv(metaclass=ABCMeta):
     __slots__ = ('func',)
     func: Callable[[object], object]
 
     def __init__(self, func: Callable[[object], object]):
         self.func = func
 
-    def to_mor(self, source: Obj, target: Obj):
-        return PrimMor(source, target, self.func)
+    @abstractmethod
+    def to_mor(self, source: Obj, target: Obj) -> Mor:
+        pass
 
     def __hash__(self):
         return hash(self.func)
@@ -679,13 +693,8 @@ class Eq:
             and self.starget == proof.starget
         )
 
-    # def __str__(self):
-    #     # if hasattr(self, 'name'):
-    #     #     return '.'.join(self.name)
-    #     return NotImplemented
-
     def __repr__(self):
-        return f'Eq("{self!s}: {self.ssource} == {self.starget}")'
+        return f'{type(self).__name__}({self.ssource} == {self.starget})'
 
     def sym(self) -> 'Eq':
         """Models morphism `category.sym`"""
@@ -711,22 +720,26 @@ class Eq:
         """Models morphism `lex.equalizer_pairing_unique`"""
         raise TypeError("Requires LexEq")
 
-class Axiom(Enum):
-    PRIVATE = False
-    PUBLIC = True
+class Axiom(metaclass=ABCMeta):
+    __slots__ = ('public',)
+    public: bool
+
+    def __init__(self, public: bool):
+        self.public = public
+
+    @abstractmethod
+    def to_eq(self, ssource: Mor, starget: Mor) -> Eq:
+        pass
 
 class PrimEq(Eq):
     """Base of primitive equalities"""
     __slots__ = ()
 
-    def __init__(self, ssource: Mor, starget: Mor, public: bool | Axiom):
+    def __init__(self, ssource: Mor, starget: Mor, public: bool):
         # Trusting the target of a primitive morphism is analogous to not
         # providing a proof when assuming a primitive equality (especially a non
         # public one).
         super().__init__(ssource, starget)
-        if isinstance(public, Axiom):
-            public = public.value
-
         self.ssource.source.require_eq(self, public)
         self.proven = True
 

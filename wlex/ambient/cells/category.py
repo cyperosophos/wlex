@@ -3,17 +3,25 @@ from typing import override, Callable
 from abc import ABCMeta
 from collections.abc import Sequence
 
-from ..cells import Obj, Mor, PrimMor, Eq, PrimEq
+from ..cells import (
+    Obj, Mor, PrimMor, Eq, PrimEq, PrimEv, Axiom, TypeObj,
+)
 
 class CategoryObj(Obj, metaclass=ABCMeta):
     """Models object `category.Obj`"""
     __slots__ = ()
 
+    _eq_cls: type[Eq]
     _composition_cls: type['Composition']
 
     @classmethod
     def init_cls(cls):
+        cls._eq_cls = CategoryEq
         cls._composition_cls = Composition
+
+    @classmethod
+    def postulate(cls, ssource: Mor, starget: Mor):
+        return cls._eq_cls(ssource, starget)
 
     @override
     def identity(self):
@@ -24,13 +32,17 @@ class CategoryObj(Obj, metaclass=ABCMeta):
     def vcomposition(cls, *factors: Mor) -> Mor:
         return cls._composition_cls.simplified(factors)
 
+class CategoryTypeObj(TypeObj, CategoryObj):
+    # This works because TypeObj implements abstract methods.
+    __slots__ = ()
+
 class CategoryMor(Mor, metaclass=ABCMeta):
     """Models object `category.Mor`"""
     __slots__ = ()
 
     @override
     def ref(self):
-        eq = Eq(self, self)
+        eq = self.source.postulate(self, self)
         eq.proven = True
         return eq
 
@@ -42,9 +54,15 @@ class CategoryMor(Mor, metaclass=ABCMeta):
         f = self
         return LazyComposition(f, g, expand)
 
-class CategoryPrimMor(PrimMor, CategoryMor, metaclass=ABCMeta):
+class CategoryPrimMor(PrimMor, CategoryMor):
     """Models object `category.Mor` as primitive"""
     __slots__ = ()
+
+class CategoryPrimEv(PrimEv):
+    __slots__ = ()
+
+    def to_mor(self, source: Obj, target: Obj):
+        return CategoryPrimMor(source, target, self.func)
 
 class CategoryEq(Eq):
     """Models object `category.Eq`"""
@@ -52,7 +70,7 @@ class CategoryEq(Eq):
 
     @override
     def sym(self):
-        eq = Eq(self.starget, self.ssource)
+        eq = self.ssource.source.postulate(self.starget, self.ssource)
         eq.proven = True
         return eq
 
@@ -66,14 +84,14 @@ class CategoryEq(Eq):
         if g.ssource.same(g.starget):
             return f
 
-        eq = Eq(g.ssource, f.starget)
+        eq = self.ssource.source.postulate(g.ssource, f.starget)
         eq.proven = f.proven and g.proven
         return eq
 
     @override
     def compose_eq(self, e: Eq):
         d = self
-        eq = Eq(
+        eq = self.ssource.source.postulate(
             d.ssource.compose(e.ssource),
             d.starget.compose(e.starget),
         )
@@ -83,6 +101,12 @@ class CategoryEq(Eq):
 class CategoryPrimEq(PrimEq, CategoryEq):
     """Models object `category.Eq` as primitive"""
     __slots__ = ()
+
+class CategoryAxiom(Axiom):
+    __slots__ = ()
+
+    def to_eq(self, ssource: Mor, starget: Mor):
+        return CategoryPrimEq(ssource, starget, self.public)
 
 class LazyComposition(CategoryMor):
     """Models lazy composition"""
@@ -124,6 +148,9 @@ class LazyComposition(CategoryMor):
             x = x.expanded()
 
         return self.expanded().same(x)
+
+    def __repr__(self):
+        return f'{type(self).__name__}({self.expanded()})'
 
 class Composition(CategoryMor):
     """Models the result of `category.compose`"""
@@ -230,13 +257,8 @@ class Composition(CategoryMor):
             and self.source.identical(x.source)
         )
 
-    def __str__(self):
-        name = super().__str__()
-        if name is NotImplemented:
-            return f'({'@'.join(str(factor) for factor in self.factors)})'
-        return name
-
     def __repr__(self):
-        return f'`comp {self!s}`'
+        name = self.name or ' @ '.join(repr(factor) for factor in self.factors)
+        return f'{type(self).__name__}({name})'
 
 CategoryObj.init_cls()

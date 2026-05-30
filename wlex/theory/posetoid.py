@@ -141,7 +141,7 @@ def Setoid(stub: _u[SetoidStub]):
     p = ctx.pair
 
     P = ctx.sub('P', Posetoid(prim.P))
-    _ = ctx.define('El', P.Rel)
+    _ = ctx.define('Eq', P.Rel)
     source = ctx.define('source', P.source)
     target = ctx.define('target', P.target)
     _, _sym_hat = ctx.mor('sym', prim.sym, (
@@ -172,8 +172,8 @@ def Congruence(stub: _u[CongruenceStub]):
         req(
             prod(('d', Eq), ('e', Eq)),
             (c(eq, proj('d')), c(eq, proj('e'))),
-        ),
-        c(p(i, i), Eq),
+        ), Eq,
+        i, p(('d', i), ('e', i)),
     ))
     _unique_hat(prim.unique_hat)
 

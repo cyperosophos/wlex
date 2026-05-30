@@ -5,7 +5,7 @@ from typing import Any, Self, TypeGuard, TypeVar, overload #, NoReturn
 from itertools import chain
 import dataclasses
 
-from .cells import Obj, Mor, Eq, MorStub, EqStub, PrimEv, PrimEq, Axiom, Name
+from .cells import Obj, Mor, Eq, MorStub, EqStub, PrimEv, Axiom, Name
 from .cells.category import Composition
 from . import cells
 from .public import category as public
@@ -25,32 +25,35 @@ def check_signature(source: Obj, target: Obj, cell: Mor):
     if not target.identical(cell.target):
         raise cells.TargetUnfit("Wrong target", cell.target, target)
 
-def _source_fit_mor_like(source: Obj, cell: MorLike):
+def _source_trim_mor_like(source: Obj, cell: MorLike):
     if isinstance(cell, Callable):
         cell = cell(source)
 
     if isinstance(cell, Obj):
         cell = cell.identity()
 
-    sconv = source.trim(cell.source)
-    if not sconv:
+    # TODO: Is this the best place for trimming? Why not in straighten?
+    try:
+        sconv = source.trim(cell.source)
+    except ValueError as exc:
         raise cells.SourceUnfit(
-            "Can't convert for fitting source", source, cell.source,
-        )
+            "Can't trim source", source, cell.source,
+        ) from exc
 
     #return cell.compose(sconv)
     return cell, sconv
 
-def _source_fit_eq(source: Obj, cell: Eq):
-    sconv = source.trim(cell.ssource.source)
-    if not sconv:
+def _source_trim_eq(source: Obj, cell: Eq):
+    # TODO: Is this the best place for trimming? Why not in straighten?
+    try:
+        sconv = source.trim(cell.ssource.source)
+    except ValueError as exc:
         raise cells.SourceUnfit(
-            "Can't convert for fitting source", source, cell.ssource.source,
-        )
+            "Can't trim source", source, cell.ssource.source,
+        ) from exc
 
     #return cell.compose_eq(sconv.ref())
     return cell, sconv.ref()
-
 
 def _ssource_fit_eq(ssource: Mor, cell: Eq, prove: Prover):
     # TODO: This seems wrong. It be better to not do any "fitting" here of
@@ -195,11 +198,12 @@ OnceUpdate = tuple[OnceStub[S], Callable[[S], None]] | OnceStub[S]
 #         """Stub corresponds to theory"""
 #         return isinstance(stub, cls.Stub)
 
+@dataclasses.dataclass(frozen=True)
 class Theory(metaclass=ABCMeta):
-    name: Name
+    name: Name = dataclasses.field(default_factory=Name, kw_only=True)
 
-    @abstractmethod
     @classmethod
+    @abstractmethod
     def from_ctx(cls, ctx: 'Context[Any]') -> Self:
         """Creates theory from context"""
 
@@ -239,6 +243,16 @@ class Context[V: Theory]:
     # This isn't a problem as long as the accept method of backend.Obj is
     # isinstance(x, Obj), etc. Include only the actually publicly used cells of category.
     # The problem of using dataclass is that one ends up having to repeat all the function signatures.
+
+    @staticmethod
+    def copy_name[W: Obj | Mor](src: W, cell: W) -> W:
+        cell.name = src.name
+        return cell
+
+    @staticmethod
+    def copy_name_to_target(src: Obj, cell: Mor) -> Mor:
+        cell.target.name = src.name
+        return cell
 
     def __init__(self, theory_cls: type[V]): # TODO: forbid subclasses of V?
         #proven_eqs: set[tuple[Mor, Mor]] | None = None):
@@ -467,7 +481,7 @@ class Context[V: Theory]:
         if ssource.same(starget):
             return self.ref(ssource)
 
-        e = Eq(ssource, starget)
+        e = ssource.source.postulate(ssource, starget)
         e.proven = True
         if (ssource, starget) in self.proven_eqs:
             return e
@@ -556,7 +570,7 @@ class Context[V: Theory]:
         if not ssignature:
             if not cell:
                 raise TypeError(
-                    "`ssignature is required when no `cell` is provided.",
+                    "`ssignature` is required when no `cell` is provided.",
                 )
 
             if isinstance(cell, Axiom) or isinstance(cell, Callable):
@@ -581,7 +595,7 @@ class Context[V: Theory]:
             # There is no assumption about source being preserved here.
             cell = cell(ssource.source).ref()
         elif isinstance(cell, Axiom):
-            cell = PrimEq(ssource, starget, cell)
+            cell = cell.to_eq(ssource, starget)
 
         #cell = _fit_eq(ssource, starget, cell, self.prove)
         cell = self.t(starget, cell, ssource)
@@ -652,7 +666,7 @@ def _gen_fit_mors(source: Obj, factors: Iterator[MorLike]):
     # Polish order
     # Adapt the sources of morphisms
     for f in factors:
-        f, g = _source_fit_mor_like(source, f)
+        f, g = _source_trim_mor_like(source, f)
         source = f.target
         yield g
         yield f
@@ -662,12 +676,12 @@ def _gen_fit_eqs(source: Obj, factors: Iterator[EqLike]):
     # Adapt the sources of equalities
     for f in factors:
         if isinstance(f, Eq):
-            f, g = _source_fit_eq(source, f)
+            f, g = _source_trim_eq(source, f)
             source = f.ssource.target
             yield g
             yield f
         else:
-            f, g = _source_fit_mor_like(source, f)
+            f, g = _source_trim_mor_like(source, f)
             source = f.target
             yield g.ref()
             yield f.ref()
@@ -709,7 +723,9 @@ def eq_like_to_eq(source: Obj, cell: EqLike):
     return _cell_to_eq(cell)
 
 def _gen_fit_eqs_for_trans(factors: Iterator[Eq], prove: Prover):
-    # Conversion is done adapting target from right to left.
+    # Conversion is done adapting starget from right to left.
+    # Polish order. Notice call to _sequence_to_iterator in
+    # operate_eq_common_source and `rev` flag.
     for f in factors:
         ssource = f.starget
         yield f

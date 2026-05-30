@@ -72,18 +72,19 @@ class LexContext[T: Theory](cart.CartContext[T]):
         else:
             assert r.target.identical(obj.terminal())
 
-        return self.req(
+        return self.copy_name(obj, self.req(
             new, *((
                 self.c(s, r),
                 self.c(t, r),
             ) for s, t in obj.requirements),
-        )
+        ))
 
     def exfit(self, mor: Mor, source: Obj):
         if not isinstance(mor, EqualizerMor):
             return mor.exfit(source)
 
         sup = mor.sup.exfit(source)
+        # TODO: req requires itself exfitting and trim_join
         target = self.req(sup.target, *mor.target.requirements)
         return target.lift(sup)
 
@@ -148,20 +149,16 @@ class LexContext[T: Theory](cart.CartContext[T]):
         ))
         return source
 
-    def _restricted_sup(self, mor: Mor, target: Obj):
-        extra = mor.target.requirements & target.requirements
-        return mor.target.sup.subobject(extra)
-
     def fit(self, mor: Mor, target: Obj):
         # The source of a requirement of `target` is a *strict* superobject of
         # target and a subobject of `target.sup` (possibly `target.sup` itself).
         # The only condition on `mor` is `target.sup.identical(mor.target.sup)`.
         # `mor.target` can have requirements that aren't fulfilled by `target`.
-        # These get ignored.
+        # These get ignored. The condition gets checked by `req` in this call.
         source = self._restricted_source(mor, target)
 
         # Greatest common superobject
-        sup = self._restricted_sup(mor, target)
+        sup = mor.target.incl_join(target)
 
         # Redundant type checking: lift, incl and compose are guaranteed to
         # receive the right type of arguments here. We still type-check lift
@@ -196,7 +193,7 @@ class LexContext[T: Theory](cart.CartContext[T]):
             handle = self.c(ssource.source, short)
             assert handle.source.identical(source)
             eq = self.prove(
-                *Eq(ssource, starget).compose_eq(
+                *handle.source.postulate(ssource, starget).compose_eq(
                     handle.ref(),
                 ).ssignature(),
             )
@@ -214,7 +211,7 @@ class LexContext[T: Theory](cart.CartContext[T]):
         # This is required in order to be able to compose equalities when only
         # the superobjects match.
         source = self._restricted_source(eq.ssource, target)
-        sup = self._restricted_sup(eq.ssource, target)
+        sup = eq.ssource.target.incl_join(target)
         long = eq.ssource.target.incl(sup).ref().compose_eq(
             eq.compose_eq(source.incl(eq.ssource.source).ref()),
         )
@@ -224,12 +221,12 @@ class LexContext[T: Theory](cart.CartContext[T]):
             handle = self.c(ssource.source, short)
             assert handle.ssource.source.identical(source)
             eq_s = self.prove(
-                *Eq(ssource, starget).compose_eq(
+                *source.postulate(ssource, starget).compose_eq(
                     handle.ssource.ref(),
                 ).ssignature(),
             )
             eq_t = self.prove(
-                *Eq(ssource, starget).compose_eq(
+                *source.postulate(ssource, starget).compose_eq(
                     handle.ssource.ref(),
                 ).ssignature(),
             )
@@ -246,6 +243,7 @@ class LexContext[T: Theory](cart.CartContext[T]):
         self, obj: Obj,
         first: tuple[MorLike, MorLike],
         *requirements: tuple[MorLike, MorLike],
+        trim_requirements: bool = False,
     ) -> Obj:
         # When type-checking with `equalizer`, the parallel pair gets precomposed
         # with an inclusion as needed so that its source is the `obj` with all the
@@ -271,13 +269,15 @@ class LexContext[T: Theory](cart.CartContext[T]):
             ssource = self.c(ssource, obj)
             starget = self.c(starget, obj)
 
-            # `exfit` imposes a predertmined source, but the target depends on
+            # `exfit` imposes a predermined source, but the target depends on
             # the morphism. We must therefore make sure that precomposition with
             # `obj` preserves parallelism with respect to the target.
             # The `equalizer` check is still relevant for the source.
-            sx, tx = ssource.target.join(starget.target)
-            ssource = sx.compose(ssource)
-            starget = tx.compose(starget)
+            if trim_requirements:
+                join = ssource.target.trim_join(starget.target)
+
+                ssource = self.c(join, ssource)
+                starget = self.c(join, starget)
 
             try:
                 self.prove(ssource, starget)

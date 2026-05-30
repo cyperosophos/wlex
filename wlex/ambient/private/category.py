@@ -13,6 +13,7 @@ AssociativitySource = tuple[Mor, Mor, Mor]
 
 # We annotate return types here to make type annotations as explicit as
 # signatures in the wlex files.
+# TODO: See theory/ regarding superfluous requirements in type-checking.
 
 def source_globular_cond(eq: Eq):
     """Models equality `category.Q.source_globular_cond` (public)"""

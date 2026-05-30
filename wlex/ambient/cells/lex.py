@@ -4,7 +4,7 @@ from collections.abc import Collection, Callable, Iterable, Sequence
 from typing import Self, override
 from itertools import chain
 
-from ..cells import Obj, Mor, Eq, PrimEq
+from ..cells import Obj, Mor, Eq, PrimEq, TypeObj, Axiom
 from .cart import (
     CartObj, CartMor, CartPrimMor, CartEq, CartComposition,
 )
@@ -14,6 +14,7 @@ class LexObj(CartObj, metaclass=ABCMeta):
 
     @classmethod
     def init_cls(cls):
+        cls._eq_cls = LexEq
         cls._composition_cls = LexComposition
         cls._subobject_cls = Subobject
         cls._equalizer_mor_cls = EqualizerMor
@@ -25,6 +26,17 @@ class LexObj(CartObj, metaclass=ABCMeta):
             return self
 
         return self._subobject_cls(self, requirements)
+
+    @override
+    def incl_join(self, obj: Obj) -> Obj:
+        if not self.sup.identical(obj.sup):
+            raise ValueError('Must share superobject')
+
+        shared = self.requirements & obj.requirements
+        return self.sup.subobject(shared)
+
+class LexTypeObj(TypeObj, LexObj):
+    __slots__ = ()
 
 LexMor = CartMor
 LexPrimMor = CartPrimMor
@@ -57,13 +69,19 @@ class LexEq(CartEq, metaclass=ABCMeta):
 
     @override
     def equalizer_pairing_unique(self, mor: Mor, fmor: Mor) -> Eq:
-        eq = Eq(self.equalizer_pairing(fmor), mor)
+        eq = self.ssource.source.postulate(self.equalizer_pairing(fmor), mor)
         eq.proven = True
         return eq
 
-class LexPrimEq(PrimEq, LexEq, metaclass=ABCMeta):
+class LexPrimEq(PrimEq, LexEq):
     """Models object `lex.Eq` as primitive"""
     __slots__ = ()
+
+class LexAxiom(Axiom):
+    __slots__ = ()
+
+    def to_eq(self, ssource: Mor, starget: Mor):
+        return LexPrimEq(ssource, starget, self.public)
 
 class LiftingObj(LexObj, metaclass=ABCMeta):
     __slots__ = ('_sup',)
@@ -84,6 +102,9 @@ class LazySubobject(LiftingObj):
     _expand: Callable[[Obj, tuple[Mor, Mor]], Obj]
     _expanded: Obj
     identity_priority = True
+
+    def __repr__(self):
+        return f'{type(self).__name__}({self.expanded()})'
 
     def __init__(
         self, sup: Obj,
@@ -155,9 +176,27 @@ class LazySubobject(LiftingObj):
     ):
         return self.expanded().relabel(relabeling)
 
+    @override
+    def trim_join(self, obj: Obj):
+        return self.expanded().trim_join(obj)
+
+    @override
+    def incl_join(self, obj: Obj):
+        return self.expanded().incl_join(obj)
+
 class Subobject(LiftingObj):
     __slots__ = ('_requirements',)
     _requirements: frozenset[tuple[Mor, Mor]]
+
+    def __repr__(self):
+        reqs = ', '.join(f'{x} = {y}' for x, y in self._requirements)
+        name = self.name or f'{self.sup} | {reqs}'
+
+        return f'{type(self).__name__}({name})'
+
+    @override
+    def trim_join(self, obj: Obj):
+        return self.sup.trim_join(obj)
 
     def iso_relabeling(self, relabeling: Iterable[tuple[str | int, str | int]]):
         return self.sup.iso_relabeling(relabeling)
@@ -174,37 +213,11 @@ class Subobject(LiftingObj):
         return self.sup.relabel(relabeling)
 
     def trim(self, obj: Obj):
-        res = super().trim(obj)
-        if res is not None:
-            return res
+        # TODO: Preserve requirements?
+        if self.identical(obj):
+            return self.identity()
 
         return self.sup.trim(obj.sup)
-
-    # def trim_old(self, obj: Obj):
-    #     # Conversion applies even when the `self` is not a subobject of `obj`.
-    #     # In this case lifting (through `restrict`) will be required, because
-    #     # the resulting conversion will only have a superobjet of `obj` as
-    #     # target.
-    #     res = super().trim(obj)
-    #     if res is None:
-    #         return res
-
-    #     sup = self.sup
-    #     conv = sup.trim(obj.sup)
-    #     if not conv:
-    #         return None
-
-    #     # Each of the `obj.requirements` has to be precomposed with `conv`?
-    #     # Create superobject of `obj` and `self`. This will be the target.
-    #     reqs = self.requirements & obj.requirements
-    #     sup = sup.subobject(reqs)
-    #     return self.incl(sup)
-
-    #     # It would be better to limit the conversion to the superobject.
-    #     # The resulting conversion with have `obj` as the target and its source
-    #     # will have the same superobject as `self`.
-    #     # This would be analogous to Product conversion in the sense that the
-    #     # superobject is a component of the subobject.
 
     @property
     @override
@@ -278,7 +291,7 @@ class Subobject(LiftingObj):
         ):
             raise ValueError("No proof from requirements")
 
-        eq = Eq(ssource, starget).compose_eq(
+        eq = self.postulate(ssource, starget).compose_eq(
             Inclusion(self, ssource.source).ref(),
         )
         eq.proven = True
@@ -298,8 +311,8 @@ class Subobject(LiftingObj):
         # That `x` is accepted by the source of `eq` is guaranteed by the order
         # of `self.requirements`.
         return self.sup.accepts(x) and all(
-            # TODO: Eq.verify_ssignature(...)
-            Eq(*eq).verify(x) for eq in self._requirements
+            # TODO: Eq.verify_ssignature(...) ?
+            self.postulate(*eq).verify(x) for eq in self._requirements
         )
 
     def same(self, x: object, y: object):
@@ -342,6 +355,11 @@ class Inclusion(CartMor):
     # the identity. The high-level interface should keep this from happening.
     __slots__ = ()
 
+    def __repr__(self):
+        name = self.name or f'{self.source} -> {self.target}'
+
+        return f'{type(self).__name__}({name})'
+
     def incl_compose(self, mor: Self):
         """Compose with inclusion into a single inclusion"""
         return Inclusion(mor.source, self.target)
@@ -370,6 +388,11 @@ class EqualizerMor(LexMor):
     # (by exfitting requirements). Therefore we don't modify the inherited
     # exfit and instead provide a context level exfit that handles the new
     # requirements.
+
+    def __repr__(self):
+        name = self.name or f'{self.sup}: {self.target}'
+
+        return f'{type(self).__name__}({name})'
 
     def after_incl(self, mor: Inclusion) -> tuple[Mor, Mor]:
         """Get supermorphism by composing with the inclusion"""
