@@ -56,6 +56,9 @@ class CartTheory(Theory):
     SpanEq: MetaObj
     pairing_eq: MetaMor
 
+    RetSec: MetaObj
+    proj_section: MetaMor
+
     @classmethod
     def from_ctx(cls, ctx: Context[Self]):
         return cls(
@@ -77,7 +80,9 @@ class CartTheory(Theory):
             pairing=ctx.mor_refs['pairing'],
             pairing_unique=ctx.mor_refs['pairing_unique'],
             SpanEq=ctx.obj_refs['SpanEq'],
-            pairing_eq=ctx.mor_refs['pairing_eq']
+            pairing_eq=ctx.mor_refs['pairing_eq'],
+            RetSec=ctx.obj_refs['RetSec'],
+            proj_section=ctx.mor_refs['proj_section'],
         )
 
 def Cart(stub: _u[CartStub]):
@@ -182,6 +187,7 @@ def Cart(stub: _u[CartStub]):
 
     pm_mor, pm_p_eq, pm_q_eq = (proj(n) for n in ('pm_mor', 'pm_p_eq', 'pm_q_eq'))
     # Notice that relabeling does not preserve equivalence, so it must never be implicit.
+    # TODO: !!! Complete missing requirements as they start appearing! e.g. trans @ p(...), compose @ p(...)
     pmy = imp(
         ('', l(c(pairing, x), ('pm_mor', '', '', 'pm_p_eq', 'q_eq', 'pm_q_eq'))),
         ('', p(
@@ -219,5 +225,110 @@ def Cart(stub: _u[CartStub]):
         pmy,
         SpanEq, # TODO: Check that taking out this arg will produce an error (due to pmy being a transformation).
     ))
+
+    f, g, h = (proj(n) for n in 'fgh')
+    dnp = c(ix(ProductMor), p(
+        c(ix(compose), p(mor, h)), c(ix(compose), p(p_, h)), c(ix(compose), p(q, h)),
+        c(ix(C.S.S.P.trans), p(
+            c(C.compose_eq, p(p_eq, h)),
+            c(C.associativity, p(c(p_, pt), c(mor, h))),
+        )),
+        c(ix(C.S.S.P.trans), p(
+            c(C.compose_eq, p(q_eq, h)),
+            c(C.associativity, p(c(q, pt), c(mor, h))),
+        )),
+    ), p(
+        ('', c(ix(pairing), p(f, g))),
+        ('h', h),
+    ))
+    _, _diagonal_natural_hat = ctx.mor(
+        'diag_natural',
+        c(pairing_unique, dnp), (
+            req(prod(
+                ('', l(Span, ('f', 'g'))), ('h', Mor),
+            ), (
+                c(target, h), c(source, f),
+            )), Eq,
+            p(
+                c(mor, ix(pairing), p(c(ix(compose), p(f, h)), c(ix(compose), p(g, h)))),
+                c(ix(compose), p(c(mor, ix(pairing), p(f, g)), h)),
+            ), eq,
+        ),
+    )
+
+    # TODO: Is this proof needed below??
+    #t(c(p_, ix(pairing), p(f, g)), f)
+    _diagonal_natural_hat(t(
+        #c(eq, diag_natural),
+        c(p( # Notice that ix on projection produces terminal morphism!
+            c(mor, pairing),
+            mor,
+        ), dnp), # TODO: Is this link missing?? This probably accomplished by simplification (disregading expensive mors)!
+        p(
+            c(mor, pairing, dnp), # ix(pairing) doesn't work here because its source is Span not ProductMor
+            c(mor, dnp),
+        ),
+        p(
+            c(mor, ix(pairing), p( # TODO: possible missing link! Common source gets determined by signature.
+                c(ix(compose), p(f, h)),
+                c(ix(compose), p(g, h)),
+            )),
+            c(ix(compose), p(c(mor, ix(pairing), p(f, g)), h)),
+        )
+    ))
+
+    r, s, e = (proj(n) for n in 'rse')
+    RetSec = ctx.define('RetSec', req(prod(
+        ('r', Mor), ('s', Mor),
+        ('e', Eq),
+    ), (
+        p(c(compose, p(r, s)), c(C.identity, source, s)),
+        c(eq, e),
+    )))
+
+    el = proj('el')
+    pid = c(pairing, p(
+        c(C.identity, x),
+        c(compose, p(el, c(terminal_mor, x))),
+    ))
+    _ = c(p_, ctx.ref(product), p(x, t(y, c(target, el))))
+    ctx.eq(c(compose, t(
+        p(t( # TODO: Missing links?
+            c(p_, ctx.ref(product), p(x, t(y, c(target, el)))), # TODO: this will probably give an error due to transformations in the last factor.
+            c(p_, pt, p(
+                c(C.identity, x),
+                c(compose, p(el, c(terminal_mor, x))),
+            )),
+            c(p_, pt, pid),
+        ), c(mor, pid)), # TODO: Naturality of the diagonal, see coment above.
+        c(p(c(p_, pt), mor), pid),
+    )))
+    ctx.eq(t(
+        c(C.identity, t(
+            c(source, mor, pid),
+            c(source, C.identity, x),
+            x,
+        )), # Possible missing link ^pairing, see (f, g) above
+        c(p_, pid),
+    ))
+    _ = ctx.mor(
+        'proj_section', c(ix(RetSec), p(
+            c(p_, product),
+            c(mor, pid),
+            c(p_eq, pid),
+        )),
+        (
+            req(prod(
+                ('el', Mor), ('x', Obj), ('y', Obj),
+            ), (
+                c(source, el),
+                terminal,
+            ), (
+                c(target, el),
+                y,
+            )),
+            RetSec,
+        )
+    )
 
     return ctx

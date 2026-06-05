@@ -11,7 +11,7 @@ type Path := {
     f: Rel, g: Rel,
     source @ $f == target @ $g,
 };
-    
+
 fn ref: ($, $) @ El -> (source, target);
 fn trans: (source @ $g, target @ $f) @ Path
     -> (source, target);
@@ -33,3 +33,10 @@ fn unique: (
     d, e: Eq,
     eq @ ($d == $e),
 ) -> ($, $) @ Eq;
+
+#fn intensionalize: (
+#    s: Mor, t: Mor,
+#    $s == $t,
+#) -> eq;
+#
+#fn intensionalize = S.P.ref;

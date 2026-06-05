@@ -218,11 +218,13 @@ class Obj(metaclass=ABCMeta):
 
     def trim(self, obj: 'Obj') -> 'Mor':
         """Gives morphism that converts `self` into `obj`"""
-        # Inclusion conversions always make sense.
         if self.identical(obj):
             return self.identity()
 
         raise ValueError("Can't trim")
+
+    def obj_to_proj(self, obj: 'Obj') -> 'Mor':
+        return self.terminal_mor()
 
     @abstractmethod
     def accepts(self, x: object) -> bool:

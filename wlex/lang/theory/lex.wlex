@@ -30,6 +30,8 @@ type EqualizerMor := (
     (compose @ (meqp, Mor), Mor @ Fork) == eq,
 );
 
+# It's true that all morphisms to an equalizer object are equalizer pairings,
+# but a morphism can be an equalizer pairing in more than one way (by following the poset of requirement sets).
 fn equalizer_pairing: Fork @ ($ -> EqualizerMor);
 fn equalizer_pairing_unique: Mor @ (equalizer_pairing, $) @ EqualizerMor -> eq;
 
@@ -49,3 +51,21 @@ fn equalizer_pairing_eq = C.S.S.sym @ equalizer_pariring_unique @ (
     Mor, ($y, $p, $d),
     C.S.S.P.trans @ ($e, Eq @ EqualizerMor),
 ) @ equalizer_pairing @ ($x, $p, $c);
+
+# Proof that f |-> compose @ ($mor @ equalizer, $f)
+# has equalizer_pairing as retraction.
+fn incl_compose: (
+    Parallel, mor: Mor,
+    target @ $mor == source @ $mor @ equalizer,
+) -> equalizer_pairing; # TODO: This requires trim_join!! Keep it manual?
+fn incl_compose = compose @ ($mor @ equalizer, $mor);
+# TODO: In fact the source of incl_compose is isomorphic to EqualizerMor.
+# What should be done is that a simpler version of EqualizerMor is needed
+# since some of its components are redundant. Perhaps do the same with ProductMor?
+# The result is then subproduct with one morphism and the limit diagram.
+
+fn incl_mono: ($f, $g) @ (
+    Parallel, f: Mor, g: Mor, e: Eq,
+    compose @ ($mor @ equalizer, ($f, $g)) == eq @ $e,
+) -> eq;
+fn incl_mono = equalizer_pairing_unique @ ...

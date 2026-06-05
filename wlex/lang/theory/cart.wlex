@@ -59,3 +59,71 @@ fn pairing_eq = C.S.S.sym @ pairing_unique @ (
 ) @ pairing @ $x;
 
 # TODO: Should one proof the naturality of the diagonal (for pullbacks)?
+fn diag_natural: (
+    $mor @ pairing @ (compose @ ($f, $h), compose @ ($g, $h))
+    compose @ ($mor @ pairing @ ($f, $g), $h),
+) @ (
+    (f, g): Span, h: Mor,
+    target @ h == source @ $f,
+) -> eq;
+fn diag_natural = pairing_unique @ (
+    compose @ ($mor, $h), compose @ ($f, $h), compose @ ($g, $h),
+    C.S.S.P.trans @ (
+        C.compose_eq @ ($p_eq, $h),
+        associativity @ ($p @ pt, $mor, $h), # needs relabeling!
+    )
+    # ...
+) @ pairing @ ($f, $g);
+
+type RetSec := (
+    r: Mor, s: Mor, e: Eq,
+    (compose @ ($r, $s), identity @ source @ $s) == eq,
+)
+
+# f, g are parallel
+# Just like lifting along inclusion, extending along projection preserves equality.
+# The idea is that "for all f, f @ e can always be extended along e *in a unique way*" is equivalent to
+# e is epi. (Dually for mono) (f |-> ) f @ e and m @ f are "meta split mono".
+fn proj_section: (
+    el: Mor, x, y: Obj,
+    source @ el == terminal,
+    target @ el == $y,
+) -> RetSec;
+fn pid := pairing @ (identity @ $x, compose @ ($el, terminal_mor @ $x));
+fn proj_section = RetSec @ (
+    $p @ product,
+    $mor @ pid,
+    C.S.S.transivity @ ($p_eq @ pid, ),
+    # target @ Span @ $pid has to be ($x, $y)
+    # identity @ $x has to be identity @ source @ $s
+    # $p_eq @ $pid
+    # ssource is compose @ ($p @ pt, $mor) @ pid. This seems to require naturality of diagonal!
+    # starget is $p @ pid
+    # target @ ($p, $q) @ pid == target @ (identity @ $x, compose @ ($el, terminal_mor @ $x)) by ^pairing
+    # target @ identity @ $x == $x by ^identity
+    # target @ compose @ ($el, terminal_mor @ $x) == $target @ $el by ^compose
+    # target @ $el == $y by the requirement in the source
+    # $p @ $pid == $p @ (identity @ $x, compose @ ($el, terminal_mor @ $x)) by ^pairing
+    # ... == identity @ $x by $p_eq
+    # $x == source @ $mor @ pid by requirement of ProductMor and by ^identity.
+)
+
+#fn proj_epi: ($f, $g) @ (
+#    x, y: Obj, e: Eq, f: Mor, g: Mor, el: Mor,
+#    compose @ (($f, $g), $p @ product) == eq,
+#    source @ el == terminal,
+#    target @ el == $y,
+#) -> eq;
+
+# f @ p = g @ p
+# (f @ p, q) = (g @ p, q)    (pairing_eq and ref)
+# ...
+# f = g
+
+# NOTE: Being a projection is not sufficient for being epi.
+# Is being a projection from an inhabited product sufficient for being (split) epi?
+# Yes. The section is X -> X x Y which appends the chosen element of Y.
+# Is being a projection sufficient for the exfit extension to
+# exist (without overextending)? Yes, since we don't need uniqueness and this is solely
+# based in how the morphism to be extended is factored.
+

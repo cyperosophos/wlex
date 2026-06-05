@@ -154,3 +154,25 @@ What about functor strength? Would a strength macro also be needed?
 The syntax sugar for Monads does need to require monadicity, it
 can just follow preferred precedence (just like with +, * for
 associativity, etc.).
+
+# Exfit
+
+[10:04 AM, 5/28/2026] Luis G P: X Allow incl_join every time a common target is needed. Allow trim_join only when relabeling a subobject of a product (hence flag in method req).
+[7:35 PM, 5/28/2026] Luis G P: Compare exfit and trim. Exfit is to trim as fit is to incl.
+[7:38 PM, 5/28/2026] Luis G P: When composing, apply exfit without projection composition.
+[7:41 PM, 5/28/2026] Luis G P: Projection composition is still needed for requirements during relabeling.
+[7:42 PM, 5/28/2026] Luis G P: Have trim_join that preserves requirements, or just a context level join that combines trim_join and incl_join.
+[8:41 PM, 5/28/2026] Luis G P: Alternatively handle trim_join outside req (in relabeling and in lex context exfit?)
+[7:01 PM, 5/29/2026] Luis G P: Context level (ex)fit must preserve name (this applies to other methods, see CartContext.relabel).
+
+Enlarge the target of equalities??
+(f, g) vs *(m @ f, m @ g)* where m is mono
+*(f, g)* vs (f @ e, g @ e) where e is epi
+Of the two equivalent propositions store (as proven) the one that can be found from the other. Also normalize requirements!
+Notice that preserving the requirements of the target of a requirement is never needed.
+On the other hand the target of the requirement needs to match the superobject. In contrast with inclusion, the projection is not unique. A projection is a split epi (when the non-target object is inhabited), so one gets rid of it when it appears as the handle of a fork. For proofs are needed, cf. the proof of (equalizer_)paring_eq.
+NOTE: composing with projections may be useful when requiring a common source!
+The proof *(f, g)* <= (f @ e, g @ e) indicates that one should
+store (f, g). Proving (f @ e, g @ e) is based on the fork.
+The proof (f, g) <= *(m @ f, m @ g)* indicates that one can prove
+(f, g). Storing (m @ f, m @ g) is based on the cofork.

@@ -207,9 +207,10 @@ class ComponentMap[T](Mapping[str | int, T]):
 
 class Product(CartObj):
     """Models object corresponding to source of span `cart.product`"""
-    __slots__ = ('components',)
+    __slots__ = 'components', '_unambiguous_components'
 
     components: ComponentMap[Obj]
+    _unambiguous_components: dict[Obj, str | int]
 
     # @override
     # def extend(self, mor: Mor):
@@ -260,10 +261,11 @@ class Product(CartObj):
         # The ambiguity arises as well when trimming XxYx(XxY) to XxY. Hence,
         # for simplicity, trims must preserve labels. Also, the legs of a
         # trim_join must be trims.
-        # TODO: At the context level, support converting through single label relabeling, i.e. projection and single component pairing.
+        # TODO: !!!!!!!!! At the context level, support converting through single label relabeling, i.e. projection and single component pairing.
         # Fail when there would be an ambiguity, including the ambiguity of trimming vs
         # projecting in the case of product components which also appear as multiple components
-        # (flattened).
+        # (flattened). The case X -> x: X is already handled by exfitting the composing morphism
+        # (changing its source to X, extending it along the projection x: X -> X).
         if self.identical(obj):
             return self.identity()
 
@@ -283,6 +285,14 @@ class Product(CartObj):
             (label, c.compose(obj.proj(label)))
             for label, c in conversions
         ])
+
+    def obj_to_proj(self, obj: Obj) -> Mor:
+        label = self._unambiguous_components.get(obj)
+
+        if label is None:
+            return self.terminal_mor()
+
+        return self.proj(label)
 
     @override
     def proj(self, label: str | int):
@@ -306,9 +316,11 @@ class Product(CartObj):
     @staticmethod
     def _add_component(
         agg: dict[str | int, Obj],
+        unambiguous: dict[Obj, str | int],
+        ambiguous: set[Obj],
         label: str | int,
         component: Obj,
-        no_repeat: bool
+        no_repeat: bool,
     ):
         if label in agg:
             if no_repeat:
@@ -318,6 +330,12 @@ class Product(CartObj):
                 raise ValueError("Types with same label must be identical.")
         else:
             agg[label] = component
+
+        if component in unambiguous:
+            del unambiguous[component] # TODO: Watch out for this mistake elsewhere where one deletes repetition and then adds it back!!
+            ambiguous.add(component)
+        elif component not in ambiguous:
+            unambiguous[component] = label
 
     def iso_relabeling(self, relabeling: Iterable[tuple[str | int, str | int]]):
         used: set[str | int] = set()
@@ -389,18 +407,21 @@ class Product(CartObj):
                 return
 
         agg: dict[str | int, Obj] = {}
+        ambiguous: set[Obj] = set()
+        self._unambiguous_components = {}
+        unambiguous = self._unambiguous_components
         terminal = self.terminal()
         for label, component in components:
             if label != '':
                 if component is not terminal:
-                    self._add_component(agg, label, component, no_repeat)
+                    self._add_component(agg, unambiguous, ambiguous, label, component, no_repeat)
             else:
                 if not isinstance(component, Product):
                     raise ValueError("Unlabeled component must be product.")
 
                 for l, c in component.components.items():
                     assert l != ''
-                    self._add_component(agg, l, c, no_repeat)
+                    self._add_component(agg, unambiguous, ambiguous, l, c, no_repeat)
 
         self.components = ComponentMap(list(agg.items()))
         assert len(self.components) == self.components.full_len()
@@ -506,10 +527,8 @@ class Projection(CartMor):
         # In the case of a pairing of projections, one extends each component,
         # so that only some of them may up needing to be composed with a
         # terminal morphism.
-        # TODO: Make sure that in ProductMor, one gets rid of terminal morphism
-        # components.
         # Notice that since target isn't preserved this can't be handled as simplification.
-        # We actually not just extending, but also composing with a projection as needed
+        # We are actually not just extending, but also composing with a projection as needed
         # (e.g. with a terminal morphism). We can also precompose with a projection,
         # so that we handle e.g. the case where source is not a product, or there is no
         # projection (identity) from the old source to the new source. All of this makes

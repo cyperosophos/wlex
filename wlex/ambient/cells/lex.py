@@ -196,6 +196,8 @@ class Subobject(LiftingObj):
 
     @override
     def trim_join(self, obj: Obj):
+        # `self.sup.trim_join` already uses `obj.sup`. All requirements get
+        # discarded.
         return self.sup.trim_join(obj)
 
     def iso_relabeling(self, relabeling: Iterable[tuple[str | int, str | int]]):
@@ -213,11 +215,17 @@ class Subobject(LiftingObj):
         return self.sup.relabel(relabeling)
 
     def trim(self, obj: Obj):
-        # TODO: Preserve requirements?
+        # TODO: Preserve requirements? It seems this is better done at the context
+        # level, or requirements simply get reintroduced by fitting. Check that this is the case.
+        # This applies to other methods such as obj_to_proj (relabeling can't have fit reintroduce requirements).
+        # What about exfit?
         if self.identical(obj):
             return self.identity()
 
         return self.sup.trim(obj.sup)
+
+    def obj_to_proj(self, obj: Obj):
+        return self.sup.obj_to_proj(obj.sup)
 
     @property
     @override

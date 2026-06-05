@@ -25,6 +25,22 @@ def check_signature(source: Obj, target: Obj, cell: Mor):
     if not target.identical(cell.target):
         raise cells.TargetUnfit("Wrong target", cell.target, target)
 
+def _trim_or_proj(source: Obj, target: Obj):
+    proj = source.obj_to_proj(target)
+    no_proj = proj.target.identical(source.terminal())
+    try:
+        trim = source.trim(target)
+    except ValueError:
+        if no_proj:
+            raise
+
+        return proj
+
+    if no_proj:
+        return trim
+
+    raise ValueError("Ambiguous choice of trim or projection")
+
 def _source_trim_mor_like(source: Obj, cell: MorLike):
     if isinstance(cell, Callable):
         cell = cell(source)
@@ -32,9 +48,8 @@ def _source_trim_mor_like(source: Obj, cell: MorLike):
     if isinstance(cell, Obj):
         cell = cell.identity()
 
-    # TODO: Is this the best place for trimming? Why not in straighten?
     try:
-        sconv = source.trim(cell.source)
+        sconv = _trim_or_proj(source, cell.source)
     except ValueError as exc:
         raise cells.SourceUnfit(
             "Can't trim source", source, cell.source,
@@ -44,9 +59,8 @@ def _source_trim_mor_like(source: Obj, cell: MorLike):
     return cell, sconv
 
 def _source_trim_eq(source: Obj, cell: Eq):
-    # TODO: Is this the best place for trimming? Why not in straighten?
     try:
-        sconv = source.trim(cell.ssource.source)
+        sconv = _trim_or_proj(source, cell.ssource.source)
     except ValueError as exc:
         raise cells.SourceUnfit(
             "Can't trim source", source, cell.ssource.source,
@@ -55,7 +69,7 @@ def _source_trim_eq(source: Obj, cell: Eq):
     #return cell.compose_eq(sconv.ref())
     return cell, sconv.ref()
 
-def _ssource_fit_eq(ssource: Mor, cell: Eq, prove: Prover):
+def _ssource_trans_eq(ssource: Mor, cell: Eq, prove: Prover):
     # TODO: This seems wrong. It be better to not do any "fitting" here of
     # morphism. Also since the conversion is not guaranteed to match
     # (calls to fit for lifitng may be needed), one must return a tuple
@@ -71,7 +85,7 @@ def _ssource_fit_eq(ssource: Mor, cell: Eq, prove: Prover):
             ssource, cell.ssource,
         )
 
-    return cell.trans(sconv)
+    return cell, sconv
 
 def _mor_like_to_mor_ssignature(ssignature: tuple[MorLike, MorLike]):
     ssource, starget = ssignature
@@ -529,6 +543,17 @@ class Context[V: Theory]:
 
         raise UnprovenEq(f"No equality for {ssource} and {starget}")
 
+    def sharpen(self, x: Obj, y: Obj):
+        # Compose with the result using `self.c`.
+        if x.identical(y):
+            return x
+
+        raise ValueError("Can't sharpen")
+
+    def _sharp_prove(self, f: Mor, g: Mor):
+        edge = self.sharpen(f.target, g.target)
+        return self.prove(self.c(edge, f), self.c(edge, g))
+
     def eq(
         self, cell_or_stub: EqLike | Once[EqStub] | None,
         ssignature: tuple[MorLike, MorLike] | None = None,
@@ -578,6 +603,7 @@ class Context[V: Theory]:
                     "If `cell` is callable, setoid signature is needed.",
                 )
 
+            # Globular conditions are already fulfilled here.
             if cell.proven:
                 self.register_equality(cell.ssource, cell.starget)
             else:
@@ -588,8 +614,7 @@ class Context[V: Theory]:
         ssource, starget = _mor_like_to_mor_ssignature(ssignature)
 
         if not cell:
-            cell = self.prove(ssource, starget)
-            return cell
+            return self._sharp_prove(ssource, starget)
 
         if isinstance(cell, Callable):
             # There is no assumption about source being preserved here.
@@ -598,12 +623,14 @@ class Context[V: Theory]:
             cell = cell.to_eq(ssource, starget)
 
         #cell = _fit_eq(ssource, starget, cell, self.prove)
+        # TODO: incl_join in trans, sharpen? In this case sharpen must be
+        # all equalities (eqlikes) before _ssource_trans_eq, etc.
         cell = self.t(starget, cell, ssource)
 
         if cell.proven:
             self.register_equality(ssource, starget)
         else:
-            cell = self.prove(ssource, starget)
+            cell = self._sharp_prove(ssource, starget)
 
         return cell
 
@@ -637,13 +664,21 @@ class Context[V: Theory]:
     @overload
     def c(self, first: MorLike, *factors: Eq) -> Eq: ...
 
-    def c(self, first: EqLike, *factors: EqLike,) -> Mor | Transformation | Eq:
+    def c(self, first: EqLike, *factors: EqLike) -> Mor | Transformation | Eq:
         """Variadic high-level composition"""
         return operate_mor_or_eq(self.comp_op_mor, self.comp_op_eq, first, factors)
 
     def t(self, first: EqLike, *factors: EqLike):
         """Variadic high-level transitivity"""
-        return _trans(self.trans, first, factors, self.prove)
+        def trans(x: tuple[Eq, Eq]) -> Eq:
+            d, e = x
+            edge = self.sharpen(d.ssource.target, e.ssource.target)
+            return self.trans((
+                self.c(edge, d),
+                self.c(edge, e),
+            ))
+
+        return _trans(trans, first, factors, self._sharp_prove)
 
 ComposableT = TypeVar('ComposableT')
 Composer = Callable[[tuple[ComposableT, ComposableT]], ComposableT]
@@ -734,8 +769,9 @@ def _gen_fit_eqs_for_trans(factors: Iterator[Eq], prove: Prover):
         assert False
 
     for f in factors:
-        f = _ssource_fit_eq(ssource, f, prove)
+        f, g = _ssource_trans_eq(ssource, f, prove)
         ssource = f.starget
+        yield g # targets of f and prev equality must be adapted to target of g using Context.c
         yield f
 
 def _mor_compose(comp: Composer[Mor], factors: Iterator[Mor]):

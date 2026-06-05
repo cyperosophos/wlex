@@ -79,12 +79,20 @@ class LexContext[T: Theory](cart.CartContext[T]):
             ) for s, t in obj.requirements),
         ))
 
-    def exfit(self, mor: Mor, source: Obj):
+    def exfit(self, mor: Mor, source: Obj, overextending: bool = False):
         if not isinstance(mor, EqualizerMor):
-            return mor.exfit(source)
+            res = mor.exfit(source)
+            if res.target.identical(mor.target) or overextending:
+                return res
+
+            raise ValueError("Can't exfit without overextending")
 
         sup = mor.sup.exfit(source)
         # TODO: req requires itself exfitting and trim_join
+        # The idea here is that after exfitting mor.sup its target (sup.target) will end up
+        # having less components so that some requirements will need to be adapted by exfitting
+        # them to sup.target (when their target is mor.sup.target). Exfitting in this case
+        # needs to allow overextending, and be followed by a requirement preserving trim_join.
         target = self.req(sup.target, *mor.target.requirements)
         return target.lift(sup)
 
@@ -148,6 +156,12 @@ class LexContext[T: Theory](cart.CartContext[T]):
             for ssource, starget in missing
         ))
         return source
+
+    def sharpen(self, x: Obj, y: Obj):
+        if x.identical(y):
+            return x
+
+        return x.incl_join(y)
 
     def fit(self, mor: Mor, target: Obj):
         # The source of a requirement of `target` is a *strict* superobject of
@@ -243,7 +257,7 @@ class LexContext[T: Theory](cart.CartContext[T]):
         self, obj: Obj,
         first: tuple[MorLike, MorLike],
         *requirements: tuple[MorLike, MorLike],
-        trim_requirements: bool = False,
+        #trim_requirements: bool = False,
     ) -> Obj:
         # When type-checking with `equalizer`, the parallel pair gets precomposed
         # with an inclusion as needed so that its source is the `obj` with all the
@@ -269,15 +283,21 @@ class LexContext[T: Theory](cart.CartContext[T]):
             ssource = self.c(ssource, obj)
             starget = self.c(starget, obj)
 
+            # If the target gets enlarged, this may end up leaving some
+            # superfluous requirements.
+            edge = self.sharpen(ssource.target, starget.target)
+            ssource = self.c(edge, ssource)
+            starget = self.c(edge, starget)
+
             # `exfit` imposes a predermined source, but the target depends on
             # the morphism. We must therefore make sure that precomposition with
             # `obj` preserves parallelism with respect to the target.
             # The `equalizer` check is still relevant for the source.
-            if trim_requirements:
-                join = ssource.target.trim_join(starget.target)
+            # if trim_requirements:
+            #     join = ssource.target.trim_join(starget.target)
 
-                ssource = self.c(join, ssource)
-                starget = self.c(join, starget)
+            #     ssource = self.c(join, ssource)
+            #     starget = self.c(join, starget)
 
             try:
                 self.prove(ssource, starget)
