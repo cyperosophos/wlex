@@ -234,6 +234,31 @@ class Theory(metaclass=ABCMeta):
 # and pylance type-checking is too limited and makes implementation cumbersome.
 # The difficulty of tracking types arrises with subtheories.
 
+class Hat[V: Theory]:
+    def __init__(
+        self, ctx: 'Context[V]',
+        hat_source: Mor, hat_target: Mor,
+        cell: Mor,
+    ):
+        self.ctx = ctx
+        self.hat_source = hat_source
+        self.hat_target = hat_target
+        self.cell = cell
+
+    def __call__(self, c: EqLike | Once[EqStub] | None):
+        # We defer assigning hat, because we may end up needing cell in its
+        # definition.
+        return self.ctx.eq(
+            c, (self.hat_source, self.hat_target.compose(self.cell)),
+        )
+
+    def invert(self):
+        return type(self)(
+            self.ctx,
+            self.hat_source, self.cell,
+            self.hat_target,
+        )
+
 class Context[V: Theory]:
     """Handles cells of a theory with ambient category"""
     __slots__ = 'proven_eqs', 'obj_refs', 'mor_refs', 'sub_refs', 'theory_cls'
@@ -314,6 +339,34 @@ class Context[V: Theory]:
         return cell
 
     @overload
+    def iso(
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
+        signature: tuple[Obj, Mor | Transformation],
+    ) -> tuple[Mor, Hat[V], Hat[V]]: ...
+    @overload
+    def iso(
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
+        signature: tuple[Obj, Obj, Mor | Transformation],
+    ) -> tuple[Mor, Hat[V], Hat[V]]: ...
+
+    def iso(
+        self, name: str, cell_or_stub: MorLike | Once[MorStub],
+        signature: tuple[Obj, Mor | Transformation] | tuple[Obj, Obj, Mor | Transformation],
+    ) -> tuple[Mor, Hat[V], Hat[V]]:
+        """Defines isomorphism by requiring an extra equality"""
+        if len(signature) == 3:
+            s, t, r = signature
+            mor_signature = s, t, s, r
+        else:
+            mor_signature = signature
+
+        res, hat = self.mor(name, cell_or_stub, mor_signature)
+
+        # An extra hat is required, which reverses the composition in the first hat.
+        ihat = hat.invert()
+        return res, hat, ihat
+
+    @overload
     def mor(
         self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Obj, Obj],
@@ -322,22 +375,22 @@ class Context[V: Theory]:
     def mor(
         self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Obj, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]: ...
+    ) -> tuple[Mor, Hat[V]]: ...
     @overload
     def mor(
         self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Mor | Transformation, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]: ...
+    ) -> tuple[Mor, Hat[V]]: ...
     @overload
     def mor(
         self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Obj, Obj, Obj, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]: ...
+    ) -> tuple[Mor, Hat[V]]: ...
     @overload
     def mor(
         self, name: str, cell_or_stub: MorLike | Once[MorStub],
         signature: tuple[Obj, Obj, Mor | Transformation, Mor | Transformation],
-    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]: ...
+    ) -> tuple[Mor, Hat[V]]: ...
     @overload
     def mor(
         self, name: str, cell_or_stub: Obj | Mor,
@@ -465,7 +518,7 @@ class Context[V: Theory]:
         signature: tuple[Obj, Obj],
         final_signature: tuple[Obj | None, Obj | None],
         hat_signature: tuple[Mor, Mor],
-    ) -> tuple[Mor, Callable[[EqLike | Once[EqStub] | None], Eq]]:
+    ) -> tuple[Mor, Hat[V]]:
         """Sets name on morphism and checks signature"""
         final_source, final_target = final_signature
         source, target = signature
@@ -480,13 +533,7 @@ class Context[V: Theory]:
 
         hat_source, hat_target = hat_signature
 
-        def _hat(c: EqLike | Once[EqStub] | None):
-            # We defer assigning hat, because we may end up needing cell in its
-            # definition.
-            return self.eq(
-                c, (hat_source, hat_target.compose(cell)),
-            )
-
+        _hat = Hat(self, hat_source, hat_target, cell)
         self.define(name, cell)
         return cell, _hat
 

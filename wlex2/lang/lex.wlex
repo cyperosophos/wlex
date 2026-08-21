@@ -1,0 +1,39 @@
+include "cart.wlex";
+
+type Parallel;
+fn parallel_i: Parallel -> Mor;
+fn parallel_j: Parallel -> Mor;
+eq source @ (parallel_i == parallel_j);
+eq target @ (parallel_i == parallel_j);
+
+# The idea is to distinguish intensional equalities as equalities of
+# elements, therefore terms of a type of equalities (just like objects
+# and morphisms are terms of their respective types).
+# A more elaborate interpretation of a fork is then a pullback of three components,
+# where the equality occurs between terms of the type of morphism equalities.
+# One side of the equality is the `eq` component and the other is an
+# equality resulting from `$mor` and `$par`.
+# Equality component turns the whole pairing into an equality of pairings.
+# Here the components are types (this is a product), and the last type is an equality type.
+type Fork := (
+    mor: Mor, par: Parallel,
+    compose @ (
+        (parallel_i @ $par, $mor) ==
+        (parallel_j @ $par, $mor)
+    ),
+);
+
+fn equalizer: Parallel @ ($ -> Fork);
+
+type Lift := (
+    mor: Mor, par: Parallel,
+    target @ $mor == equalizer,
+);
+
+fn Fork == (
+    mor = compose @ ($mor @ equalizer, $mor),
+    par = $par,
+    # TODO: apply associativity. This is needed in `theory`, which does
+    # not rely on normalized composition.
+    #eq = compose @ ($eq @ equalizer, $mor),
+) @ Lift;

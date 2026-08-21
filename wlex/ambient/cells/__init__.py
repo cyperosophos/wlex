@@ -262,7 +262,7 @@ class Obj(metaclass=ABCMeta):
         """Public equalities unfulfilled by `x`
 
         "Public" means that the equality is not guaranteed to be fulfilled by
-        aguments of the public interface.
+        arguments of the public interface.
         """
         return [
             eq for eq, public in self.eqs[self]

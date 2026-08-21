@@ -1,6 +1,62 @@
 from quiver import Quiver;
 from posetoid import Posetoid, Congruence;
 
+spec BasicCategory;
+type P <- Posetoid;
+type Obj := P.El;
+type Arr := P.Rel;
+fn source := P.source;
+fn target := P.target;
+type Composable := P.Path;
+fn identity := P.ref;
+fn compose := P.trans;
+
+# left_identity_law
+eq compose @ (identity @ target, $) == $;
+# right_identity_law
+eq compose @ ($, identity @ source) == $;
+# associativity
+eq (compose @ ($f, compose @ ($g, $h))
+== compose @ (compose @ ($f, $g), $h)) @ (
+    Composable,
+    (g, h): Composable,
+);
+
+# Eq is needed for intensional (setoid) equalities.
+# TODO: Does this work with diagrams that need equalities?
+
+spec Category;
+type Q <- Quiver;
+type S <- Congruence with
+    S.P.Q = Q.Q1;
+type M <- CategoryQuiver with
+    P.Q = Q.Q0;
+type Obj := M.Obj;
+type Mor := M.Arr;
+type Eq := S.Eq;
+fn eq := S.eq;
+fn source := M.source;
+fn target := M.target;
+type Composable := M.Composable;
+fn identity := M.identity;
+fn compose := M.compose;
+
+type ComposableEq := (
+    d, e: Eq,
+    source @ S.source @ $d == target @ S.target @ $e,
+);
+
+fn compose_eq: compose! @ !(S.source, S.target) @ ComposableEq -> eq;
+
+type E <- CategoryQuiver with
+    Obj = Obj,
+    Arr = Eq,
+    source = source @ S.source,
+    target = source @ S.target,
+    Composable = ComposableEq,
+    identity = S.ref @ identity,
+    compose = compose_eq;
+
 spec Category;
 type Q <- Quiver;
 type P <- Posetoid with
@@ -35,6 +91,8 @@ type ComposableEq := (
 # compose_eq corresponds to composition being uniquely determined according
 # to rule 3 of the theory of categories in fully formal etcs (nlab).
 fn compose_eq: compose! @ !(S.source, S.target) @ ComposableEq -> eq;
+#eq compose_eq @ (ref, ref) == ref @ compose; # This can be proven using the uniqueness of equalities.
+
 # (S.source, S.target) @ ComposableEq is ambiguous
 # it can mean ((s d, s e), (t d, t e)) or
 # [(s, t), (s, t)] (d, e) i.e. ((s d, t d), (s e, t e))

@@ -1,0 +1,26 @@
+type Obj;
+type Mor;
+fn source: Mor -> Obj;
+fn target: Mor -> Obj;
+fn identity: ($, $) @ Obj -> (source, target);
+
+type Composable := (
+    f: Mor,
+    g: Mor,
+    source @ $f == target @ $g,
+);
+fn compose: (source @ $g, target @ $f) @ Composable
+-> (source, target);
+
+# left_identity_law
+eq compose @ (identity @ target, $) == $;
+
+# right_identity_law
+eq compose @ ($, identity @ source) == $;
+
+# associativity
+eq (compose @ ($f, compose @ ($g, $h))
+== compose @ (compose @ ($f, $g), $h)) @ (
+    Composable,
+    (g, h): Composable,
+);

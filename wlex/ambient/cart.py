@@ -59,27 +59,21 @@ class CartContext[T: Theory](category.Context[T]):
     tm = terminal_mor
 
     def imp(
-        self, first: tuple[str | int, MorLike],
-        *factors: tuple[str | int, MorLike],
+        self, first: MorLike,
+        *factors: MorLike,
     ):
         """Imperative composition"""
         # Polish order
         it = iter(reversed(list(chain((first,), factors))))
 
         fs: list[MorLike] = []
-        for label, factor in it:
-            if label == '':
-                # This needs to be handled for the case when the target of factor
-                # is not a product.
-                fs.append(factor)
-            else:
-                fs.append(self.pair((label, factor)))
-
+        for factor in it:
+            fs.append(factor)
             break
 
         fs.extend(
-            self.pair(('', self.identity), (l, f))
-            for l, f in it
+            self.pair(self.identity, f)
+            for f in it
         )
 
         return self.c(*iter(fs))

@@ -176,3 +176,7 @@ The proof *(f, g)* <= (f @ e, g @ e) indicates that one should
 store (f, g). Proving (f @ e, g @ e) is based on the fork.
 The proof (f, g) <= *(m @ f, m @ g)* indicates that one can prove
 (f, g). Storing (m @ f, m @ g) is based on the cofork.
+
+# TODO: Do iso definition of equalizer!
+
+Instead of private eqs use (public) instantiation that checks eqs.

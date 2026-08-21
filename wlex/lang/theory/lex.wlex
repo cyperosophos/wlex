@@ -30,6 +30,57 @@ type EqualizerMor := (
     (compose @ (meqp, Mor), Mor @ Fork) == eq,
 );
 
+type Lift := (
+    mor: Mor, Parallel,
+    target @ $mor == equalizer;
+);
+
+fn Fork == (
+    mor = compose @ ($mor @ equalizer, $mor),
+    eq = compose_eq @ ($eq @ equalizer, ref @ $mor),
+    i = $i,
+    j = $j,
+) @ Lift;
+
+# ForkEq == LiftEq, with ParallelEq
+
+type ParallelEq = (
+    i, j: Eq,
+    (source, target) @ ssource @ ($i == $j),
+);
+
+type ForkEq = (
+    mor: Eq, Parallel, Eq,
+    source @ ssource @ Parallel == target @ ssource @ $mor,
+    ssource @ compose_eq @ (Parallel, $mor) == eq,
+);
+
+fn equalizer_eq: ParallelEq @ ($ -> ForkEq);
+# TODO: this would need more details about compatibity with fn equalizer.
+# The more general idea is that certain functions preserve Eq.
+# Eq is an equivalence relation (a monadic span) that only makes sense in
+# set Mor. Some functions must preserve the equiv rel, and also some
+# types made out of Mor (including Eq) must be compatible with the equiv rel.
+# The latter only means something with respect to functions from such types.
+# We don't deal directly with functors, so we don't do anything about nat trans.
+# Eq is in fact the equality of the type not just an equiv rel.
+# Instead of defining type Eq, we define `set Mor`.
+# See https://ncatlab.org/nlab/show/type-theoretic+definition+of+category
+# It makes sense to make all types have equality, since this would be an internal
+# definition of category.
+
+type LiftEq := (
+    mor: Eq, ParallelEq,
+    target @ ssource @ $mor == equalizer @ (ssource @ $i, ssource @ $j);
+);
+
+fn ForkEq == (
+    mor = compose_eq @ ($mor @ equalizer_eq, $mor),
+    eq = compose_eq @ ($eq @ equalizer_eq, ref @ ssource @ $mor),
+    i = $i,
+    j = $j,
+) @ LiftEq;
+
 # It's true that all morphisms to an equalizer object are equalizer pairings,
 # but a morphism can be an equalizer pairing in more than one way (by following the poset of requirement sets).
 fn equalizer_pairing: Fork @ ($ -> EqualizerMor);

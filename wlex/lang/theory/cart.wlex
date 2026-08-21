@@ -1,5 +1,27 @@
 from category import Category;
 
+spec CartLimit;
+type Mor;
+type Obj;
+fn source: ;
+fn target := C.target;
+fn compose := C.compose;
+
+type Span := (
+    p, q: Mor,
+    source @ ($p == $q),
+);
+
+type Pairing := (
+    mor: Mor, x, y: Obj,
+    target == product,
+);
+
+fn Span == (
+    p = compose @ ($p @ product, $mor),
+    q = compose @ ($q @ product, $mor),
+) @ Pairing;
+
 spec Cart;
 type C <- Category;
 type Obj := C.Obj;
@@ -14,8 +36,11 @@ type TerminalMor := (
     Mor,
     target == terminal,
 );
-fn terminal_mor: Obj -> source @ TerminalMor;
-fn terminal_mor_unique: Mor @ (terminal_mor @ source, $) @ TerminalMor -> eq;
+fn Obj == source @ TerminalMor;
+#fn terminal_mor: Obj -> source @ TerminalMor;
+#fn terminal_mor_unique: Mor @ (TerminalMor @ source, $) @ TerminalMor -> eq;
+#terminal_mor_unique = ref;
+# One uses $ == Terminal @ source when proving the hat.
 
 type Span := (
     p, q: Mor,
@@ -23,32 +48,62 @@ type Span := (
 );
 
 fn product: (x, y: Obj) -> target @ Span;
-fn pt := product @ target @ Span;
-type ProductMor := (
-    Mor, Span,
-    p_eq, q_eq: Eq,
-    source @ (Mor == Span),
-    target @ Mor == source @ pt,
-    # TODO: This needs some special notation like @>.
-    (compose @ (($p, $q) @ pt, Mor), Span) == eq @ ($p_eq, $q_eq),
+#fn pt := product @ target @ Span;
+type Pairing := (
+    mor: Mor, x, y: Obj,
+    target == product,
 );
+#type ProductMor := (
+#    Mor, Span,
+#    p_eq, q_eq: Eq,
+#    source @ (Mor == Span),
+#    target @ Mor == source @ pt,
+#    # TODO: This needs some special notation like @>.
+#    (compose @ (($p, $q) @ pt, Mor), Span) == eq @ ($p_eq, $q_eq),
+#);
 # TODO: Notice that it is possible to take Span out of ProductMor
 # and just leave p_eq and q_eq, since these alread contain Span.
 # The same may apply to SpanEq, etc. However one would then need
 # to include the Span condition source @ target (p_eq == q_eq).
 # fn pairing: Span -> target @ (p_eq, q_eq) @ ProductMor
+# NOTE: When transpiling theories one makes sure no equalities are left unproven
+# solely by the calls to eq, so one must make sure that the _hat functions are called
+# even if their argument is None (which makes it look for a proof itself), but in this
+# case one places the call at the end of the theory function (this is in fact what should always happen).
+# No need for ~ inverse syntax. Name is optional in the case of isos.
+# The fn ... == ... iso may or may not have a name.
+# The distinguishing == syntax justifies using `iso` instead of `mor`.
+# Tie iso to target type so it does not need to be named.
+# A retraction must always be provided.
 
-fn pairing: Span @ ($ -> ProductMor);
-fn pairing_unique: Mor @ (pairing, $) @ ProductMor -> eq;
+fn Span == (
+    p = compose @ ($p @ product, $mor), # No Eq!
+    q = compose @ ($q @ product, $mor),
+) @ Pairing;
+# =~ ...; # Use this to define inverse.
+#fn pairing := ~span;
+# span is the retraction of pairing. Unique existence is attained by
+# having span be the inverse of pairing. span is ~pairing.
+# Since pairing is an isomorphism it can be used as a tacit conversion?
+# Is it canonical? Allow named isos, their inverse is ~<name>.
+
+#fn pairing: Span @ ($ -> ProductMor);
+#fn pairing_unique: $mor @ (pairing @ span, $) @ Pairing -> eq;
 
 # Theorem: pairing preserves equality.
+# TODO: Try making this a direct consequence of the iso.
+# The idea is that an eq of Span elements translates to an eq of Pairing elements
+# due to the existence of a retraction.
 type SpanEq := (
     x: Span, y: Span, p_eq: Eq, q_eq: Eq,
     source @ ($x == $y), # TODO: these may be superfluous
     target @ ($x == $y),
     ($p, $q) @ ($x, $y) == eq @ ($p_eq, $q_eq),
 );
-fn pairing_eq: Mor @ pairing @ SpanEq -> eq;
+fn pairing_eq: (
+    $mor @ pairing @ $x,
+    $mor @ pairing @ $y,
+) @ SpanEq -> eq;
 # TODO: Notice that this seems to requires preserving oroduct components as if they were variables.
 fn pairing_eq = C.S.S.sym @ pairing_unique @ (
     Mor, $y,
@@ -57,15 +112,64 @@ fn pairing_eq = C.S.S.sym @ pairing_unique @ (
         ($p_eq, $q_eq) @ ProductMor,
     ),
 ) @ pairing @ $x;
+# TODO: The more general result is that any function from Span
+# preserves equality. How does one prove ps = pt & qs = qt => s = t?
+# p, q are jointly mono, and in fact jointly iso. (p, q) is just span.
+# Eq is just an equivalence relation, which need not be preserved by a function.
+# compose_eq ensures that it is preserved.
+# SpanEq is the equivalence relation on Span that gets preserved by pairing,
+# as gets proven.
+
+# That two Span elements are equal when their components are equal comes
+# from pairing_eq.
+type SpanEq := (
+    x: Span, y: Span, p_eq: Eq, q_eq: Eq,
+    ($p @ $x, $p @ $y) == eq @ $p_eq,
+    ($q @ $x, $q @ $y) == eq @ $q_eq,
+);
+pairing_eq = ref @ (
+) @ pairing @ $x;
+# `pairing @ $x` is `pairing @ $y` in the sense that
+# `span @ pairing @ $x` is equal to `$x` which is 'equal' to `$y`.
+# `pairing` has to preserve Eq. This seems to be axiomatic.
+# f, g are inverses. Assume a R b <=> fa S fb.
+# x S y => fgx S fgy => gx R gy => fgx S fgy => x S y.
+# Assume instead a R b => fa S fb and x S y => gx R gy.
+# fa S fb => gfa R gfb => a R b.
+# This is more fundamental, Span == Pairing is derived using ref.
+# TODO: For simplicity (and consistency with Terminal) we keep axiomatic Span == Pairing. One derives the
+# ref definition from the retractions and the uniqueness of inverses.
+type SpanEq := (
+    p, q: Eq,
+    source @ ssource @ ($p == $q),
+);
+type PairingEq := (
+    mor: Eq, x, y: Obj,
+    target @ ssource == product,
+);
+fn SpanEq == (
+    p = compose_eq @ (ref @ $p @ product, $mor),
+    q = compose_eq @ (ref @ $q @ product, $mor),
+) @ PairingEq;
+pairing_eq := $mor @ PairingEq;
 
 # TODO: Should one proof the naturality of the diagonal (for pullbacks)?
 fn diag_natural: (
-    $mor @ pairing @ (compose @ ($f, $h), compose @ ($g, $h))
     compose @ ($mor @ pairing @ ($f, $g), $h),
+    $mor @ pairing @ (compose @ ($f, $h), compose @ ($g, $h)),
 ) @ (
     (f, g): Span, h: Mor,
     target @ h == source @ $f,
 ) -> eq;
+# Use the Span == Pairing hat to prove the diag_natural hat, especially
+# the first component.
+diag_natural = {
+    k = $mor @ Pairing @ ($f, $g);
+    $mor @ PairingEq @ (
+        p = associativity @ ($p, $k, $h),
+        q = associativity @ ($q, $k, $h),
+    );
+};
 fn diag_natural = pairing_unique @ (
     compose @ ($mor, $h), compose @ ($f, $h), compose @ ($g, $h),
     C.S.S.P.trans @ (

@@ -1,0 +1,31 @@
+include "category.wlex";
+
+fn terminal: Obj;
+type TerminalMor := (
+    Mor,
+    target == terminal,
+);
+fn Obj == source @ TerminalMor;
+
+type Param;
+fn param_x: Param -> Obj;
+fn param_y: Param -> Obj;
+
+type Span := (
+    p, q: Mor, par: Param,
+    source @ ($p == $q),
+    param_x == target @ $p,
+    param_y == target @ $q,
+);
+
+fn product: Param @ ($ -> Span);
+type Pairing := (
+    mor: Mor, par: Param,
+    target == source @ product,
+);
+
+fn Span == (
+    p = compose @ ($p @ product, $mor),
+    q = compose @ ($q @ product, $mor),
+    par = $par,
+) @ Pairing;
