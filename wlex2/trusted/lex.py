@@ -2,10 +2,10 @@
 #from typing import Iterable, TypeGuard
 
 from ..model import lex
+from ..model.category import Parallel
 from .cart import *
 from ..equality import Eq
 
-Parallel = lex.BaseParallel
 Fork = lex.BaseFork #tuple[Mor, Parallel, Eq[Mor]]
 Lift = lex.BaseLift # Every morphism is a lift along the identity.
 
@@ -99,7 +99,7 @@ def _fork(l: Lift) -> Fork:
     par = l.parallel()
     ef = equalizer(par)
     # Having been able to construct the lift means that the equalities are already registered.
-    return lex.ProvenFork(
+    return lex.Fork(
         compose((ef.handle(), mor)),
         par,
     #    _gen_eq(ef.eq()),

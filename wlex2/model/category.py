@@ -5,6 +5,7 @@ from itertools import chain, islice
 
 from . import WithItems
 from ..equality import Eq
+from ..proven import ValidationError
 
 def _flatten_factors(factors: Iterable['Mor']) -> Iterator[tuple['Mor', bool]]:
     # All compositions must be flat!
@@ -62,8 +63,14 @@ class Obj(metaclass=ABCMeta):
     def parallel(self):
         return Parallel(self, ())
 
+    def param(self):
+        return Param((self,))
+
     def is_subobject(self, obj: 'Obj'):
         return self == obj
+
+    def restrict(self, mor: 'Mor'):
+        return mor
 
     def verify(self, e: Eq['Mor']) -> bool:
         return False
@@ -196,6 +203,41 @@ class Composition(Mor):
             and self.factors == x.factors
         )
 
+#T = TypeVar('T')
+#Components = Iterable[tuple[str, T] | T]
+
+class Param(WithItems[Obj]):
+    __slots__ = ('components', 'label_to_idx_map')
+    components: tuple[Obj, ...]
+    label_to_idx_map: tuple[tuple[str, int], ...]
+
+    def __init__(self, components: Iterable[tuple[str, Obj] | Obj]):
+        li_map: list[tuple[str, int]] = []
+        comps: list[Obj] = []
+
+        for i, c in enumerate(components):
+            if isinstance(c, tuple):
+                label, c = c
+                li_map.append((label, i))
+
+            comps.append(c)
+
+        self.label_to_idx_map = tuple(li_map)
+        self.components = tuple(comps)
+
+    def getitem(self, idx: int):
+        return self.components[idx]
+
+    def __len__(self):
+        return len(self.components)
+
+    def __eq__(self, x: object):
+        return self is x or (
+            isinstance(x, type(self))
+            and self.components == x.components
+            and self.label_to_idx_map == x.label_to_idx_map
+        )
+
 class Parallel(WithItems[tuple[Mor, Mor]]):
     __slots__ = ('source', 'pairs')
     source: Obj
@@ -207,21 +249,26 @@ class Parallel(WithItems[tuple[Mor, Mor]]):
         # The `Parallel` class avoids having to compose with an inclusion, whose
         # target might end up being discarded, and which has to be removed when
         # normalizing the requirement.
-        self.pairs = tuple(pairs)
+        self.pairs = tuple((i.extend(), j.extend()) for i, j in pairs)
         self.source = source
 
+    def is_valid(self):
+        source = self.source
         for i, j in self.pairs:
             if not (source.is_subobject(i.source) and source.is_subobject(j.source)):
-                raise ValueError('`source` must be subobject.')
+                raise ValidationError('`source` must be subobject.')
 
             # Recall that there is no such thing as a public eq which need to be checked
-            # by the public interface. Initialization should already ensure that the equalities
-            # are fulfilled.
+            # by the public interface.
             if i.target != j.target:
-                raise ValueError('Must have the equal targets')
+                raise ValidationError('Must have equal targets')
 
-    def getitem(self, idx: int) -> tuple[Mor, Mor]:
-        raise NotImplementedError
+    def getitem(self, idx: int):
+        i, j = self.pairs[idx]
+        return (
+            self.source.restrict(i),
+            self.source.restrict(j),
+        )
 
     def __len__(self):
         return len(self.pairs)

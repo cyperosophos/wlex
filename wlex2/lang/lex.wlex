@@ -27,7 +27,7 @@ fn equalizer: Parallel @ ($ -> Fork);
 
 type Lift := (
     mor: Mor, par: Parallel,
-    target @ $mor == equalizer,
+    target @ $mor == $source @ $mor @ equalizer @ $par,
 );
 
 fn Fork == (

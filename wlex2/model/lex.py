@@ -2,17 +2,17 @@ from abc import ABCMeta, abstractmethod
 from typing import Iterator, Collection
 from collections.abc import Sized
 
-from .category import Obj, Mor, Composition, Parallel as BaseParallel
+from .category import Obj, Mor, Composition, Parallel
 from ..equality import Eq
 
-def _split_parallel(par: BaseParallel):
-    def head(p: BaseParallel):
+def _split_parallel(par: Parallel):
+    def head(p: Parallel):
         if isinstance(p.source, Equalizer):
             return p.source.ordered
 
         return ()
 
-    def tail(p: BaseParallel):
+    def tail(p: Parallel):
         # Gives all requirements not appearing in the source.
         if isinstance(p.source, Equalizer):
             sreqs = p.source.requirements
@@ -24,18 +24,6 @@ def _split_parallel(par: BaseParallel):
 
     return head(par), tuple(tail(par))
 
-class Parallel(BaseParallel):
-    def getitem(self, idx: int) -> tuple[Mor, Mor]:
-        i, j = super().getitem(idx)
-        if not isinstance(self.source, Equalizer):
-            return i, j
-
-        h = Inclusion(self.source)
-        return (
-            Composition.strict((i, Lift.strict(h, i.source))),
-            Composition.strict((i, Lift.strict(h, j.source))),
-        )
-
 class BaseFork(Sized, metaclass=ABCMeta):
     __slots__ = ()
 
@@ -44,7 +32,7 @@ class BaseFork(Sized, metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def parallel(self) -> BaseParallel:
+    def parallel(self) -> Parallel:
         pass
 
     def eq(self) -> Iterator[Eq[Mor]]:
@@ -62,10 +50,10 @@ class BaseFork(Sized, metaclass=ABCMeta):
             and self.parallel() == x.parallel()
         )
 
-class ProvenFork(BaseFork):
+class Fork(BaseFork):
     __slots__ = ('_handle', '_parallel')#, '_eq')
     _handle: Mor
-    _parallel: BaseParallel
+    _parallel: Parallel
     #_eq: tuple[Eq[Mor], ...]
 
     def handle(self):
@@ -80,7 +68,7 @@ class ProvenFork(BaseFork):
     def __len__(self):
         return len(self._parallel)
 
-    def __init__(self, handle: Mor, parallel: BaseParallel):#, eq: Iterable[Eq[Mor]]):
+    def __init__(self, handle: Mor, parallel: Parallel):#, eq: Iterable[Eq[Mor]]):
         self._handle = handle
         self._parallel = parallel
         #self._eq = tuple(eq)
@@ -93,6 +81,13 @@ class Equalizer(Obj, BaseFork):
     requirements: set[tuple[Mor, Mor]]
     ordered: ReqList
     frozen: bool
+
+    def restrict(self, mor: Mor):
+        # This assumes that the restrictions makes. No type-checking.
+        h = Inclusion(self)
+        res = Composition.strict((mor, Lift.strict(h, mor.source)))
+        assert res == Composition.strict((mor.extend(), h))
+        return res
 
     def flat_requirements(self):
         def _flat(reqs: ReqList) -> Iterator[tuple[Mor, Mor]]:
@@ -156,11 +151,10 @@ class Equalizer(Obj, BaseFork):
         # equalities are yielded. This appears to have no use, since one
         # cannot use for registering equalizer equalities given the overly
         # restrictive source.
-        h = Inclusion(self)
         for (i, j), _ in self.ordered[1]:
             yield Eq[Mor](
-                Composition.strict((i, Lift.strict(h, i.source))),
-                Composition.strict((j, Lift.strict(h, j.source))),
+                self.restrict(i),
+                self.restrict(j),
             )
 
     def verify(self, e: Eq[Mor]):
@@ -186,7 +180,7 @@ class Equalizer(Obj, BaseFork):
 
         return src, set()
 
-    def __init__(self, parallel: BaseParallel, _allow_no_requirements: bool = False):
+    def __init__(self, parallel: Parallel, _allow_no_requirements: bool = False):
         super().__init__()
         src = parallel.source
         self.ordered = _split_parallel(parallel)
@@ -296,6 +290,13 @@ class BaseLift(Sized, metaclass=ABCMeta):
             and self.parallel() == x.parallel()
         )
 
+    def __len__(self):
+        target = self.mor.target
+        if isinstance(target, Equalizer):
+            return len(target)
+
+        return 0
+
 class AbstractLift(BaseLift):
     __slots__ = ('_mor',)
     _mor: Mor
@@ -306,13 +307,6 @@ class AbstractLift(BaseLift):
 
     def __init__(self, mor: Mor):
         self._mor = mor
-
-    def __len__(self):
-        target = self._mor.target
-        if isinstance(target, Equalizer):
-            return len(target)
-
-        return 0
 
 class Lift(Mor, BaseLift):
     __slots__ = ('sup',)
@@ -348,11 +342,6 @@ class Lift(Mor, BaseLift):
             self.sup = mor.sup
         else:
             self.sup = mor
-
-    def __len__(self):
-        target = self.target
-        assert isinstance(target, Equalizer)
-        return len(target)
 
     @classmethod
     def strict(cls, mor: Mor, target: Obj):

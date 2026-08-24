@@ -1,17 +1,34 @@
 from ..trusted import cart
-from . import validated as v
+from . import validated as v, ValidationError
 from .category import *
 
 def is_terminal_mor(tm: cart.TerminalMor):
-    return target(tm) == terminal()
+    if target(tm) == terminal():
+        return
+
+    raise ValidationError("Invalid")
 
 def is_span(sp: cart.Span):
     p, q = sp
-    return source(p) == source(q)
+    x, y = sp.param()
+    if (
+        source(p) == source(q)
+        and x == target(p)
+        and y == target(q)
+    ):
+        return
+
+    raise ValidationError("Invalid")
 
 def is_pairing(p: cart.Pairing):
-    x, y = p
-    return target(p.mor) == source(product((x, y))[0])
+    # Initialization checks should be minimal so as to not unnecessarily impact performance.
+    # Checks are better done in `proven` (public interface).
+    # `target(p.mor) == product(p.param())`
+    # Is given by the definition of `param` which is a retraction of `product`.
+    if len(p) == 2:
+        return
+
+    raise ValidationError("Invalid")
 
 terminal = cart.terminal
 terminal_mor = cart.terminal_mor

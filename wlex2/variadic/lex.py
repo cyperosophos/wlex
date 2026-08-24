@@ -1,7 +1,7 @@
 from typing import Iterable
 
-from ..model.category import Obj, Mor
-from ..model.lex import Equalizer, Parallel, ProvenFork
+from ..model.category import Obj, Mor, Composition
+from ..model.lex import Equalizer, Parallel, Fork as ConcreteFork, Inclusion
 from ..proven import lex
 from ..trusted import lex as plex
 from ..equality import Verifier
@@ -9,10 +9,6 @@ from .cart import *
 
 Fork = plex.Fork
 Lift = plex.Lift
-
-def _extended(requirements: Iterable[tuple[Mor, Mor]]):
-    for i, j in requirements:
-        yield i.extend(), j.extend()
 
 def _complete(obj: Obj, requirements: Iterable[tuple[Mor, Mor]]):
     if isinstance(obj, Equalizer):
@@ -46,8 +42,8 @@ def equalizer(obj: Obj, requirements: Iterable[tuple[Mor, Mor]]) -> Fork:
     # The list of requirements must be complete in the sense that any requirement of
     # a source of a requirement in the list must precede the requirement in the list.
     res = obj
-    for req in _complete(obj, _extended(requirements)):
-        par = Parallel(res, (req,))
+    for r in _complete(obj, requirements):
+        par = Parallel(res, (r,))
         res = lex.equalizer(par)
         assert isinstance(res, Equalizer)
         res.frozen = False
@@ -60,27 +56,62 @@ def equalizer(obj: Obj, requirements: Iterable[tuple[Mor, Mor]]) -> Fork:
 
 def lift(
     mor: Mor,
-    #requirements: Iterable[tuple[tuple[Mor, Mor], Eq[Mor]]],
     requirements: Iterable[tuple[Mor, Mor]],
     proofs: Verifier[object],
+    restrict: bool = False,
 ) -> Lift:
     # Equalities (in `requirements`) don't change by composition with adapted handle.
     res = Lift.ensure(mor)
-    tgt = mor.target
-    for req in _complete(tgt, _extended(requirements)):
-        par = Parallel(tgt, (req,))
-        f = ProvenFork(res.mor, par)
-        res = lex.lift(f, proofs)
-        tgt = res.mor.target
-        assert isinstance(tgt, Equalizer)
-        tgt.frozen = False
+    target = mor.target
+    for r in _complete(target, requirements):
+        par = Parallel(target, (r,))
+        f = ConcreteFork(res.mor, par)
+        if restrict:
+            res = restricting_lift(f, proofs)
+        else:
+            res = lex.lift(f, proofs)
 
-    if not isinstance(tgt, Equalizer):
+        target = res.mor.target
+        assert isinstance(target, Equalizer)
+        target.frozen = False
+
+    if not isinstance(target, Equalizer):
         raise ValueError("Empty requirements")
 
-    tgt.frozen = True
+    target.frozen = True
     return res
+
+def restricting_lift(f: Fork, proofs: Verifier[object]) -> Lift:
+    try:
+        # This will still fail if the superobjects don't coincide.
+        return lex.lift(f, proofs)
+    except lex.ProofError as pe:
+        eq = pe.eq
+        mor = f.handle()
+        source = mor.source
+
+        if isinstance(source, Equalizer):
+            mor = mor.extend() # The original source will get reused.
+            source.frozen = False
+
+        eqr = plex.equalizer(Parallel(source, (eq,)))
+        assert isinstance(eqr, Equalizer)
+        mor = Composition.strict((mor, Inclusion(eqr)))
+        f = ConcreteFork(mor, f.parallel())
+        # Avoid superfluous check.
+        return plex.lift(f)
 
 # For now, we don't do variadic `_fork` and `lift_ihat` because there
 # is no way to determine where the lift requirements start and where
 # the fulfilled requirements end.
+
+def req(obj: Obj, *requirements: tuple[AdaptingMor, AdaptingMor]):
+    res = equalizer(obj, (
+        (
+            i(obj) if isinstance(i, Callable) else i,
+            j(obj) if isinstance(j, Callable) else j,
+        )
+        for i, j in requirements
+    ))
+    assert isinstance(res, Obj)
+    return res

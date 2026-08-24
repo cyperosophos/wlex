@@ -1,23 +1,14 @@
 """Private model of `cart` morphisms"""
-from typing import Sequence
-
 from ..model import cart
+from ..model.category import Param
 from .category import *
 
 TerminalMor = Mor
-LabeledObj = tuple[str, Obj] | Obj
-Param = tuple[LabeledObj, LabeledObj]
-Span = Sequence[Mor] # Length 2 (dynamic check >= 2 is implicit)
+Span = cart.BaseSpan # Length 2 (dynamic check >= 2 is implicit)
 Pairing = cart.BasePairing # Length 2
 
-def _remove_label(obj: LabeledObj):
-    if isinstance(obj, tuple):
-        return obj[1]
-
-    return obj
-
 def terminal() -> Obj:
-    return cart.Product(())
+    return cart.Product(Param(()))
 
 def terminal_mor(obj: Obj) -> TerminalMor:
     return cart.Pairing(obj)
@@ -31,10 +22,10 @@ def terminal_mor_ihat(tm: TerminalMor):
     return Eq(tm, tm)
 
 def param_x(par: Param) -> Obj:
-    return _remove_label(par[0])
+    return par[0]
 
 def param_y(par: Param) -> Obj:
-    return _remove_label(par[1])
+    return par[1]
 
 def product(par: Param) -> Span:
     return cart.Product(par)
@@ -48,13 +39,16 @@ def pairing(s: Span) -> Pairing:
     return cart.Pairing(s)
 
 def _span(pm: Pairing) -> Span:
-    x, y = pm
     mor = pm.mor
-    p, q = product((x, y))
-    return (
+    # We use the double use of Product as the Span of projections,
+    # so we don't create a new Product instance.
+    tgt = mor.target
+    assert isinstance(tgt, cart.Product)
+    p, q = tgt
+    return cart.Span((
         compose((p, mor)),
         compose((q, mor)),
-    )
+    ), pm.param())
 
 def pairing_hat(s: Span):
     assert Span.__eq__(s, _span(pairing(s)))

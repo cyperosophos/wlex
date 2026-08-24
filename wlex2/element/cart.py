@@ -13,30 +13,30 @@ class TheoryTerminalMorIso(Mor):
         assert isinstance(x, Obj)
         return cart.terminal_mor(x)
 
-class TheoryDoubleObj(Obj):
+class TheoryParam(Obj):
     def accepts(self, x: object) -> bool:
         return is_tuple(x) and len(x) == 2
 
-def _is_do(x: object) -> TypeGuard[cart.DoubleObj]:
+def _is_param(x: object) -> TypeGuard[cart.Param]:
     if not (is_tuple(x) and len(x) == 2):
         return False
 
     u, v = x
     return isinstance(u, Obj) and isinstance(v, Obj)
 
-class TheoryDoX(Mor):
+class TheoryParamX(Mor):
     def ev(self, x: object) -> object:
-        assert _is_do(x)
-        return cart.do_x(x)
+        assert _is_param(x)
+        return cart.param_x(x)
 
-class TheoryDoY(Mor):
+class TheoryParamY(Mor):
     def ev(self, x: object) -> object:
-        assert _is_do(x)
-        return cart.do_y(x)
+        assert _is_param(x)
+        return cart.param_y(x)
 
 class TheoryProduct(Mor):
     def ev(self, x: object) -> object:
-        assert _is_do(x)
+        assert _is_param(x)
         return cart.product(x)
 
 class TheoryPairingIso(Mor):

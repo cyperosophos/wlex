@@ -10,45 +10,27 @@ def _all_mor(x: list[Mor | None]) -> TypeGuard[list[Mor]]:
     return all(m is not None for m in x)
 
 class BaseSpan(WithItems[Mor], metaclass=ABCMeta):
-    __slots__ = ()
+    __slots__ = ('label_to_idx_map',)
+    label_to_idx_map: dict[str, int]
 
     @abstractmethod
-    def param(self) -> Param:
+    def unlabeled_param(self) -> Iterable[Obj]:
         pass
 
-    def __eq__(self, x: object):
-        # This is needed in `private.is_terminal_mor`
-        return self is x or (
-            isinstance(x, type(self))
-            and super().__eq__(x)
-            and self.param() == x.param()
-        )
-
-class Span(BaseSpan):
-    __slots__ = ('_components', '_param')
-    _components: tuple[Mor, ...]
-    _param: Param
-
-    def __init__(self, components: Iterable[Mor], param: Param):
-        # Some redundancy is tolerated since initialization is based on the parameters
-        # we would actually have available in `trusted`.
-        self._param = param
-        self._components = tuple(components)
-
-    def __len__(self):
-        return len(self._components)
-
-    def getitem(self, idx: int):
-        return self._components[idx]
-
     def param(self):
-        return self._param
+        def _gen_components():
+            idx_to_label: dict[int, str] = {}
+            for k, v in self.label_to_idx_map.items():
+                idx_to_label[v] = k
 
-class Product(Obj, BaseSpan):
-    __slots__ = ('components', 'frozen', 'label_to_idx_map')
-    components: list[Obj]
-    frozen: bool
-    label_to_idx_map: dict[str, int]
+            for i, c in enumerate(self.unlabeled_param()):
+                label = idx_to_label.get(i)
+                if label:
+                    yield label, c
+                else:
+                    yield c
+
+        return Param(_gen_components())
 
     def label_to_idx(self, label: str):
         return self.label_to_idx_map[label]
@@ -66,6 +48,54 @@ class Product(Obj, BaseSpan):
             raise ValueError('No label for index')
 
         return k
+
+    def __eq__(self, x: object):
+        # This is needed in `private.is_terminal_mor`
+        return self is x or (
+            isinstance(x, type(self))
+            and super().__eq__(x)
+            and self.label_to_idx_map == x.label_to_idx_map
+        )
+
+class Span(BaseSpan):
+    __slots__ = ('_components',)
+    _components: tuple[Mor, ...]
+
+    def __init__(self, components: Iterable[tuple[str, Mor] | Mor]):
+        # param is inferred from components. Therefore less checking is required
+        # in `proven`.
+        li_map: dict[str, int] = {}
+        comps: list[Mor] = []
+
+        for i, c in enumerate(components):
+            if isinstance(c, tuple):
+                label, c = c
+            else:
+                label = ''
+
+            comps.append(c)
+            if label:
+                li_map[label] = i
+
+        self.label_to_idx_map = li_map
+        self._components = tuple(comps)
+
+    def __len__(self):
+        return len(self._components)
+
+    def getitem(self, idx: int):
+        return self._components[idx]
+
+    def unlabeled_param(self):
+        return (m.target for m in self._components)
+
+class Product(Obj, BaseSpan):
+    __slots__ = ('components', 'frozen')
+    components: list[Obj]
+    frozen: bool
+
+    def unlabeled_param(self):
+        return self.components
 
     def accepts(self, x: object):
         return (
@@ -93,43 +123,77 @@ class Product(Obj, BaseSpan):
 
     @classmethod
     def _reuse_first(
-        cls, components: Iterator[Obj],
-    ) -> tuple[list[Obj], dict[str, int], bool]:
+        cls, components: Iterator[tuple[str, Obj] | Obj],
+    ) -> tuple[list[Obj], dict[str, int]]:
         for component in components:
+            if isinstance(component, tuple):
+                label, component = component
+            else:
+                label = ''
+
             if isinstance(component, Product) and not component.frozen:
-                res = (component.components, component.label_to_idx_map, True)
+                if label:
+                    raise ValueError("Component to be reused can't be labeled.")
+
+                res = (component.components, component.label_to_idx_map)
                 del component.components
                 del component.label_to_idx_map
                 return res
 
-            return [component], {}, False
+            label_map: dict[str, int] = {}
+            if label:
+                label_map[label] = 0
 
-        return [], {}, False
+            return [component], label_map
 
-    def __init__(self, param: Param):
+        return [], {}
+
+    def __init__(self, components: Components[Obj], _allow_single_component: bool = False):
         super().__init__()
-        it = iter(param.components)
-        comps, li_map, is_reusing = self._reuse_first(it)
+        it = iter(components)
+        comps, li_map = self._reuse_first(it)
 
-        param_li = param.label_to_idx_map
-        if is_reusing:
-            idx_offset = len(comps) - 1
-        else:
-            idx_offset = 0
+        for i, component in enumerate(it):
+            if isinstance(component, tuple):
+                label, component = component
+            else:
+                label = ''
 
-        for l, i in param_li:
-            # Repeated labels are allowed because otherwise we wouldn't have a param -> product function.
-            if is_reusing and i == 0:
-                raise ValueError("Reused component can't be labeled")
+            comps.append(component)
+            if label:
+                # TODO: Index offset based on reused component!
+                li_map[label] = i + 1
 
-            li_map[l] = i + idx_offset
-
-        # Single product component is allowed. This is required by the variadic product.
         self.frozen = True
         self.components = comps
         self.label_to_idx_map = li_map
 
-    def fix_order(self, components: Iterable[tuple[str, Mor] | Mor]):
+    # TODO: Define strict? for case of one component with no label.
+    # Check that this works with pairing! Instead make sure there is no
+    # single component during initialization.
+
+    # @staticmethod
+    # def extract_labels(components: Components[Obj]):
+    #     labels: dict[str, int] = {}
+    #     comps: list[Obj] = []
+    #     for i, lc in enumerate(components):
+    #         if isinstance(lc, tuple):
+    #             l, c = lc
+    #             if l in labels:
+    #                 raise ValueError("Repeated label")
+
+    #             labels[l] = i
+    #         else:
+    #             c = lc
+
+    #         comps.append(c)
+
+    #     return labels, tuple(comps)
+
+    # def set_labels(self, map_: dict[str, int]):
+    #     self.label_to_idx_map = map_
+
+    def fix_order(self, components: Components[Mor]):
         res: list[Mor | None] = [None]*len(self.components)
 
         for i, lc in enumerate(components):
@@ -212,6 +276,9 @@ class AbstractPairing(BasePairing):
         return self._mor
 
     def __init__(self, mor: Mor):
+        if not isinstance(mor.target, Product):
+            raise ValueError('`target` must be product.')
+
         self._mor = mor
 
 class Pairing(Mor, BasePairing):
@@ -258,17 +325,17 @@ class Pairing(Mor, BasePairing):
 
         raise ValueError("Can't have empty component list")
 
-    def __init__(self, components: BaseSpan | Obj):
+    def __init__(self, components: Iterable[Mor] | Obj):
         # Span check is done in `proven`.
         if isinstance(components, Obj):
             source = components
             comps: list[Mor] = []
-            target = Product(Param(()))
+            target = Product(())
         else:
             it = iter(components)
             source, comps = self._reuse_first(it)
             comps.extend(it)
-            target = Product(components.param())
+            target = Product(c.target for c in comps)
 
         super().__init__(source, target)
         self.components = comps

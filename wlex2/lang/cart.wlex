@@ -21,7 +21,7 @@ type Span := (
 fn product: Param @ ($ -> Span);
 type Pairing := (
     mor: Mor, par: Param,
-    target == source @ product,
+    target @ $mor == source @ $p @ product @ $par,
 );
 
 fn Span == (

@@ -4,12 +4,14 @@ from itertools import chain
 from ..model.category import Obj, Mor, Composition
 from ..proven import category
 from ..trusted import category as pcategory
+from . import it_with_first
+from ..equality import Verifier
 
 Composable = Iterable[Mor]
 
-def compose(target: Obj, c: Composable) -> Mor:
+def compose(target: Obj, c: Composable, proofs: Verifier[object] | None = None) -> Mor:
     # Variadic normalized composition
-    # There has to be a "straighten" method with makes mors match.
+    # There has to be a "straighten" method which makes mors match.
     res = pcategory.identity(target)
     for factor in c:
         # We compose left-associatively since it is the `factors` on the left
@@ -17,42 +19,61 @@ def compose(target: Obj, c: Composable) -> Mor:
         if isinstance(res, Composition):
             res.frozen = False
 
-        res = category.compose((res, factor))
+        if proofs is None:
+            res = category.compose((res, factor))
+        else:
+            res = restricting_compose((res, factor), proofs)
 
     return res
+
+def restricting_compose(factors: tuple[Mor, Mor], proofs: Verifier[object]):
+    try:
+        return category.compose(factors)
+    except category.CompositionError:
+        f, g = factors
+        target = f.target
+
+        if isinstance(target, )
 
 AdaptingMor = Mor | Callable[[Obj], Mor]
 AdaptingComposable = Iterable[AdaptingMor]
 
-def adapting_compose(c: AdaptingComposable, source: Obj | None = None) -> AdaptingMor:
-    adapter = ComposableAdapter(c)
-    target, factors = adapter.composable(source)
+# def with_source(mor: AdaptingMor, source: Obj):
+#     if isinstance(mor, Callable):
+#         return mor(source)
 
-    if target is None:
+#     if mor.source != source:
+#         raise ValueError("Source doesn't match.")
+
+#     return mor
+
+def adapting_compose(c: Iterable[AdaptingMor]) -> AdaptingMor:
+    adapter = ComposeAdapter(c)
+    f0, factors = it_with_first(adapter.composable())
+
+    if f0 is None:
         def comp_only_pending(src: Obj):
-            t, factors = adapter.composable(src)
-            if t is None:
+            x0, f = it_with_first(adapter.flush(src))
+            if x0 is None:
                 raise ValueError("Empty factors")
 
-            return compose(t, factors)
+            return compose(x0.target, f)
 
         return comp_only_pending
 
-    comp = compose(target, factors) # The consumes the factors iterator.
+    comp = compose(f0.target, factors) # This consumes the factors iterator.
     if adapter.pending:
         def comp_with_pending(src: Obj):
-            t, factors = adapter.composable(src)
-            assert t
-            return compose(comp.target, chain((comp,), factors))
+            f = adapter.flush(src)
+            return compose(comp.target, chain((comp,), f))
 
         return comp_with_pending
 
     return comp
 
-class ComposableAdapter:
-    __slots__ = ('pending', 'target', 'factors')
+class ComposeAdapter:
+    __slots__ = ('pending', 'factors')
     pending: list[Callable[[Obj], Mor]]
-    target: Obj
     factors: AdaptingComposable
 
     def __init__(self, factors: AdaptingComposable):
@@ -69,7 +90,7 @@ class ComposableAdapter:
         del self.pending[:]
         return reversed(res)
 
-    def _composable(self, source: Obj | None) -> Iterator[Mor]:
+    def composable(self) -> Iterator[Mor]:
         pending = self.pending
         for factor in self.factors:
             if isinstance(factor, Callable):
@@ -78,16 +99,3 @@ class ComposableAdapter:
                 src = factor.target
                 yield from self.flush(src)
                 yield factor
-
-        if source:
-            yield from self.flush(source)
-
-    def composable(self, source: Obj | None):
-        it = self._composable(source)
-        for factor in it:
-            self.target = factor.target
-            break
-        else:
-            return None, it
-
-        return self.target, chain((factor,), it)

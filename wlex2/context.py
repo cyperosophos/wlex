@@ -1,4 +1,10 @@
-from .model.category import Obj, Mor
+from typing import Callable
+
+from .model.category import Obj, Mor, Composition
+from .model.lex import Equalizer, Inclusion
+from .proven.category import identity
+from .variadic.category import AdaptingMor, adapting_compose
+from .variadic.lex import lift
 from .equality import Eq as GeneralEq, Verifier
 
 Eq = GeneralEq[Mor]
@@ -10,19 +16,69 @@ def _check_signature(mor: Mor, source: Obj, target: Obj):
     if mor.target != target:
         raise ValueError('Wrong target')
 
+def _fix_eq_signature(left: AdaptingMor | Obj, right: AdaptingMor | Obj):
+    if isinstance(left, Obj):
+        left = Composition(left)
+
+    if isinstance(right, Obj):
+        right = Composition(right)
+
+    if isinstance(left, Callable):
+        if isinstance(right, Callable):
+            raise ValueError("Sides can't be both callable.")
+
+        left = left(right.source)
+    elif isinstance(right, Callable):
+        right = right(left.source)
+
+    return left, right
+
 class Context:
-    __slots__ = (
-        'refs',
-        'proofs',
-    )
+    __slots__ = ('refs', 'proofs')
     refs: dict[str, Obj | Mor]
     proofs: Verifier[object]
 
-    def obj(self, name: str, cell: Obj):
+    def straighten(self, mor: Mor, target: Obj) -> Mor:
+        if mor.target == target:
+            return mor
+
+        if isinstance(target, Equalizer):
+            # TODO: Not the equalizer equalities by equalizer parallel
+            # (source of the parallel is target of morphism). If the source
+            # of the parallel is too small, requirements will get added by `complete`.
+
+            mor = lift(mor, target.eq(), self.proofs, restrict=True).mor
+
+        t = mor.target
+        if isinstance(t, Equalizer):
+            # TODO: Check superobject
+            return Composition((Inclusion(t), mor))
+
+        return mor
+
+    def compose(self, *factors: AdaptingMor | Obj):
+        # Straightening has to work with extensivity in the same way,
+        # i.e. by composing and precomposing with inclusions as needed.
+        it = (
+            identity(x) if isinstance(x, Obj) else x
+            for x in factors
+        )
+
+        adapting_compose(factors)
+
+    #def pairing
+
+    def obj(self, name: str, cell: Obj | None = None):
         # Builtin cells (including equalities) come from the theory.
         # For cells that need a signature, the theory provides a function
         # taking the signature, since there is no point in having the signature
         # beforehand (when there are in fact no cell to define it).
+        if cell is None:
+            res = self.refs[name]
+            if not isinstance(res, Obj):
+                raise ValueError("Not an object")
+
+            return res
 
         if name in self.refs:
             raise ValueError("Can't reuse name")
@@ -33,9 +89,27 @@ class Context:
 
     def mor(
         self, name: str,
-        source: Obj, target: Obj,
-        cell: Mor,
+        source: Obj | None = None, target: Obj | None = None,
+        cell: AdaptingMor | None = None,
     ):
+        if cell is None:
+            res = self.refs[name]
+            if not isinstance(res, Mor):
+                raise ValueError("Not a morphism")
+
+            return res
+
+        if isinstance(cell, Callable):
+            if source is None:
+                raise ValueError("Source is required")
+
+            cell = cell(source)
+        elif source is None:
+            source = cell.source
+
+        if target is None:
+            target = cell.target
+
         if name in self.refs:
             raise ValueError("Can't reuse name")
 
@@ -44,11 +118,17 @@ class Context:
         self.refs[name] = cell
         return cell
 
+    @staticmethod
+    def axiom(left: AdaptingMor | Obj, right: AdaptingMor | Obj):
+        return Eq(*_fix_eq_signature(left, right))
+
     def eq(
         self,
-        left: Mor, right: Mor,
+        left: AdaptingMor | Obj, right: AdaptingMor | Obj,
         cell: Eq | None = None,
     ):
+        left, right = _fix_eq_signature(left, right)
+
         # Axiomatic equalities can't be present in the proofs from the start,
         # because one does not have the cells to build their signature.
         _check_signature(right, left.source, left.target)

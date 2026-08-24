@@ -1,17 +1,28 @@
 """Public model of `category` morphisms"""
 from ..trusted import category
-from . import validated as v
+from . import validated as v, ValidationError
+
+class CompositionError(ValidationError):
+    pass
 
 def is_composable(c: category.Composable):
+    # The point of this type-checking is to ensure that the theory is
+    # true beyond what can be checked through static type-checking,
+    # for example length and equalities (including equalities outside limits).
+    # One does minimal checking, for example some equalities may be guarantied
+    # by the data structure. The checks here can be ad-hoc (e.g. is_subset).
+    # We avoid initialization checks (except fail-early checks, normalization checks) so as to
+    # not unnecessarily impact performance of initialization in private contexts.
     f, g = c
-    return source(f) == target(g)
+    if source(f) == target(g):
+        return
+
+    raise CompositionError("Invalid")
 
 def is_associativity_source(s: category.AssociativitySource):
     f, g, h = s
-    return (
-        is_composable((f, g))
-        and is_composable((g, h))
-    )
+    is_composable((f, g))
+    is_composable((g, h))
 
 source = category.source
 target = category.target
