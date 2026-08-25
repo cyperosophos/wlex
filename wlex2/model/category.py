@@ -238,6 +238,13 @@ class Param(WithItems[Obj]):
             and self.label_to_idx_map == x.label_to_idx_map
         )
 
+    def labels(self):
+        res: list[str] = ['']*len(self.components)
+        for l, i in self.label_to_idx_map:
+            res[i] = l
+
+        return res
+
 class Parallel(WithItems[tuple[Mor, Mor]]):
     __slots__ = ('source', 'pairs')
     source: Obj

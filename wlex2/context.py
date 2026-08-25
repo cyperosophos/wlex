@@ -59,7 +59,7 @@ class Context:
     def compose(self, *factors: AdaptingMor | Obj):
         # Straightening has to work with extensivity in the same way,
         # i.e. by composing and precomposing with inclusions as needed.
-        it = (
+        it = ( # TODO: Move this back to `variadic`.
             identity(x) if isinstance(x, Obj) else x
             for x in factors
         )

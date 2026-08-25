@@ -1,4 +1,5 @@
-from typing import Iterator
+from ..model.category import Obj, Mor
+from typing import Iterator, Callable, Iterable
 from itertools import chain
 
 def it_with_first[T](it: Iterator[T]):
@@ -8,3 +9,6 @@ def it_with_first[T](it: Iterator[T]):
         return None, it
 
     return first, chain((first,), it)
+
+AdaptingMor = Mor | Callable[[Obj], Mor]
+AdaptingComposable = Iterable[AdaptingMor]

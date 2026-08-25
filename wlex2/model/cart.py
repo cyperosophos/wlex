@@ -25,24 +25,34 @@ class BaseSpan(WithItems[Mor], metaclass=ABCMeta):
         )
 
 class Span(BaseSpan):
-    __slots__ = ('_components', '_param')
-    _components: tuple[Mor, ...]
-    _param: Param
+    __slots__ = ('components', 'labels')
+    components: tuple[Mor, ...]
+    labels: tuple[str, ...]
 
-    def __init__(self, components: Iterable[Mor], param: Param):
-        # Some redundancy is tolerated since initialization is based on the parameters
-        # we would actually have available in `trusted`.
-        self._param = param
-        self._components = tuple(components)
+    def __init__(self, components: Iterable[Mor], labels: Iterable[str]):
+        self.labels = tuple(labels)
+        self.components = tuple(components)
+        if len(self.labels) != len(self.components):
+            raise ValueError("Labels and components must have the same length.")
 
     def __len__(self):
-        return len(self._components)
+        return len(self.components)
 
     def getitem(self, idx: int):
-        return self._components[idx]
+        return self.components[idx]
 
     def param(self):
-        return self._param
+        return Param((
+            (l, c.target) if l else c.target
+            for l, c in zip(self.labels, self.components)
+        ))
+
+    def __eq__(self, x: object):
+        return self is x or (
+            isinstance(x, type(self))
+            and self.components == x.components
+            and self.labels == x.labels
+        )
 
 class Product(Obj, BaseSpan):
     __slots__ = ('components', 'frozen', 'label_to_idx_map')

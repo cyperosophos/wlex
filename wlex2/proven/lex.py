@@ -28,12 +28,9 @@ def is_fork(f: lex.Fork, proofs: Verifier[object]):
     # its equality extensional. The object mapping of a functor can still be built as a limit.
 
     # Tacit equalities in the limit of the fork.
-    par = f.parallel()
-    is_parallel(par)
-    ((i, j),) = f.parallel()
-    h = f.handle()
-    is_composable((i, h))
-    is_composable((j, h))
+    is_parallel(f.parallel())
+    # That the handle is already composable with the parallel is
+    # given by the initialization.
 
     # That `e` is intensionally equal to a registered equality is the same as `e` being registered up to transitivity.
     (e,) = f.eq()

@@ -1,6 +1,7 @@
 from ..trusted import cart
 from . import validated as v, ValidationError
-from .category import *
+from ..model.cart import Product
+from .category import source, target
 
 def is_terminal_mor(tm: cart.TerminalMor):
     if target(tm) == terminal():
@@ -10,12 +11,8 @@ def is_terminal_mor(tm: cart.TerminalMor):
 
 def is_span(sp: cart.Span):
     p, q = sp
-    x, y = sp.param()
-    if (
-        source(p) == source(q)
-        and x == target(p)
-        and y == target(q)
-    ):
+    # Matching param is given by initialization.
+    if source(p) == source(q):
         return
 
     raise ValidationError("Invalid")
@@ -25,7 +22,8 @@ def is_pairing(p: cart.Pairing):
     # Checks are better done in `proven` (public interface).
     # `target(p.mor) == product(p.param())`
     # Is given by the definition of `param` which is a retraction of `product`.
-    if len(p) == 2:
+    t = p.target
+    if isinstance(t, Product) and len(t) == 2:
         return
 
     raise ValidationError("Invalid")

@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from typing import Iterator, Collection
+from typing import Iterator, Collection, Iterable
 from collections.abc import Sized
 
 from .category import Obj, Mor, Composition, Parallel
@@ -51,27 +51,29 @@ class BaseFork(Sized, metaclass=ABCMeta):
         )
 
 class Fork(BaseFork):
-    __slots__ = ('_handle', '_parallel')#, '_eq')
-    _handle: Mor
-    _parallel: Parallel
-    #_eq: tuple[Eq[Mor], ...]
+    __slots__ = ('mor', 'pairs')
+    mor: Mor
+    pairs: tuple[tuple[Mor, Mor], ...]
 
     def handle(self):
-        return self._handle
+        return self.mor
 
     def parallel(self):
-        return self._parallel
-
-    #def eq(self):
-    #    return iter(self._eq)
+        return Parallel(self.mor.target, self.pairs)
 
     def __len__(self):
-        return len(self._parallel)
+        return len(self.pairs)
 
-    def __init__(self, handle: Mor, parallel: Parallel):#, eq: Iterable[Eq[Mor]]):
-        self._handle = handle
-        self._parallel = parallel
-        #self._eq = tuple(eq)
+    def __init__(self, mor: Mor, pairs: Iterable[tuple[Mor, Mor]]):
+        self.mor = mor
+        self.pairs = tuple(pairs)
+
+    def __eq__(self, x: object):
+        return self is x or (
+            isinstance(x, type(self))
+            and self.mor == x.mor
+            and self.pairs == x.pairs
+        )
 
 ReqList = tuple['ReqList | tuple[()]', tuple[tuple[tuple[Mor, Mor], bool], ...]]
 

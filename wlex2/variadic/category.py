@@ -1,11 +1,14 @@
 from typing import Callable, Iterable, Iterator
 from itertools import chain
 
+from . import AdaptingMor, AdaptingComposable
 from ..model.category import Obj, Mor, Composition
+from ..model.lex import Equalizer
 from ..proven import category
 from ..trusted import category as pcategory
 from . import it_with_first
 from ..equality import Verifier
+from .lex import lift
 
 Composable = Iterable[Mor]
 
@@ -26,17 +29,17 @@ def compose(target: Obj, c: Composable, proofs: Verifier[object] | None = None) 
 
     return res
 
-def restricting_compose(factors: tuple[Mor, Mor], proofs: Verifier[object]):
+def restricting_compose(factors: tuple[Mor, Mor], proofs: Verifier[object]) -> Mor:
     try:
         return category.compose(factors)
     except category.CompositionError:
         f, g = factors
         target = f.target
 
-        if isinstance(target, )
-
-AdaptingMor = Mor | Callable[[Obj], Mor]
-AdaptingComposable = Iterable[AdaptingMor]
+        # There is no way to handle the complementary case by lifting, since it requires
+        # at least one requirement for type-checking.
+        if isinstance(target, Equalizer):
+            g = lift(g, , proofs, restrict=True)
 
 # def with_source(mor: AdaptingMor, source: Obj):
 #     if isinstance(mor, Callable):

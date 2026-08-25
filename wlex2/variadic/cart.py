@@ -1,11 +1,11 @@
-from typing import Iterable, TypeGuard
+from typing import Iterable, TypeGuard, Callable, Iterator
 
-from ..model.category import Obj, Param
+from . import AdaptingMor
+from ..model.category import Obj, Mor, Param
 from ..proven import cart
 from ..trusted import cart as pcart
 from ..model.cart import Pairing, Product, Span as ConcreteSpan
 from . import it_with_first
-from .category import *
 
 Span = pcart.Span
 

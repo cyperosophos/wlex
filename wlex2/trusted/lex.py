@@ -101,7 +101,7 @@ def _fork(l: Lift) -> Fork:
     # Having been able to construct the lift means that the equalities are already registered.
     return lex.Fork(
         compose((ef.handle(), mor)),
-        par,
+        par.pairs,
     #    _gen_eq(ef.eq()),
     )
 

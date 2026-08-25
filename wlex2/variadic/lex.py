@@ -5,7 +5,7 @@ from ..model.lex import Equalizer, Parallel, Fork as ConcreteFork, Inclusion
 from ..proven import lex
 from ..trusted import lex as plex
 from ..equality import Verifier
-from .cart import *
+#from .cart import *
 
 Fork = plex.Fork
 Lift = plex.Lift
@@ -56,29 +56,30 @@ def equalizer(obj: Obj, requirements: Iterable[tuple[Mor, Mor]]) -> Fork:
 
 def lift(
     mor: Mor,
-    requirements: Iterable[tuple[Mor, Mor]],
+    #requirements: Iterable[tuple[Mor, Mor]],
+    target: Obj,
     proofs: Verifier[object],
     restrict: bool = False,
 ) -> Lift:
+    # The result can be the same morphism
     # Equalities (in `requirements`) don't change by composition with adapted handle.
     res = Lift.ensure(mor)
-    target = mor.target
-    for r in _complete(target, requirements):
-        par = Parallel(target, (r,))
-        f = ConcreteFork(res.mor, par)
+    mtarget = mor.target
+    for r in _complete(mtarget, requirements):
+        f = ConcreteFork(res.mor, (r,))
         if restrict:
             res = restricting_lift(f, proofs)
         else:
             res = lex.lift(f, proofs)
 
-        target = res.mor.target
-        assert isinstance(target, Equalizer)
-        target.frozen = False
+        mtarget = res.mor.target
+        assert isinstance(mtarget, Equalizer)
+        mtarget.frozen = False
 
-    if not isinstance(target, Equalizer):
+    if not isinstance(mtarget, Equalizer):
         raise ValueError("Empty requirements")
 
-    target.frozen = True
+    mtarget.frozen = True
     return res
 
 def restricting_lift(f: Fork, proofs: Verifier[object]) -> Lift:
