@@ -2,12 +2,12 @@
 #from typing import Iterable, TypeGuard
 
 from ..model import lex
-from ..model.category import Parallel
+from ..model.category import Mor, Parallel
 from .cart import *
 from ..equality import Eq
 
 Fork = lex.BaseFork #tuple[Mor, Parallel, Eq[Mor]]
-Lift = lex.BaseLift # Every morphism is a lift along the identity.
+Lift = Mor # Every morphism is a lift along the identity.
 
 def parallel_i(par: Parallel) -> Mor:
     return par[0][0]
@@ -25,7 +25,7 @@ def eq_parallel_target(par: Parallel):
     assert i == target(parallel_j(par))
     return Eq(i, i)
 
-def equalizer(par: Parallel) -> Fork:
+equalizer = lex.Equalizer
     # In variadic equalizer, composing with inclusion is what allows
     # preserving previous requirements.
     # ** At a higher level one makes sure that requirements of the source of requirements
@@ -52,7 +52,7 @@ def equalizer(par: Parallel) -> Fork:
     #return inc, par, Eq(compose((i, inc)), compose((j, inc)))
     # Use InclusionComposition class that simply changes the source? Analogous to Lift.
     #src = par.source
-    return lex.Equalizer(par)
+    #return lex.Equalizer(par)
 
     # `inc` is an intensional identity in case of a tautological requirement.
     #ef = eqr.fork(compose)
@@ -80,10 +80,18 @@ def lift(f: Fork) -> Lift:
     # to get an object that's big enough. This equality has to be proven
     # using intensional equalities (equalities that appear in the actual
     # program and not in the theory of programs).
-    eqr = lex.Equalizer(f.parallel())
-    res = Lift.ensure(lex.Lift.strict(f.handle(), eqr))
-    assert len(res) == 1
-    return res
+
+    # IMPORTANT If the parallel is tautological because of the equalizer source,
+    # the equalizer here will be the source (with a redundant requirement), and
+    # the result will be *equal* to f.handle(), which might of course just be a simple morphism.
+    # Notice the inefficient `==` in Lift.strict.
+    # Having f.handle() now pointing to a reused Equalizer is not a problem because
+    # this only affects instances of Lift, and it is their `sup` mor which end up becoming
+    # the `sup` of the returned Lift. However this will be a problem if we return f.handle()
+    # itself. In fact, the `==` comparison will fail due to the target of f.handle() having being
+    # reused.
+    eqr = equalizer(f.parallel())
+    return lex.Lift.strict(f.handle(), eqr)
 
 def _fork(l: Lift) -> Fork:
     # def _is_len_2(x: Eq[tuple[Mor, ...]]) -> TypeGuard[Eq[tuple[Mor, Mor]]]:
@@ -95,8 +103,8 @@ def _fork(l: Lift) -> Fork:
     #         assert _is_len_2(d)
     #         yield d.apply(compose)
 
-    mor = l.mor
-    par = l.parallel()
+    mor = l
+    par = l.target.parallel()
     ef = equalizer(par)
     # Having been able to construct the lift means that the equalities are already registered.
     return lex.Fork(

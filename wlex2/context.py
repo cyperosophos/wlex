@@ -1,10 +1,12 @@
 from typing import Callable
 
 from .model.category import Obj, Mor, Composition
-from .model.lex import Equalizer, Inclusion
-from .proven.category import identity
-from .variadic.category import AdaptingMor, adapting_compose
-from .variadic.lex import lift
+from .model.cart import Product
+from .model.lex import Equalizer, Lift
+from .variadic.category import Transform, CartMor, LabeledMor, CartTransform, tcompose
+from .variadic.cart import pairing
+from .variadic.lex import lift, equalizer
+from .variadic import resolve
 from .equality import Eq as GeneralEq, Verifier
 
 Eq = GeneralEq[Mor]
@@ -16,20 +18,20 @@ def _check_signature(mor: Mor, source: Obj, target: Obj):
     if mor.target != target:
         raise ValueError('Wrong target')
 
-def _fix_eq_signature(left: AdaptingMor | Obj, right: AdaptingMor | Obj):
+def _fix_eq_signature(left: Transform | Obj, right: Transform | Obj):
     if isinstance(left, Obj):
         left = Composition(left)
 
     if isinstance(right, Obj):
         right = Composition(right)
 
-    if isinstance(left, Callable):
-        if isinstance(right, Callable):
+    if isinstance(left, (Callable, str, int)):
+        if isinstance(right, (Callable, str, int)):
             raise ValueError("Sides can't be both callable.")
 
-        left = left(right.source)
-    elif isinstance(right, Callable):
-        right = right(left.source)
+        left = resolve(left, right.source)
+    elif isinstance(right, (Callable, str, int)):
+        right = resolve(right, left.source)
 
     return left, right
 
@@ -38,35 +40,57 @@ class Context:
     refs: dict[str, Obj | Mor]
     proofs: Verifier[object]
 
-    def straighten(self, mor: Mor, target: Obj) -> Mor:
-        if mor.target == target:
-            return mor
-
-        if isinstance(target, Equalizer):
-            # TODO: Not the equalizer equalities by equalizer parallel
-            # (source of the parallel is target of morphism). If the source
-            # of the parallel is too small, requirements will get added by `complete`.
-
-            mor = lift(mor, target.eq(), self.proofs, restrict=True).mor
-
-        t = mor.target
-        if isinstance(t, Equalizer):
-            # TODO: Check superobject
-            return Composition((Inclusion(t), mor))
-
-        return mor
-
-    def compose(self, *factors: AdaptingMor | Obj):
+    def compose(self, *factors: CartTransform | Obj):
         # Straightening has to work with extensivity in the same way,
         # i.e. by composing and precomposing with inclusions as needed.
-        it = ( # TODO: Move this back to `variadic`.
-            identity(x) if isinstance(x, Obj) else x
-            for x in factors
-        )
 
-        adapting_compose(factors)
+        return tcompose(factors, self.fit_factor)
 
-    #def pairing
+    # def fix_fork(self, f: ) -> Mor:
+    #     # T
+    #     pass
+
+    # def fit_for_pairing(self, mor: Mor, source: Obj, target: Obj) -> Mor:
+    #     # Fit target first, since then the source may change.
+    #     mor = self.fit_mor_factor(target, mor)
+
+    #     # To get the intersection lift an identity.
+    #     # Type-checking??
+    #     # Do all this inside pairing??
+    #     i = self.fit_mor_factor(source, identity(mor.source))
+    #     j = self.fit_mor_factor(mor.source, i)
+    #     return compose((mor, j))
+
+    def fit_tuple_factor(self, target: Obj, factor: tuple[LabeledMor, ...]) -> Mor:
+        if not isinstance(target, Product):
+            raise ValueError('Target must be product')
+
+        return pairing(factor, target, self.fit_mor_factor, equalizer)
+
+    def fit_mor_factor(self, target: Obj, factor: Mor) -> Mor:
+        if isinstance(target, Equalizer):
+            factor = lift(factor, target, self.proofs)
+            # It is more simplified to only lift the inclusion.
+            return Composition.strict((
+                Lift.strict(factor.target.incl(), target),
+                factor,
+            ))
+
+        # In the case that there are no requirements for lifting
+        # (target is not an Equalizer), we don't know that factor.target
+        # is target. If `factor.target` already satisfies all requirements,
+        # then `factor.target` is included in `target` (in particular superobjects
+        # coincide.) If there are requirements, then when checking the
+        # parallels of the fork we indirectly make sure that factor.target
+        # is a subobject of target (or rather can be turned into a subobject
+        # by restricting factor.source).
+        return Composition.strict((factor.target.incl(), factor))
+
+    def fit_factor(self, target: Obj, factor: CartMor) -> Mor:
+        if isinstance(factor, Mor):
+            return self.fit_mor_factor(target, factor)
+
+        return self.fit_tuple_factor(target, factor)
 
     def obj(self, name: str, cell: Obj | None = None):
         # Builtin cells (including equalities) come from the theory.
@@ -90,7 +114,7 @@ class Context:
     def mor(
         self, name: str,
         source: Obj | None = None, target: Obj | None = None,
-        cell: AdaptingMor | None = None,
+        cell: Transform | None = None,
     ):
         if cell is None:
             res = self.refs[name]
@@ -99,11 +123,11 @@ class Context:
 
             return res
 
-        if isinstance(cell, Callable):
+        if isinstance(cell, (Callable, str, int)):
             if source is None:
                 raise ValueError("Source is required")
 
-            cell = cell(source)
+            cell = resolve(cell, source)
         elif source is None:
             source = cell.source
 
@@ -119,12 +143,12 @@ class Context:
         return cell
 
     @staticmethod
-    def axiom(left: AdaptingMor | Obj, right: AdaptingMor | Obj):
+    def axiom(left: Transform | Obj, right: Transform | Obj):
         return Eq(*_fix_eq_signature(left, right))
 
     def eq(
         self,
-        left: AdaptingMor | Obj, right: AdaptingMor | Obj,
+        left: Transform | Obj, right: Transform | Obj,
         cell: Eq | None = None,
     ):
         left, right = _fix_eq_signature(left, right)

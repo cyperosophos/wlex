@@ -1,12 +1,11 @@
 from abc import ABCMeta, abstractmethod
 from typing import TypeGuard, Iterable, Iterator
-from collections.abc import Sized
 
 from .category import Obj, Mor, Param
 from . import WithItems
 from .. import is_tuple
 
-def _all_mor(x: list[Mor | None]) -> TypeGuard[list[Mor]]:
+def _all_mor(x: list[tuple[str, Mor] | None]) -> TypeGuard[list[tuple[str, Mor]]]:
     return all(m is not None for m in x)
 
 class BaseSpan(WithItems[Mor], metaclass=ABCMeta):
@@ -139,8 +138,8 @@ class Product(Obj, BaseSpan):
         self.components = comps
         self.label_to_idx_map = li_map
 
-    def fix_order(self, components: Iterable[tuple[str, Mor] | Mor]):
-        res: list[Mor | None] = [None]*len(self.components)
+    def pairing_components(self, components: Iterable[tuple[str, Mor] | Mor]):
+        res: list[tuple[str, Mor] | None] = [None]*len(self.components)
 
         for i, lc in enumerate(components):
             if isinstance(lc, tuple):
@@ -148,16 +147,17 @@ class Product(Obj, BaseSpan):
                 i = self.label_to_idx(l)
             else:
                 c = lc
+                l = ''
 
             if res[i] is not None:
                 raise ValueError("Conflicting label or index")
 
-            res[i] = c
+            res[i] = (l, c)
 
         if not _all_mor(res):
             raise ValueError("Not enough components for target")
 
-        return tuple(res)
+        return res
 
 class Projection(Mor):
     __slots__ = ('idx',)
@@ -188,50 +188,10 @@ class Projection(Mor):
             and self.idx == x.idx
         )
 
-class BasePairing(Sized, metaclass=ABCMeta):
-    __slots__ = ()
-
-    @property
-    @abstractmethod
-    def mor(self) -> Mor:
-        pass
-
-    def param(self):
-        target = self.mor.target
-        return target.param()
-
-    def __eq__(self, x: object):
-        return self is x or (
-            isinstance(x, type(self))
-            and self.mor == x.mor
-        )
-
-    def __len__(self):
-        target = self.mor.target
-        if isinstance(target, Product):
-            return len(target)
-
-        return 1
-
-class AbstractPairing(BasePairing):
-    __slots__ = ('_mor',)
-    _mor: Mor
-
-    @property
-    def mor(self):
-        return self._mor
-
-    def __init__(self, mor: Mor):
-        self._mor = mor
-
-class Pairing(Mor, BasePairing):
+class Pairing(Mor):
     __slots__ = ('components', 'frozen')
     components: list[Mor]
     frozen: bool
-
-    @property
-    def mor(self):
-        return self
 
     def ev(self, x: object):
         return tuple(c.ev(x) for c in self.components)
@@ -261,24 +221,23 @@ class Pairing(Mor, BasePairing):
             if isinstance(component, Pairing) and not component.frozen:
                 res = component.components
                 del component.components
-                assert isinstance(res, list)
                 return source, res
 
             return source, [component]
 
         raise ValueError("Can't have empty component list")
 
-    def __init__(self, components: BaseSpan | Obj):
+    def __init__(self, components: Iterable[Mor] | Obj, target: Product):
+        # TODO: Initialize from Product!! Cf. Lift.
+        #       Also change variadic.pairing to look more like variadic.lift.
         # Span check is done in `proven`.
         if isinstance(components, Obj):
             source = components
             comps: list[Mor] = []
-            target = Product(Param(()))
         else:
             it = iter(components)
             source, comps = self._reuse_first(it)
             comps.extend(it)
-            target = Product(components.param())
 
         super().__init__(source, target)
         self.components = comps

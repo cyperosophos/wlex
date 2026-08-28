@@ -27,13 +27,13 @@ fn equalizer: Parallel @ ($ -> Fork);
 
 type Lift := (
     mor: Mor, par: Parallel,
-    target @ $mor == $source @ $mor @ equalizer @ $par,
+    target @ $mor == source @ $mor @ equalizer @ $par,
 );
 
 fn Fork == (
-    mor = compose @ ($mor @ equalizer, $mor),
-    par = $par,
+    mor = compose @ (mor\equalizer, mor\),
+    par = par$,
     # TODO: apply associativity. This is needed in `theory`, which does
     # not rely on normalized composition.
-    #eq = compose @ ($eq @ equalizer, $mor),
+    #eq = compose @ (equalizer/eq, mor\),
 ) @ Lift;

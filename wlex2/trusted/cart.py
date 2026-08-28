@@ -11,7 +11,7 @@ def terminal() -> Obj:
     return cart.Product(Param(()))
 
 def terminal_mor(obj: Obj) -> TerminalMor:
-    return cart.Pairing(obj)
+    return cart.Pairing(obj, cart.Product(Param(())))
 
 def terminal_mor_hat(obj: Obj):
     assert obj == source(terminal_mor(obj))
@@ -27,8 +27,7 @@ def param_x(par: Param) -> Obj:
 def param_y(par: Param) -> Obj:
     return par[1]
 
-def product(par: Param) -> Span:
-    return cart.Product(par)
+product = cart.Product
 
 def product_hat(par: Param):
     p, q = product(par)
@@ -36,7 +35,8 @@ def product_hat(par: Param):
     return Eq(par, par)
 
 def pairing(s: Span) -> Pairing:
-    return cart.Pairing(s)
+    prod = product(s.param())
+    return cart.Pairing(s, prod)
 
 def _span(pm: Pairing) -> Span:
     mor = pm

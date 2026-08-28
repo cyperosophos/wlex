@@ -84,8 +84,26 @@ class Equalizer(Obj, BaseFork):
     ordered: ReqList
     frozen: bool
 
+    def incl(self):
+        return Inclusion(self)
+
+    # def intersection(self, obj: Obj):
+    #     if obj == self.sup:
+    #         return self, ()
+
+    #     if not (isinstance(obj, Equalizer) and obj.sup == self.sup):
+    #         raise ValidationError("Can't intersect")
+
+    #     # Return the smallest amount of requirements
+    #     if len(self.requirements) > len(obj.requirements):
+    #         return self, obj.requirements - self.requirements
+
+    #     return obj, self.requirements - obj.requirements
+
     def restrict(self, mor: Mor):
-        # This assumes that the restrictions makes. No type-checking.
+        # This assumes that the restrictions make sense. No type-checking.
+        # If `mor.source` gets reused and `mor` is precomposed with an inclusion,
+        # this will still work since the inclusion gets reduced with the lift.
         h = Inclusion(self)
         res = Composition.strict((mor, Lift.strict(h, mor.source)))
         assert res == Composition.strict((mor.extend(), h))
@@ -109,7 +127,10 @@ class Equalizer(Obj, BaseFork):
 
     def is_subobject(self, obj: 'Obj'):
         if isinstance(obj, Equalizer):
-            return self.requirements.issuperset(obj.requirements)
+            return (
+                self.sup == obj.sup
+                and self.requirements.issuperset(obj.requirements)
+            )
 
         return self.sup == obj
 
@@ -161,6 +182,9 @@ class Equalizer(Obj, BaseFork):
 
     def verify(self, e: Eq[Mor]):
         s, t = e
+        # What if the equality only applies for a subset of the intersection of the sources?
+        # This would only concern us if we were searching the equality among the proofs.
+        # The source of the equality is the equalizer, so the equality is fulfilled.
         return (
             s.extend(),
             t.extend(),
@@ -265,52 +289,7 @@ class Inclusion(Mor):
     def extend(self):
         return Composition(self.target)
 
-class BaseLift(Sized, metaclass=ABCMeta):
-    __slots__ = ()
-
-    @property
-    @abstractmethod
-    def mor(self) -> Mor:
-        pass
-
-    def parallel(self):
-        target = self.mor.target
-        return target.parallel()
-
-    @classmethod
-    def ensure(cls, mor: Mor):
-        if isinstance(mor, cls):
-            return mor
-
-        return AbstractLift(mor)
-
-    def __eq__(self, x: object):
-        # `parallel()` is not guarantied to be the same.
-        return self is x or (
-            isinstance(x, type(self))
-            and self.mor == x.mor
-            and self.parallel() == x.parallel()
-        )
-
-    def __len__(self):
-        target = self.mor.target
-        if isinstance(target, Equalizer):
-            return len(target)
-
-        return 0
-
-class AbstractLift(BaseLift):
-    __slots__ = ('_mor',)
-    _mor: Mor
-
-    @property
-    def mor(self):
-        return self._mor
-
-    def __init__(self, mor: Mor):
-        self._mor = mor
-
-class Lift(Mor, BaseLift):
+class Lift(Mor):
     __slots__ = ('sup',)
     sup: Mor
 
@@ -321,10 +300,6 @@ class Lift(Mor, BaseLift):
         if isinstance(self.sup, Inclusion):
             return Composition(self.target)
 
-        return self
-
-    @property
-    def mor(self):
         return self
 
     def __init__(self, mor: Mor, target: Equalizer):
@@ -347,8 +322,9 @@ class Lift(Mor, BaseLift):
 
     @classmethod
     def strict(cls, mor: Mor, target: Obj):
-        # The == comparisons here usually return False, so they don't impact performance too much.
-        if mor.target == target:
+        # See `trusted.lift` comments for why we avoid comparing
+        # equalizers when mor is a lift.
+        if not isinstance(mor, Lift) and mor.target == target:
             return mor
 
         if not isinstance(target, Equalizer):

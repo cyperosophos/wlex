@@ -25,9 +25,7 @@ def identity_hat(obj: Obj):
     )
     return Eq(s, s)
 
-def compose(c: Composable) -> Mor:
-    f, g = c
-    return Composition.strict((f, g))
+compose = Composition.strict
 
 def compose_hat(c: Composable):
     h = compose(c)

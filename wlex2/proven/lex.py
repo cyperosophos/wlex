@@ -1,4 +1,5 @@
 from ..equality import Verifier, Eq
+from ..model.lex import Equalizer
 from ..trusted import lex
 from . import intensionally_validated as iv, validated as v, ValidationError
 from .cart import *
@@ -38,8 +39,16 @@ def is_fork(f: lex.Fork, proofs: Verifier[object]):
         raise ProofError(e)
 
 def is_lift(l: lex.Lift):
-    if len(l) != 1:
-        raise ValidationError("Lift must have length 1")
+    # TODO: Checking that the lift here actually corresponds to a fork seems
+    # superfluous. Cf. pairing and span. The reason is that for a general lift
+    # this is already guarantied the target, so there is no point in having a
+    # special case where the supermorphism has to be checked.
+    # The conclusion is then that the init of Lift and Pairing can't fully be
+    # trusted in a public interface. Trusted init would require Fork/Span as args.
+    # Does this apply to any other class? This seems to mainly affect Mor subclasses.
+    t = l.target
+    if not (isinstance(t, Equalizer) and len(t) == 1):
+        raise ValidationError("Lift must have one requirement")
 
     # This check is superfluous, cf. is_pairing
     # mor = l.mor

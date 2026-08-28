@@ -75,6 +75,15 @@ class Obj(metaclass=ABCMeta):
     def verify(self, e: Eq['Mor']) -> bool:
         return False
 
+    def incl(self) -> 'Mor':
+        return Composition(self)
+
+    # def intersection(self, obj: 'Obj') -> tuple['Obj', Iterable[tuple['Mor', 'Mor']]]:
+    #     if obj.is_subobject(self):
+    #         return obj, ()
+
+    #     raise ValidationError("Can't intersect")
+
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms"""
     # This needs to be hashable, so that we can find equalities.
@@ -82,6 +91,11 @@ class Mor(metaclass=ABCMeta):
     name: str
     source: Obj
     target: Obj
+
+    # def lower(self):
+    #     # We don't support lowering directly to an equalizer because
+    #     # of the type-checking involved, which can be handled by `variadic.lift`.
+    #     return Composition.strict((self.target.incl(), self))
 
     def extend(self):
         return self
@@ -246,9 +260,10 @@ class Param(WithItems[Obj]):
         return res
 
 class Parallel(WithItems[tuple[Mor, Mor]]):
-    __slots__ = ('source', 'pairs')
+    __slots__ = ('source', 'pairs', '_sources')
     source: Obj
     pairs: tuple[tuple[Mor, Mor], ...]
+    _sources: tuple[tuple[Obj, Obj], ...]
 
     def __init__(self, source: Obj, pairs: Iterable[tuple[Mor, Mor]]):
         # Lifting an inclusion based on builtin subset operation
@@ -256,15 +271,18 @@ class Parallel(WithItems[tuple[Mor, Mor]]):
         # The `Parallel` class avoids having to compose with an inclusion, whose
         # target might end up being discarded, and which has to be removed when
         # normalizing the requirement.
+        # Extending here is correct since the common source is already determined.
+        self._sources = tuple((i.source, j.source) for i, j in pairs)
         self.pairs = tuple((i.extend(), j.extend()) for i, j in pairs)
         self.source = source
 
     def is_valid(self):
         source = self.source
-        for i, j in self.pairs:
-            if not (source.is_subobject(i.source) and source.is_subobject(j.source)):
+        for si, sj in self._sources:
+            if not (source.is_subobject(si) and source.is_subobject(sj)):
                 raise ValidationError('`source` must be subobject.')
 
+        for i, j in self.pairs:
             # Recall that there is no such thing as a public eq which need to be checked
             # by the public interface.
             if i.target != j.target:
