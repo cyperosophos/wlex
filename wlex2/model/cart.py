@@ -59,6 +59,10 @@ class Product(Obj, BaseSpan):
     frozen: bool
     label_to_idx_map: dict[str, int]
 
+    @classmethod
+    def is_terminal(cls, obj: Obj):
+        return isinstance(obj, cls) and not obj.components
+
     def label_to_idx(self, label: str):
         return self.label_to_idx_map[label]
 
@@ -134,6 +138,7 @@ class Product(Obj, BaseSpan):
             li_map[l] = i + idx_offset
 
         # Single product component is allowed. This is required by the variadic product.
+        comps.extend(it)
         self.frozen = True
         self.components = comps
         self.label_to_idx_map = li_map
@@ -170,8 +175,6 @@ class Projection(Mor):
         self.name = f'${idx}'
 
     def ev(self, x: object):
-        source = self.source
-        assert isinstance(source, Product)
         assert is_tuple(x)
         return x[self.idx]
 
@@ -202,8 +205,8 @@ class Pairing(Mor):
 
         if not (
             isinstance(x, type(self))
-            and self.source == x.source
             and self.components == x.components
+            and (True if self.components else self.source == x.source)
         ):
             return False
 
@@ -228,14 +231,12 @@ class Pairing(Mor):
         raise ValueError("Can't have empty component list")
 
     def __init__(self, components: Iterable[Mor] | Obj, target: Product):
-        # TODO: Initialize from Product!! Cf. Lift.
-        #       Also change variadic.pairing to look more like variadic.lift.
         # Span check is done in `proven`.
         if isinstance(components, Obj):
             source = components
             comps: list[Mor] = []
         else:
-            it = iter(components)
+            it = self.iter_set_broken(components)
             source, comps = self._reuse_first(it)
             comps.extend(it)
 

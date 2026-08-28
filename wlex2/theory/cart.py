@@ -65,8 +65,8 @@ def cart(ctx: Context):
     _pairing_sign = (Span, Pairing)
     pairing = ctx.mor('pairing', *_pairing_sign, TheoryPairingIso(*_pairing_sign))
     _span = c((
-        ('p', c(compose, (c('p', product), 'mor'))),
-        ('q', c(compose, (c('q', product), 'mor'))),
+        ('p', c(compose, (c('p', product, 'par'), 'mor'))),
+        ('q', c(compose, (c('q', product, 'par'), 'mor'))),
         ('par', 'par'),
     ))
     _pairing_hat_sign = (Span, c(_span, pairing))

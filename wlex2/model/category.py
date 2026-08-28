@@ -87,10 +87,11 @@ class Obj(metaclass=ABCMeta):
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms"""
     # This needs to be hashable, so that we can find equalities.
-    __slots__ = 'name', 'source', 'target'
+    __slots__ = 'name', 'source', 'target', 'broken'
     name: str
     source: Obj
     target: Obj
+    broken: bool
 
     # def lower(self):
     #     # We don't support lowering directly to an equalizer because
@@ -118,9 +119,16 @@ class Mor(metaclass=ABCMeta):
         self.name = ''
         self.source = source
         self.target = target
+        # We prioritize any value set by subclass initialization.
+        self.broken = getattr(self, 'broken', False)
 
     def __repr__(self):
         return f'{type(self).__name__}({self.name}: {self.source} -> {self.target})'
+
+    def iter_set_broken(self, factors: Iterable['Mor']):
+        for factor in factors:
+            self.broken = self.broken or factor.broken
+            yield factor
 
 class Composition(Mor):
     """Models the result of `category.compose`"""
@@ -162,18 +170,19 @@ class Composition(Mor):
 
             return [factor]
 
-        return []
+        raise ValueError('`factors` must be an instance of `Obj` if there are no factors.')
 
     def __init__(self, factors: Obj | Iterable[Mor], _allow_single_factor: bool = False):
         # Do not directly call class for instantiation, use `identity` or
         # `simplified` instead.
+        self.broken = False
         if isinstance(factors, Obj):
             self.factors = []
             super().__init__(factors, factors)
             self.frozen = True
             return
 
-        it = iter(factors)
+        it = self.iter_set_broken(factors)
         self.factors = self._reuse_first(it)
         f = self.factors
         if f:
@@ -182,18 +191,15 @@ class Composition(Mor):
         else:
             tail = it
 
-        self.factors.extend(_reduce_factors(_flatten_factors(tail)))
+        f.extend(_reduce_factors(_flatten_factors(tail)))
         self.frozen = True
 
-        if f:
-            if len(f) == 1 and not _allow_single_factor:
-                raise ValueError('Single factor')
+        if len(f) == 1 and not _allow_single_factor:
+            raise ValueError('Single factor')
 
-            target = f[0].target
-            source = f[-1].source
-            super().__init__(source, target)
-        else:
-            raise ValueError('`factors` must be an instance of `Obj` if there are no factors.')
+        target = f[0].target
+        source = f[-1].source
+        super().__init__(source, target)
 
     @classmethod
     def strict(cls, factors: Obj | Iterable[Mor]):

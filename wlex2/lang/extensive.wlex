@@ -1,2 +1,62 @@
 include "lex.wlex";
 
+# Always existing cospan
+# Coproducts don't need to support labeling, another reason for
+# Cospan not to have a diagram component.
+type Cospan := (
+    p, q: Mor,
+    target @ ($p == $q),
+);
+
+fn coproduct: (x: Obj, y: Obj) -> (target, target) @ Cospan;
+type Copairing := (
+    mor: Mor, x: Obj, y: Obj,
+    source @ $mor == coproduct @ ($x, $y),
+);
+
+fn Cospan == (
+    p = compose @ ($mor, $p @ coproduct @ ($x, $y)),
+    q = compose @ ($mor, $q @ coproduct @ ($x, $y)),
+) @ Copairing;
+
+# Is extensivity needed for constructing products from dependent products?
+# The key point of extensivity is that inclusions of coproducts can be treated
+# the same way as inclusions of equalizers, so that for example a similar process
+# can be followed for restricting then lifting.
+
+fn bool: Cospan := coproduct @ (terminal, terminal);
+type Selector := (
+    Mor,
+    target == target @ bool,
+);
+
+# Notice that this does mean that A is the equalizer of A + B => 2.
+# It means that A is isomorphic to the equalizer (consider a certain pullback
+# and the fact that isomorphisms are stable under pullback).
+# Equal morphisms will produce the "equal" equalizers on the parallels gotten
+# by evaluating `case` on the morphisms. This equality of objects cannot be expressed
+# in the program. In fact one should only be able to deduce isomorphism from
+# equality of morphisms. The * means that `case` cannot get evaluated on equalities.
+# It is indifferent to equality of elements just as it would be with respect to any
+# equivalence relation. Morphisms and equalities (such as the hat here) also carry
+# this *. Such cells are called broken. There is no need for eq* because the *
+# is inherited from the sides of the equality.
+fn* case: Mor @ Selector -> parallel_i @ (
+    Parallel,
+    parallel_j == compose @ ($p @ bool, terminal_mor @ source @ parallel_i),
+);
+
+# For now no hat on define functions (nor image as domain).
+fn select: Selector -> Mor := $mor @ equalizer @ case;
+# TODO: How do we reference isos? Probably name them manually
+# based on naming convention.
+fn negation: Mor := $mor @ Copairing @ ($q @ bool, $p @ bool);
+fn split: Selector -> Mor;
+
+# Now we postulate that split is iso, the inverse of a certain mor.
+fn stick: Selector -> Mor := $mor @ Copairing @ (
+    select,
+    select @ compose @ (negation, $),
+);
+eq identity @ source @ split := compose @ (stick, split);
+eq identity @ target @ split := compose @ (split, stick);

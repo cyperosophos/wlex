@@ -314,6 +314,7 @@ class Lift(Mor):
         # quadratic time issue.
         super().__init__(mor.source, target)
         self.name = mor.name
+        self.broken = mor.broken
 
         if isinstance(mor, Lift):
             self.sup = mor.sup

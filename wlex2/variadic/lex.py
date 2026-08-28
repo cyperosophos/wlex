@@ -89,6 +89,9 @@ def lift(
         except lex.ProofError as pe:
             eq = pe.eq
             msource = res.source
+            # eqr is actually equivalently pullback!
+            # Pulling back along a mono gives a mono,
+            # hence we take the equalizer as a kind of shortcut.
             eqr = plex.equalizer(Parallel(msource, (eq,)))
             eqr.frozen = False
             res = eqr.restrict(res)

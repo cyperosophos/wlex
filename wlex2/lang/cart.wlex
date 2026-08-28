@@ -25,7 +25,7 @@ type Pairing := (
 );
 
 fn Span == (
-    p = compose @ ($p @ product, $mor),
-    q = compose @ ($q @ product, $mor),
+    p = compose @ ($p @ product @ $par, $mor),
+    q = compose @ ($q @ product @ $par, $mor),
     par = $par,
 ) @ Pairing;

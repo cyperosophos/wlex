@@ -24,6 +24,10 @@ type Fork := (
 );
 
 fn equalizer: Parallel @ ($ -> Fork);
+# It seems one might one to keep certain equalizers from existing.
+# For example when equality is not decidable enough for element rel to be decidable,
+# which is not a requirement of a bishop set, but rather of open subsets.
+# Here decidable actually means semidecidable.
 
 type Lift := (
     mor: Mor, par: Parallel,
