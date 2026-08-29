@@ -41,22 +41,24 @@ type Selector := (
 # equivalence relation. Morphisms and equalities (such as the hat here) also carry
 # this *. Such cells are called broken. There is no need for eq* because the *
 # is inherited from the sides of the equality.
-fn* case: Mor @ Selector -> parallel_i @ (
-    Parallel,
-    parallel_j == compose @ ($p @ bool, terminal_mor @ source @ parallel_i),
-);
+#fn* case: Mor @ Selector -> parallel_i @ (
+#    Parallel,
+#    parallel_j == compose @ ($p @ bool, terminal_mor @ source @ parallel_i),
+#);
 
 # For now no hat on define functions (nor image as domain).
 fn select: Selector -> Mor := $mor @ equalizer @ case;
 # TODO: How do we reference isos? Probably name them manually
 # based on naming convention.
 fn negation: Mor := $mor @ Copairing @ ($q @ bool, $p @ bool);
-fn split: Selector -> Mor;
 
 # Now we postulate that split is iso, the inverse of a certain mor.
 fn stick: Selector -> Mor := $mor @ Copairing @ (
     select,
-    select @ compose @ (negation, $),
+    select @ compose @ (negation @ (), $),
 );
+# The hat is needed for having the composition of stick and split.
+fn split: (target, source) @ stick @ Selector -> (source, target);
+
 eq identity @ source @ split := compose @ (stick, split);
 eq identity @ target @ split := compose @ (split, stick);

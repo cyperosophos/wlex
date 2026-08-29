@@ -1,7 +1,14 @@
 from ..trusted import cart
 from . import validated as v, ValidationError
 from ..model.cart import Product
+from ..model.category import Param
 from .category import source, target
+
+def is_param(par: Param):
+    if len(par) == 2:
+        return
+
+    raise ValidationError("Invalid")
 
 def is_terminal_mor(tm: cart.TerminalMor):
     if target(tm) == terminal():
@@ -32,10 +39,10 @@ terminal = cart.terminal
 terminal_mor = cart.terminal_mor
 terminal_mor_hat = cart.terminal_mor_hat
 terminal_mor_ihat = v(cart.terminal_mor_ihat, is_terminal_mor)
-param_x = cart.param_x
-param_y = cart.param_y
-product = cart.product
-product_hat = cart.product_hat
+param_x = v(cart.param_x, is_param)
+param_y = v(cart.param_y, is_param)
+product = v(cart.product, is_param)
+product_hat = v(cart.product_hat, is_param)
 pairing = v(cart.pairing, is_span)
 pairing_hat = v(cart.pairing_hat, is_span)
 pairing_ihat = v(cart.pairing_ihat, is_pairing)

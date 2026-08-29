@@ -87,11 +87,11 @@ class Obj(metaclass=ABCMeta):
 class Mor(metaclass=ABCMeta):
     """Base class for morphisms"""
     # This needs to be hashable, so that we can find equalities.
-    __slots__ = 'name', 'source', 'target', 'broken'
+    __slots__ = 'name', 'source', 'target'#, 'broken'
     name: str
     source: Obj
     target: Obj
-    broken: bool
+    #broken: bool
 
     # def lower(self):
     #     # We don't support lowering directly to an equalizer because
@@ -120,15 +120,15 @@ class Mor(metaclass=ABCMeta):
         self.source = source
         self.target = target
         # We prioritize any value set by subclass initialization.
-        self.broken = getattr(self, 'broken', False)
+        #self.broken = getattr(self, 'broken', False)
 
     def __repr__(self):
         return f'{type(self).__name__}({self.name}: {self.source} -> {self.target})'
 
-    def iter_set_broken(self, factors: Iterable['Mor']):
-        for factor in factors:
-            self.broken = self.broken or factor.broken
-            yield factor
+    # def iter_set_broken(self, factors: Iterable['Mor']):
+    #     for factor in factors:
+    #         self.broken = self.broken or factor.broken
+    #         yield factor
 
 class Composition(Mor):
     """Models the result of `category.compose`"""
@@ -175,14 +175,15 @@ class Composition(Mor):
     def __init__(self, factors: Obj | Iterable[Mor], _allow_single_factor: bool = False):
         # Do not directly call class for instantiation, use `identity` or
         # `simplified` instead.
-        self.broken = False
+        #self.broken = False
         if isinstance(factors, Obj):
             self.factors = []
             super().__init__(factors, factors)
             self.frozen = True
             return
 
-        it = self.iter_set_broken(factors)
+        #it = self.iter_set_broken(factors)
+        it = iter(factors)
         self.factors = self._reuse_first(it)
         f = self.factors
         if f:

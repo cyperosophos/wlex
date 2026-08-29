@@ -15,7 +15,7 @@ def product(components: Iterable[tuple[str, Obj] | Obj]) -> Product:
     assert isinstance(res, Product)
     for component in components:
         res.frozen = False
-        res = cart.product(Param((res, component)))
+        res = pcart.product(Param((res, component)))
         assert isinstance(res, Product)
 
     return res

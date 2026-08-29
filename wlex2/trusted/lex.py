@@ -1,9 +1,7 @@
 """Private model of `lex` morphisms"""
-#from typing import Iterable, TypeGuard
-
 from ..model import lex
 from ..model.category import Mor, Parallel
-from .cart import *
+from .category import source, target, compose
 from ..equality import Eq
 
 Fork = lex.BaseFork #tuple[Mor, Parallel, Eq[Mor]]

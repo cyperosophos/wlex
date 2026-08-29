@@ -40,7 +40,7 @@ def pairing(s: Span) -> Pairing:
 
 def _span(pm: Pairing) -> Span:
     mor = pm
-    # We use the double use of Product as the Span of projections,
+    # We rely on the double use of Product as the Span of projections,
     # so we don't create a new Product instance.
     tgt = mor.target
     assert isinstance(tgt, cart.Product)

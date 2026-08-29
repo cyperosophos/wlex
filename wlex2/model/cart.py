@@ -236,7 +236,7 @@ class Pairing(Mor):
             source = components
             comps: list[Mor] = []
         else:
-            it = self.iter_set_broken(components)
+            it = iter(components)
             source, comps = self._reuse_first(it)
             comps.extend(it)
 

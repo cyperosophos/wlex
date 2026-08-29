@@ -1,4 +1,4 @@
-from typing import Iterable, Iterator, NamedTuple
+from typing import Iterable, Iterator, NamedTuple, Sequence
 
 from .category import Obj, Mor
 from .cart import Product
@@ -25,7 +25,8 @@ class Coproduct(Obj, WithItems[Mor]):
 
         return []
 
-    def __init__(self, components: Iterable[Obj]):
+    def __init__(self, components: Sequence[Obj]):
+        # We use Sequence instead of Iterable for checking only length in `proven`.
         super().__init__()
         it = iter(components)
         comps = self._reuse_first(it)
@@ -69,7 +70,7 @@ class Coprojection(Mor):
     def ev(self, x: object):
         return x
 
-    # `reduce` is handle in copairing
+    # `reduce` is handled in copairing
 
     def __eq__(self, x: object):
         return self is x or (
@@ -82,6 +83,14 @@ class Copairing(Mor):
     __slots__ = ('components', 'frozen')
     components: list[Mor]
     frozen: bool
+
+    def reduce(self, mor: Mor):
+        if isinstance(mor, Coprojection):
+            return self.components[mor.idx]
+
+        # TODO: Reduce with split when this is a stick.
+
+        return None
 
     def ev(self, x: object):
         if isinstance(x, Shadowed):
@@ -123,10 +132,24 @@ class Copairing(Mor):
             target = components
             comps: list[Mor] = []
         else:
-            it = self.iter_set_broken(components)
+            it = iter(components)
             target, comps = self._reuse_first(it)
             comps.extend(it)
 
         super().__init__(source, target)
         self.components = comps
         self.frozen = True
+
+class Split(Mor):
+    __slots__ = ('frozen',)
+    # `reduce` with copairing corresponding to stick.
+    # Take into account that by evaluating negation (an isomorphism)
+    # on the requirement one gets an equivalent requirement, which may
+    # actually the requirement to check for the purposes of reducing.
+
+    def __init__(self, mor: Mor):
+        # This has to be variadic!!
+        source = mor.source
+        target = Coproduct((
+
+        ))
