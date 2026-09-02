@@ -45,6 +45,8 @@ type Selector := (
 #    Parallel,
 #    parallel_j == compose @ ($p @ bool, terminal_mor @ source @ parallel_i),
 #);
+# For consistency one does not write def eq_... in trusted for the equalities
+# of the target equalizer, but an is_... function in proven.
 
 # For now no hat on define functions (nor image as domain).
 fn select: Selector -> Mor := $mor @ equalizer @ case;

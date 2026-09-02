@@ -1,172 +1,265 @@
 from abc import ABCMeta, abstractmethod
-from typing import Iterator, Collection, Iterable
-from collections.abc import Sized
+import weakref
 
-from .category import Obj, Mor, Composition, Parallel
+from .category import Obj, Mor, Composition
+from .cart import WRef
 from ..equality import Eq
+from ..proven import ValidationError
 
-def _split_parallel(par: Parallel):
-    def head(p: Parallel):
-        if isinstance(p.source, Equalizer):
-            return p.source.ordered
+# TODO: Normalize equalities (and requirements) by factoring out
+# epis and monos? Probably overkill.
 
-        return ()
+class Parallel:
+    __slots__ = (
+        'source',
+        '_i', '_j',
+        'idx',
+        'equalizer',
+    )
+    source: Obj
+    _i: Mor
+    _j: Mor
+    idx: tuple[int, ...]
+    equalizer: WRef['Equalizer']
 
-    def tail(p: Parallel):
-        # Gives all requirements not appearing in the source.
-        if isinstance(p.source, Equalizer):
-            sreqs = p.source.requirements
-        else:
-            sreqs: Collection[tuple[Mor, Mor]] = frozenset()
+    def __init__(self, source: Obj, i: Mor, j: Mor, idx: tuple[int, ...]):
+        # Lifting an inclusion based on builtin subset operation
+        # has the only disadvantage that it cannot rely on intensional equalities.
+        # The `Parallel` class avoids having to compose with an inclusion, whose
+        # target might end up being discarded, and which has to be removed when
+        # normalizing the requirement.
+        # Extending here is correct since the common source is already determined.
+        self._i = i
+        self._j = j
+        self.source = source
+        self.idx = idx
+        self.equalizer = lambda: None
 
-        for q in p.pairs:
-            yield q, q in sreqs
+        # Repeated requirements must not be allowed, because then the dict
+        # of requirements in the Equalizer would be inconsistent.
+        # Of course the equalizer still exist (meaning that the lifts can be constructed)
+        # just not the parallel to produce it.
+        # TODO: Should this actually be in context?
+        if isinstance(source, Equalizer):
+            if (i.extend(), j.extend()) in source.requirements:
+                raise ValueError('Repeated requirement')
 
-    return head(par), tuple(tail(par))
+    def _restrict(self, mor: Mor):
+        p = self.source.proj(self.idx)
+        return Composition.strict(p.target.restrict(mor), p)
 
-class BaseFork(Sized, metaclass=ABCMeta):
+    def is_valid(self):
+        source = self.source.component(self.idx)
+        if not (
+            source.is_subobject(self._i.source)
+            and source.is_subobject(self._j.source)
+        ):
+            raise ValidationError('`source` must be subobject.')
+
+        # Recall that there is no such thing as a public eq which need to be checked
+        # by the public interface.
+        if self._i.target != self._j.target:
+            raise ValidationError('Must have equal targets')
+
+    def i(self):
+        return self._restrict(self._i)
+
+    def j(self):
+        return self._restrict(self._j)
+
+    def projected(self, source: Obj, idx: int):
+        # TODO: !!! idx should actually be tuple[int, ...].
+        # This could be a deep component.
+        # TODO: Should there be a mapping of components to indices?
+        #       (to be used in proj product -> object with no idx)
+        # TODO: proj should be deep!
+
+        # When an index is given, we take the existence of this parallel as having being inferred
+        # from the existence of the parallel without the index.
+        # TODO: Why don't just access the original parallel??
+        # TODO: source = self.source.component(self.idx)
+        # return Parallel(
+        #     source,
+        #     self._i,
+        #     self._j,
+        #     -1,
+        # )
+        # TODO: Since it is context where we get rid of params with equalizers,
+        # it should also be there where we give the existence of parallels whose
+        # existence was originally a consequence of the existence of the remove params.
+        # raise TypeError("...")
+        # TODO: Actually instead of subclassing param and parallel it is better to just
+        # provide functions with checks in context that create that needed diagrams.
+
+        if isinstance(self.source, Equalizer):
+            source = Equalizer(self.source.par.projected(source, idx))
+
+        # This is valid when `self.source` (not an equalizer) is the component at
+        # `idx` of (equalizer of) product `source` (no equalizer components).
+        if self.source != source.component(idx):
+            raise ValueError("Wrong source")
+
+        return Parallel(
+            source,
+            self._i,
+            self._j,
+            idx,
+        )
+
+    # def projected(self, proj: Projection):
+        # The parallel precomposed with restrict-lifted projection.
+        # TODO: Match source and target each time composition is instantiated directly (or using `strict`).
+        # The target of the projection is expected to not be an equalizer.
+        # One takes self.source, which may be an equalizer, ...
+        # The only product involved is the one with no equalizer among its components.
+        # We need to determine what data we'll normally have available to make this construction.
+        # if self.source != proj.target:
+        #     raise ValueError("Invalid proj")
+
+class BaseFork(metaclass=ABCMeta):
     __slots__ = ()
+    par: Parallel
 
     @abstractmethod
-    def handle(self) -> Mor:
+    def mor(self) -> Mor:
         pass
 
-    @abstractmethod
-    def parallel(self) -> Parallel:
-        pass
-
-    def eq(self) -> Iterator[Eq[Mor]]:
-        h = self.handle()
-        for i, j in self.parallel():
-            yield Eq[Mor](
-                Composition.strict((i, h)),
-                Composition.strict((j, h)),
-            )
+    def eq(self) -> Eq[Mor]:
+        h = self.mor()
+        return Eq[Mor](
+            Composition.strict(self.par.i(), h),
+            Composition.strict(self.par.j(), h),
+        )
 
     def __eq__(self, x: object):
         return self is x or (
             isinstance(x, type(self))
-            and self.handle() == x.handle()
-            and self.parallel() == x.parallel()
+            and self.mor() == x.mor()
+            and self.par == x.par
         )
 
 class Fork(BaseFork):
-    __slots__ = ('mor', 'pairs')
-    mor: Mor
-    pairs: tuple[tuple[Mor, Mor], ...]
+    __slots__ = ('_mor', 'par')
+    _mor: Mor
 
-    def handle(self):
-        return self.mor
+    def mor(self):
+        return self._mor
 
-    def parallel(self):
-        return Parallel(self.mor.target, self.pairs)
-
-    def __len__(self):
-        return len(self.pairs)
-
-    def __init__(self, mor: Mor, pairs: Iterable[tuple[Mor, Mor]]):
-        self.mor = mor
-        self.pairs = tuple(pairs)
-
-    def __eq__(self, x: object):
-        return self is x or (
-            isinstance(x, type(self))
-            and self.mor == x.mor
-            and self.pairs == x.pairs
-        )
-
-ReqList = tuple['ReqList | tuple[()]', tuple[tuple[tuple[Mor, Mor], bool], ...]]
+    def __init__(self, mor: Mor, par: Parallel):
+        self._mor = mor
+        self.par = par
 
 class Equalizer(Obj, BaseFork):
-    __slots__ = ('sup', 'requirements', 'ordered', 'frozen')
+    __slots__ = ('sup', 'requirements', 'length', 'par')
     sup: Obj
-    requirements: set[tuple[Mor, Mor]]
-    ordered: ReqList
-    frozen: bool
+    requirements: dict[tuple[Mor, Mor], tuple[int, int]] # This keeps the order. Requires Python >= 3.7.
+    # Second int is the idx of the component.
+    length: int
 
-    def incl(self):
-        return Inclusion(self)
+    def component(self, idx: int):
+        sup = self.sup.component(idx)
 
-    # def intersection(self, obj: Obj):
-    #     if obj == self.sup:
-    #         return self, ()
 
-    #     if not (isinstance(obj, Equalizer) and obj.sup == self.sup):
-    #         raise ValidationError("Can't intersect")
+    def proj_opt(self, target: Obj | int):
+        # This works only with expanded products
+        res = super().proj_opt(target)
+        if res:
+            return res
 
-    #     # Return the smallest amount of requirements
-    #     if len(self.requirements) > len(obj.requirements):
-    #         return self, obj.requirements - self.requirements
+        # TODO: It seems more consistent to keep track of the how requirements map to
+        # components of the superobject (when it is a product), so that the result
+        # of projection is the expected one (equalizer components).
+        res = self.sup.proj_opt(target)
+        if res:
+            return Composition.strict(res, Inclusion(self))
 
-    #     return obj, self.requirements - obj.requirements
+        # For consistency we want this to return a morphism whose target is
+        # `target`. The way we deal with equalizers of products is by extracting
+        # their superobject and passing it as the `target` here. The goal of
+        # `proj` is to make superobjects coincide so that restrict-lifting can
+        # be applied, and then `incl`.
+        return None
+
+    # @classmethod
+    # def expand(cls, obj: Obj):
+        # The morphism from the product is a lift of the pairing
+        # of the inclusions.
+        # The morphism from the equalizer is a pairing of all projections
+        # (precomposed with the inclusion and then lifted).
+        # It seems reasonable that the tautological quality of requirements
+        # is the the same in the product expanded or not.
+        # Hence, we precompose requirements with restricted-lifted projections.
+        # Expand is deep (recursive).
+        # Steps:
+        # - Get the superobject.
+        # - Collect all requirements.
+        # - Precompose with restricted lifted projections.
+        # - Build equalizer.
+        # One needs existence of Parallel. The reasoning here is that one has
+        # the existence of certain equalizers given their construction as products.
+        # Based on this (assumed) theorem, there is a method of Parallel
+        # which allows the instation of isomorphic concrete equalizer, but of course
+        # the inability to construct the concrete equalizer does not refute the
+        # existence of the equalizer.
+        # Since the elements of equalizers look exactly like the elements of their
+        # superobjects, a simpler (and opposite) approach is to disallow product
+        # params where one of the objects is an equalizer.
+        # pass
+
+    def incl_opt(self, target: Obj | None):
+        res = super().incl_opt(target)
+        if res:
+            return res
+
+        h = Inclusion(self)
+        if target is None or self.sup == target:
+            return h
+
+        assert isinstance(target, Equalizer)
+        if self.is_subobject(target):
+            return Lift((h, target))
+
+        return None
+
+    def _incl(self, target: Obj) -> Mor:
+        # TODO: Check that this gives the same result as `incl`.
+        if not isinstance(target, Equalizer):
+            return Inclusion(self)
+
+        return Lift(Fork(
+            self._incl(target.par.source),
+            target.par,
+        ))
+
+    def mor(self):
+        return Lift(Fork(
+            self._incl(self.par.source),
+            self.par),
+        )
 
     def restrict(self, mor: Mor):
-        # This assumes that the restrictions make sense. No type-checking.
+        # This assumes that the restriction makes sense. No type-checking.
         # If `mor.source` gets reused and `mor` is precomposed with an inclusion,
         # this will still work since the inclusion gets reduced with the lift.
-        h = Inclusion(self)
-        res = Composition.strict((mor, Lift.strict(h, mor.source)))
-        assert res == Composition.strict((mor.extend(), h))
-        return res
 
-    def flat_requirements(self):
-        def _flat(reqs: ReqList) -> Iterator[tuple[Mor, Mor]]:
-            head, tail = reqs
-            if head:
-                yield from _flat(head)
-
-            for r, _ in tail:
-                yield r
-
-        return _flat(self.ordered)
-
-    def __len__(self):
-        # This has to be the length of the `parallel` argument.
-        # This corresponds to the interpretation of the equalizer as as fork.
-        return len(self.ordered[1])
+        # Actually, this composition is always correct.
+        return Composition.strict(mor, self.incl(mor.source))
+        # We need to be able to restrict even if mor can't be extended.
+        #return Composition.strict(mor.extend(), Inclusion(self))
 
     def is_subobject(self, obj: 'Obj'):
         if isinstance(obj, Equalizer):
+            reqs = self.requirements
+            length = self.length
             return (
                 self.sup == obj.sup
-                and self.requirements.issuperset(obj.requirements)
+                and all(
+                    reqs.get(req, length) < length
+                    for req, _ in zip(obj.requirements, range(obj.length))
+                )
             )
 
         return self.sup == obj
-
-    def copy(self):
-        res = super().__new__(type(self))
-        res.sup = self.sup
-        res.requirements = set(self.requirements)
-        res.ordered = self.ordered
-        res.frozen = True
-        return res
-
-    def relax(self):
-        fulfilled, unfulfilled = self.ordered
-        if len(self.requirements) == len(unfulfilled):
-            return self.sup
-
-        assert len(fulfilled) > 0
-        res = self.copy()
-        res.ordered = fulfilled
-
-        # Can't remove unfulfilled requirements that appear in the source
-        # of the parallel (redundant requirements).
-        res.requirements.difference_update(
-            p for p, red in unfulfilled
-            if not red
-        )
-        return res
-
-    def parallel(self):
-        return Parallel(self.relax(), (p for p, _ in self.ordered[1]))
-
-    def handle(self):
-        # For all requirements in `self.ordered[1]` there is only one
-        # handle.
-        inc = Inclusion(self)
-        return Lift.strict(inc, self.relax())
 
     def eq(self):
         # A more efficient `eq`.
@@ -174,53 +267,58 @@ class Equalizer(Obj, BaseFork):
         # equalities are yielded. This appears to have no use, since one
         # cannot use for registering equalizer equalities given the overly
         # restrictive source.
-        for (i, j), _ in self.ordered[1]:
-            yield Eq[Mor](
-                self.restrict(i),
-                self.restrict(j),
-            )
+        return Eq[Mor](
+            self.restrict(self.par.i()),
+            self.restrict(self.par.j()),
+        )
 
     def verify(self, e: Eq[Mor]):
         s, t = e
         # What if the equality only applies for a subset of the intersection of the sources?
         # This would only concern us if we were searching the equality among the proofs.
         # The source of the equality is the equalizer, so the equality is fulfilled.
-        return (
-            s.extend(),
-            t.extend(),
-        ) in self.requirements
+
+        # TODO: Equality has to be valid. Perhaps guaranty this during instantiation.
+        # We need to make sure that the source is a subobject of self.
+        # return s.source.is_subobject(self) and (
+        #     s.extend(),
+        #     t.extend(),
+        # ) in self.requirements
+
 
     @classmethod
-    def _reuse_source(cls, src: Obj) -> tuple[Obj, set[tuple[Mor, Mor]]]:
+    def _first_requirements(cls, src: Obj) -> tuple[Obj, dict[tuple[Mor, Mor], int]]:
         if isinstance(src, Equalizer):
             sup = src.sup
-            assert not isinstance(sup, Equalizer)
-            requirements = src.requirements
-            if src.frozen:
-                return sup, set(requirements)
+            assert not isinstance(src, Equalizer)
+            requirements = sup.requirements
+            if sup.length == len(requirements):
+                return sup, requirements
 
-            del src.sup
-            del src.ordered
-            del src.requirements
-            return sup, requirements
+            return sup, requirements.copy()
 
-        return src, set()
+        return src, {}
 
-    def __init__(self, parallel: Parallel, _allow_no_requirements: bool = False):
+    def __new__(cls, par: Parallel):
+        res = par.equalizer()
+        if res is None:
+            return super().__new__(cls)
+
+        return res
+
+    def __init__(self, par: Parallel):
+        if par.equalizer() is not None:
+            return
+
+        par.equalizer = weakref.ref(self)
         super().__init__()
-        src = parallel.source
-        self.ordered = _split_parallel(parallel)
-        if not (self.ordered[1] or _allow_no_requirements):
-            raise ValueError("No requirements")
-
-        self.sup, self.requirements = self._reuse_source(src)
-        self.requirements.update(parallel.pairs)
-        self.frozen = True
+        self.sup, requirements = self._first_requirements(par.source)
+        requirements[(par.ext_i, par.ext_j)] = len(requirements)
+        self.length = len(requirements)
+        self.requirements = requirements
         # It is entirely possible for the `Parallel` instance
         # to include requirements that are tautological with respect to
-        # the source! Such requirements can't be removed when recovering the
-        # source. It is possible for the source to be the same as the equalizer,
-        # in which case the handle ends up being the identity.
+        # the source.
 
     # def __init__(
     #     self, sup: Obj,
@@ -242,15 +340,6 @@ class Equalizer(Obj, BaseFork):
         return self.sup.accepts(x) and all(
             s.ev(x) == t.ev(x)
             for s, t in self.requirements
-        )
-
-    def __eq__(self, x: object):
-        # This does not coincide with fork equality.
-        # Equality for type checking.
-        return self is x or (
-            isinstance(x, type(self))
-            and self.sup == x.sup
-            and self.requirements == x.requirements
         )
 
 class Inclusion(Mor):
@@ -275,7 +364,7 @@ class Inclusion(Mor):
 
     def reduce(self, mor: Mor):
         # This has no responsibility to do any type-checking.
-        if isinstance(mor, Lift) and isinstance(self.source, Equalizer):
+        if isinstance(mor, Lift):
             return mor.sup
 
         return None
@@ -288,6 +377,19 @@ class Inclusion(Mor):
 
     def extend(self):
         return Composition(self.target)
+
+    # def lift(self, target: Obj) -> Mor:
+    #     if self.target == target:
+    #         return self
+
+    #     assert isinstance(target, Equalizer)
+    #     if self.source == target:
+    #         return Composition(target)
+
+    #     if not self.source.is_subobject(target):
+    #         raise ValueError("Can't lift")
+
+    #     return Lift((self, target))
 
 class Lift(Mor):
     __slots__ = ('sup',)
@@ -302,7 +404,7 @@ class Lift(Mor):
 
         return self
 
-    def __init__(self, mor: Mor, target: Equalizer):
+    def __init__(self, fork: BaseFork | tuple[Mor, Equalizer]):
         # When building from `mor` and `target`, we skip the (extensionally strict)
         # subobject check here, since doing it would incur quadratic time during
         # variadic-from-binary construction. Morover, we should actually be building
@@ -312,30 +414,27 @@ class Lift(Mor):
         # The subobject check is the fork check in `proven`.
         # Requiring strictness here is not possible because of the afore-mentioned
         # quadratic time issue.
+        if isinstance(fork, tuple):
+            mor, target = fork
+        else:
+            mor = fork.mor()
+            target = Equalizer(fork.par)
+
         super().__init__(mor.source, target)
         self.name = mor.name
-        #self.broken = mor.broken
 
+        # Equalizer is flat, so Lift must also be flat.
         if isinstance(mor, Lift):
             self.sup = mor.sup
         else:
             self.sup = mor
 
     @classmethod
-    def strict(cls, mor: Mor, target: Obj):
-        # See `trusted.lift` comments for why we avoid comparing
-        # equalizers when mor is a lift.
-        if not isinstance(mor, Lift) and mor.target == target:
-            return mor
-
-        if not isinstance(target, Equalizer):
-            raise ValueError('Requires equalizer target')
-
-        res = cls(mor, target)
-
+    def strict(cls, fork: BaseFork):
+        res = cls(fork)
         # Max lift of inclusion is identity
-        if isinstance(res.sup, Inclusion) and res.sup.source == target:
-            return Composition(target)
+        if isinstance(res.sup, Inclusion) and res.source == res.target:
+            return Composition(res.target)
 
         return res
 
@@ -343,14 +442,16 @@ class Lift(Mor):
         return self.sup.ev(x)
 
     def reduce(self, mor: Mor):
-        sup_r = self.sup.reduce(mor)
-        if sup_r is not None:
-            target = self.target
-            assert isinstance(target, Equalizer)
-            # TODO: Should we use strict?? Perhaps not.
-            return Lift(sup_r, target)
+        t = self.target
+        assert isinstance(t, Equalizer)
 
-        return None
+        m = t.mor().reduce(mor)
+        if m is None:
+            return None
+
+        # m could be an inclusion. e.g. sup is a projection and mor
+        # is a pairing with an inclusion component.
+        return Lift.strict(Fork(m, t.par))
 
     def __eq__(self, x: object):
         # Equality as morphism

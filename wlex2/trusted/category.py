@@ -2,9 +2,6 @@
 from ..model.category import Obj, Mor, Composition
 from ..equality import Eq
 
-Composable = tuple[Mor, Mor]
-AssociativitySource = tuple[Mor, Mor, Mor]
-
 def source(mor: Mor) -> Obj:
     return mor.source
 
@@ -13,6 +10,8 @@ def target(mor: Mor) -> Obj:
 
 def identity(obj: Obj) -> Mor:
     return Composition(obj)
+
+Composable = tuple[Mor, Mor]
 
 def identity_hat(obj: Obj):
     i = identity(obj)
@@ -25,7 +24,8 @@ def identity_hat(obj: Obj):
     )
     return Eq(s, s)
 
-compose = Composition.strict
+def compose(c: Composable) -> Mor:
+    return Composition.strict(*c)
 
 def compose_hat(c: Composable):
     h = compose(c)
@@ -48,7 +48,9 @@ def eq_right_identity_law(mor: Mor):
     assert compose((mor, identity(source(mor)))) == mor
     return Eq(mor, mor)
 
-def eq_associativity(c: AssociativitySource):
+_AssociativitySource = tuple[Mor, Mor, Mor]
+
+def eq_associativity(c: _AssociativitySource):
     f, g, h = c
     mor = compose((compose((f, g)), h))
     assert compose((f, compose((g, h)))) == mor

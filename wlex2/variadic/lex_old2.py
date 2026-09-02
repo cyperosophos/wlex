@@ -51,7 +51,7 @@ def equalizer(obj: Obj, par: El[Parallel]) -> Fork:
             par.eqs,
         ))
         #!! frozen = False
-        inc = ef.handle
+        inc = ef.mor
 
 def lift(f: El[Fork]) -> Lift:
     fk = f.value

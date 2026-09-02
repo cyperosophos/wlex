@@ -1,57 +1,62 @@
 """Private model of `cart` morphisms"""
 from ..model import cart
-from ..model.category import Param
-from .category import *
+from ..model.category import Obj, Mor
+from .category import source, compose
+from ..equality import Eq
 
+NullParam = cart.NullParam
+NullSpan = cart.BaseNullSpan
+
+terminal = cart.Terminal
 TerminalMor = Mor
-Span = cart.BaseSpan # Length 2 (dynamic check >= 2 is implicit)
-Pairing = Mor # Length 2
+terminal_mor = cart.TerminalMor
 
-def terminal() -> Obj:
-    return cart.Product(Param(()))
+def _null_span(tm: TerminalMor) -> NullSpan:
+    t = tm.target
+    assert isinstance(t, cart.Terminal)
+    return cart.NullSpan(source(tm), t.par)
 
-def terminal_mor(obj: Obj) -> TerminalMor:
-    return cart.Pairing(obj, cart.Product(Param(())))
-
-def terminal_mor_hat(obj: Obj):
-    assert obj == source(terminal_mor(obj))
-    return Eq(obj, obj)
+def terminal_mor_hat(s: NullSpan):
+    assert s == _null_span(terminal_mor(s))
+    return Eq(s, s)
 
 def terminal_mor_ihat(tm: TerminalMor):
-    assert tm == terminal_mor(source(tm))
+    assert tm == terminal_mor(_null_span(tm))
     return Eq(tm, tm)
 
+Param = cart.Param
+
 def param_x(par: Param) -> Obj:
-    return par[0]
+    return par.x
 
 def param_y(par: Param) -> Obj:
-    return par[1]
+    return par.y
 
+Span = cart.BaseSpan
 product = cart.Product
 
 def product_hat(par: Param):
-    p, q = product(par)
-    assert par == (target(p), target(q))
+    assert par == product(par).par
     return Eq(par, par)
 
-def pairing(s: Span) -> Pairing:
-    prod = product(s.param())
-    return cart.Pairing(s, prod)
+Pairing = Mor
+pairing = cart.Pairing
 
 def _span(pm: Pairing) -> Span:
     mor = pm
     # We rely on the double use of Product as the Span of projections,
     # so we don't create a new Product instance.
-    tgt = mor.target
-    assert isinstance(tgt, cart.Product)
-    p, q = tgt
-    return cart.Span((
-        compose((p, mor)),
-        compose((q, mor)),
-    ), pm.target.param().labels())
+    t = mor.target
+    assert isinstance(t, cart.Product)
+    prod = product(t.par)
+    return cart.Span(
+        compose((prod.p(), mor)),
+        compose((prod.q(), mor)),
+        t.par,
+    )
 
 def pairing_hat(s: Span):
-    assert Span.__eq__(s, _span(pairing(s)))
+    assert s == _span(pairing(s))
     return Eq(s, s)
 
 def pairing_ihat(pm: Pairing):

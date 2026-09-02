@@ -1,25 +1,23 @@
 from ..trusted import cart
 from . import validated as v, ValidationError
-from ..model.cart import Product
-from ..model.category import Param
+from ..model.cart import Product, Terminal
 from .category import source, target
 
-def is_param(par: Param):
-    if len(par) == 2:
-        return
-
-    raise ValidationError("Invalid")
-
 def is_terminal_mor(tm: cart.TerminalMor):
-    if target(tm) == terminal():
+    if isinstance(tm.target, Terminal):
         return
 
     raise ValidationError("Invalid")
 
-def is_span(sp: cart.Span):
-    p, q = sp
-    # Matching param is given by initialization.
-    if source(p) == source(q):
+def is_span(s: cart.Span):
+    p = s.p()
+    q = s.q()
+    par = s.par
+    if (
+        source(p) == source(q)
+        and param_x(par) == target(p)
+        and param_y(par) == target(q)
+    ):
         return
 
     raise ValidationError("Invalid")
@@ -29,8 +27,7 @@ def is_pairing(p: cart.Pairing):
     # Checks are better done in `proven` (public interface).
     # `target(p.mor) == product(p.param())`
     # Is given by the definition of `param` which is a retraction of `product`.
-    t = p.target
-    if isinstance(t, Product) and len(t) == 2:
+    if isinstance(p.target, Product):
         return
 
     raise ValidationError("Invalid")
@@ -39,10 +36,10 @@ terminal = cart.terminal
 terminal_mor = cart.terminal_mor
 terminal_mor_hat = cart.terminal_mor_hat
 terminal_mor_ihat = v(cart.terminal_mor_ihat, is_terminal_mor)
-param_x = v(cart.param_x, is_param)
-param_y = v(cart.param_y, is_param)
-product = v(cart.product, is_param)
-product_hat = v(cart.product_hat, is_param)
+param_x = cart.param_x
+param_y = cart.param_y
+product = cart.product,
+product_hat = cart.product_hat,
 pairing = v(cart.pairing, is_span)
 pairing_hat = v(cart.pairing_hat, is_span)
 pairing_ihat = v(cart.pairing_ihat, is_pairing)

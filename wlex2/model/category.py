@@ -1,44 +1,18 @@
 """Base classes for cells and cell exceptions"""
 from abc import ABCMeta, abstractmethod
-from typing import Iterable, Iterator
-from itertools import chain, islice
+from typing import Iterator
 
-from . import WithItems
 from ..equality import Eq
-from ..proven import ValidationError
 
-def _flatten_factors(factors: Iterable['Mor']) -> Iterator[tuple['Mor', bool]]:
-    # All compositions must be flat!
+def _reduce_factors(prev: 'Mor', factors: Iterator['Mor']) -> Iterator['Mor']:
     for factor in factors:
-        if isinstance(factor, Composition):
-            # It is fair to assume that `factor.factors` is already flattened
-            f = factor.factors
-            for i in range(len(f) - 1):
-                yield f[i], False
-
-            yield f[-1], True
-        else:
-            yield factor, True
-
-def _reduce_factors(factors: Iterator[tuple['Mor', bool]]) -> Iterator['Mor']:
-    for prev, pr in factors:
-        break
-    else:
-        assert False
-
-    for factor, fr in factors:
-        if pr:
-            reduced = prev.reduce(factor)
-        else:
-            reduced = None
-
+        reduced = prev.reduce(factor)
         if reduced is None:
             yield prev
-            prev = factor
-            pr = fr
+            yield factor
+            yield from factors
         else:
             prev = reduced
-            # pr remains True
 
     yield prev
 
@@ -60,11 +34,12 @@ class Obj(metaclass=ABCMeta):
     def __repr__(self):
         return f'{type(self).__name__}({self.name})'
 
-    def parallel(self):
-        return Parallel(self, ())
+    # def parallel(self):
+    #     i = Composition(self)
+    #     return Parallel(self, (i, i))
 
-    def param(self):
-        return Param((self,))
+    # def param(self):
+    #     return Param((self,))
 
     def is_subobject(self, obj: 'Obj'):
         return self == obj
@@ -75,8 +50,51 @@ class Obj(metaclass=ABCMeta):
     def verify(self, e: Eq['Mor']) -> bool:
         return False
 
-    def incl(self) -> 'Mor':
-        return Composition(self)
+    def incl_opt(self, target: 'Obj | None') -> 'Mor | None':
+        if self == target:
+            return Composition(self)
+
+        return None
+
+    def incl(self, target: 'Obj | None' = None) -> 'Mor':
+        res = self.incl_opt(target)
+        if res:
+            return res
+
+        raise ValueError("Can't incl")
+
+    def pack(self) -> 'Mor | None':
+        return None
+
+    def proj_opt(self, target: 'Obj | int') -> 'Mor | None':
+        if isinstance(target, int):
+            if target == -1:
+                return Composition(self)
+
+            return None
+
+        if self == target:
+            return Composition(self)
+
+        h = target.pack()
+        if h and h.source == self:
+            return h
+
+        return None
+
+    def proj(self, target: 'Obj | int') -> 'Mor':
+        # To be consistent with incl, this need not be an iso.
+        res = self.proj_opt(target)
+        if res:
+            return res
+
+        raise ValueError("Can't plug")
+
+    def component(self, idx: int) -> 'Obj':
+        if idx == -1:
+            return self
+
+        raise ValueError("No component with idx")
 
     # def intersection(self, obj: 'Obj') -> tuple['Obj', Iterable[tuple['Mor', 'Mor']]]:
     #     if obj.is_subobject(self):
@@ -100,6 +118,24 @@ class Mor(metaclass=ABCMeta):
 
     def extend(self):
         return self
+
+    # def lift(self, target: Obj):
+    #     if self.target == target:
+    #         return self
+
+    #     raise ValueError("Can't lift")
+
+    def incl(self, target: Obj):
+        return Composition.strict(
+            self.target.incl(target),
+            self,
+        )
+
+    def proj(self, target: Obj):
+        return Composition.strict(
+            self.target.proj(target),
+            self,
+        )
 
     @abstractmethod
     def ev(self, x: object) -> object:
@@ -132,79 +168,75 @@ class Mor(metaclass=ABCMeta):
 
 class Composition(Mor):
     """Models the result of `category.compose`"""
-    __slots__ = 'factors', 'frozen'
+    __slots__ = 'factors', 'length'
     factors: list[Mor]
-    frozen: bool # Referenced (named) compositions have to be frozen.
+    length: int
 
-    def extend(self):
-        factors = self.factors
-        if not factors:
-            return self
+    # def extend(self):
+    #     factors = self.factors
+    #     if not factors:
+    #         return self
 
-        last = factors[-1]
-        ext = last.extend()
-        if ext is last:
-            return self
+    #     last = factors[-1]
+    #     ext = last.extend()
+    #     if ext is last:
+    #         return self
 
-        res = Composition(
-            chain(
-                islice(factors, len(factors) - 1),
-                (ext,),
-            ),
-            _allow_single_factor=True,
-        )
-        res.name = self.name
+    #     res = Composition(
+    #         chain(
+    #             islice(factors, len(factors) - 1),
+    #             (ext,),
+    #         ),
+    #         _allow_single_factor=True,
+    #     )
+    #     res.name = self.name
 
-        if len(res.factors) == 1:
-            return res.factors[0]
+    #     if len(res.factors) == 1:
+    #         return res.factors[0]
 
-        return res
+    #     return res
 
     @classmethod
-    def _reuse_first(cls, factors: Iterator[Mor]) -> list[Mor]:
-        for factor in factors:
-            if isinstance(factor, Composition) and not factor.frozen:
-                res = factor.factors
-                del factor.factors
-                return res
+    def _first_factors(cls, factor: Mor) -> list[Mor]:
+        if isinstance(factor, Composition):
+            factors = factor.factors
+            if factor.length == len(factors):
+                return factors
 
-            return [factor]
+            return factors[:]
 
-        raise ValueError('`factors` must be an instance of `Obj` if there are no factors.')
+        return [factor]
 
-    def __init__(self, factors: Obj | Iterable[Mor], _allow_single_factor: bool = False):
+    def __init__(self, factors: Obj | tuple[Mor, Mor]):
         # Do not directly call class for instantiation, use `identity` or
         # `simplified` instead.
-        #self.broken = False
         if isinstance(factors, Obj):
             self.factors = []
             super().__init__(factors, factors)
-            self.frozen = True
+            self.length = 0
             return
 
-        #it = self.iter_set_broken(factors)
-        it = iter(factors)
-        self.factors = self._reuse_first(it)
-        f = self.factors
-        if f:
-            # Pop last factor so that it can be reduced.
-            tail = chain((f.pop(),), it)
+        f, g = factors
+        ff = self._first_factors(f)
+        if isinstance(g, Composition):
+            tail = g.factors
         else:
-            tail = it
+            tail = (g,)
 
-        f.extend(_reduce_factors(_flatten_factors(tail)))
-        self.frozen = True
+        if ff:
+            f0 = self.factors.pop() # Not Composition
+            tail = _reduce_factors(f0, iter(tail))
 
-        if len(f) == 1 and not _allow_single_factor:
-            raise ValueError('Single factor')
-
-        target = f[0].target
-        source = f[-1].source
+        ff.extend(tail)
+        self.length = len(ff)
+        target = ff[0].target
+        source = ff[-1].source
+        self.factors = ff
         super().__init__(source, target)
 
     @classmethod
-    def strict(cls, factors: Obj | Iterable[Mor]):
-        res = cls(factors, _allow_single_factor=True)
+    def strict(cls, f: Mor, g: Mor) -> Mor:
+        res = cls((f, g))
         if len(res.factors) == 1:
             return res.factors[0]
 
@@ -221,93 +253,20 @@ class Composition(Mor):
         return self is x or (
             isinstance(x, type(self))
             and self.source == x.source
-            and self.factors == x.factors
+            and eq_with_length(
+                self.factors, self.length,
+                x.factors, x.length,
+            )
         )
 
-#T = TypeVar('T')
-#Components = Iterable[tuple[str, T] | T]
+    def __hash__(self):
+        return hash((self.source, *zip(self.factors, range(self.length))))
 
-class Param(WithItems[Obj]):
-    __slots__ = ('components', 'label_to_idx_map')
-    components: tuple[Obj, ...]
-    label_to_idx_map: tuple[tuple[str, int], ...]
-
-    def __init__(self, components: Iterable[tuple[str, Obj] | Obj]):
-        li_map: list[tuple[str, int]] = []
-        comps: list[Obj] = []
-
-        for i, c in enumerate(components):
-            if isinstance(c, tuple):
-                label, c = c
-                li_map.append((label, i))
-
-            comps.append(c)
-
-        self.label_to_idx_map = tuple(li_map)
-        self.components = tuple(comps)
-
-    def getitem(self, idx: int):
-        return self.components[idx]
-
-    def __len__(self):
-        return len(self.components)
-
-    def __eq__(self, x: object):
-        return self is x or (
-            isinstance(x, type(self))
-            and self.components == x.components
-            and self.label_to_idx_map == x.label_to_idx_map
+def eq_with_length[T](l1: list[T], len1: int, l2: list[T], len2: int):
+    return (
+        len1 == len2
+        and all(
+            i == j for i, j, _
+            in zip(l1, l2, range(len1))
         )
-
-    def labels(self):
-        res: list[str] = ['']*len(self.components)
-        for l, i in self.label_to_idx_map:
-            res[i] = l
-
-        return res
-
-class Parallel(WithItems[tuple[Mor, Mor]]):
-    __slots__ = ('source', 'pairs', '_sources')
-    source: Obj
-    pairs: tuple[tuple[Mor, Mor], ...]
-    _sources: tuple[tuple[Obj, Obj], ...]
-
-    def __init__(self, source: Obj, pairs: Iterable[tuple[Mor, Mor]]):
-        # Lifting an inclusion based on builtin subset operation
-        # has the only disadvantage that it cannot rely on intensional equalities.
-        # The `Parallel` class avoids having to compose with an inclusion, whose
-        # target might end up being discarded, and which has to be removed when
-        # normalizing the requirement.
-        # Extending here is correct since the common source is already determined.
-        self._sources = tuple((i.source, j.source) for i, j in pairs)
-        self.pairs = tuple((i.extend(), j.extend()) for i, j in pairs)
-        self.source = source
-
-    def is_valid(self):
-        source = self.source
-        for si, sj in self._sources:
-            if not (source.is_subobject(si) and source.is_subobject(sj)):
-                raise ValidationError('`source` must be subobject.')
-
-        for i, j in self.pairs:
-            # Recall that there is no such thing as a public eq which need to be checked
-            # by the public interface.
-            if i.target != j.target:
-                raise ValidationError('Must have equal targets')
-
-    def getitem(self, idx: int):
-        i, j = self.pairs[idx]
-        return (
-            self.source.restrict(i),
-            self.source.restrict(j),
-        )
-
-    def __len__(self):
-        return len(self.pairs)
-
-    def __eq__(self, x: object):
-        return self is x or (
-            isinstance(x, type(self))
-            and self.source == x.source
-            and self.pairs == x.pairs
-        )
+    )

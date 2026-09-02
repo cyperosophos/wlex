@@ -57,7 +57,7 @@ def case_target(sel: Selector):
     return Eq(j, j)
 
 def select(sel: Selector) -> Mor:
-    return equalizer(case(sel)).handle()
+    return equalizer(case(sel)).mor()
 
 # def negation() -> extensive.Copairing:
 #     p, q = bool_()

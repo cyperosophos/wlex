@@ -1,16 +1,24 @@
 include "category.wlex";
 
-fn terminal: Obj;
-type TerminalMor := (
-    Mor,
-    target == terminal,
+type NullParam;
+type NullSpan := (
+    obj: Obj, par: NullParam,
 );
-fn Obj == source @ TerminalMor;
+
+fn terminal: NullParam -> NullSpan;
+type TerminalMor := (
+    mor: Mor, par: NullParam,
+    target @ $mor == terminal @ $par,
+);
+
+fn NullSpan == (
+    obj = source @ $mor,
+    par = $par,
+) @ TerminalMor;
 
 type Param;
 fn param_x: Param -> Obj;
 fn param_y: Param -> Obj;
-
 type Span := (
     p, q: Mor, par: Param,
     source @ ($p == $q),

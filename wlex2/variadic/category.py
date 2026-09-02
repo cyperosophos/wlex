@@ -2,9 +2,8 @@ from typing import Callable, Iterable, Iterator, TypeGuard
 from itertools import chain
 
 from . import Transform
-from ..model.category import Obj, Mor, Composition
+from ..model.category import Obj, Mor
 from ..proven import category
-from ..proven.cart import terminal_mor
 from ..trusted import category as pcategory
 from . import it_with_first, resolve
 from .cart import product
@@ -30,13 +29,11 @@ def compose(
 ) -> Mor:
     # Variadic normalized composition
     # There has to be a "straighten" method which makes mors match.
+    # TODO: Remove target arg and call to identity?
     res = pcategory.identity(target)
     for factor in c:
         # We compose left-associatively since it is the `factors` on the left
         # that gets reused.
-        if isinstance(res, Composition):
-            res.frozen = False
-
         category.compose((res, fit(res.source, factor)))
         # if proofs is None:
         #     res = category.compose((res, factor))
@@ -67,11 +64,12 @@ def compose(
 def tcompose(
     c: Iterable[CartTransform | Obj],
     fit: Callable[[Obj, CartMor], Mor],
+    terminal_mor: Callable[[Obj], Mor],
 ) -> Transform:
-    adapter = _TComposer(
+    adapter = _TComposer((
         pcategory.identity(x) if isinstance(x, Obj) else x
         for x in c
-    )
+    ), terminal_mor)
     f0, factors = it_with_first(adapter.composable())
 
     if f0 is None:
@@ -105,13 +103,15 @@ def tcompose(
     return comp
 
 class _TComposer:
-    __slots__ = ('pending', 'factors')
+    __slots__ = ('pending', 'factors', 'terminal_mor')
     pending: list[Transform | tuple[LabeledTransform, ...]]
     factors: Iterable[CartTransform]
+    terminal_mor: Callable[[Obj], Mor]
 
-    def __init__(self, factors: Iterable[CartTransform]):
+    def __init__(self, factors: Iterable[CartTransform], terminal_mor: Callable[[Obj], Mor]):
         self.pending = []
         self.factors = iter(factors)
+        self.terminal_mor = terminal_mor
 
     def flush(self, source: Obj):
         res: list[CartMor] = []
@@ -120,7 +120,7 @@ class _TComposer:
                 mor = resolve(factor, source)
                 source = mor.target
             elif factor == ():
-                mor = terminal_mor(source)
+                mor = self.terminal_mor(source)
                 source = mor.target
             else:
                 mor = tuple(

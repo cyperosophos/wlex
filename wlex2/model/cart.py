@@ -1,167 +1,330 @@
 from abc import ABCMeta, abstractmethod
-from typing import TypeGuard, Iterable, Iterator
+from typing import Iterable, Callable, TypeGuard, TypeVar
+import weakref
 
-from .category import Obj, Mor, Param
-from . import WithItems
+from .category import Obj, Mor, eq_with_length, Composition
 from .. import is_tuple
 
-def _all_mor(x: list[tuple[str, Mor] | None]) -> TypeGuard[list[tuple[str, Mor]]]:
-    return all(m is not None for m in x)
+T = TypeVar('T')
+WRef = Callable[[], 'T | None']
 
-class BaseSpan(WithItems[Mor], metaclass=ABCMeta):
+class NullParam:
+    __slots__ = ('terminal',)
+    terminal: WRef['Terminal']
+
+    def __init__(self):
+        # One takes care at a higher level that tis gets only instantiated once.
+        self.terminal = lambda: None
+
+class BaseNullSpan(metaclass=ABCMeta):
     __slots__ = ()
+    par: NullParam
 
     @abstractmethod
-    def param(self) -> Param:
+    def obj(self) -> Obj:
         pass
 
     def __eq__(self, x: object):
-        # This is needed in `private.is_terminal_mor`
         return self is x or (
             isinstance(x, type(self))
-            and super().__eq__(x)
-            and self.param() == x.param()
+            and self.obj() == x.obj()
+            and self.par == x.par
         )
 
-class Span(BaseSpan):
-    __slots__ = ('components', 'labels')
-    components: tuple[Mor, ...]
-    labels: tuple[str, ...]
+class NullSpan(BaseNullSpan):
+    __slots__ = ('_obj', 'par')
+    _obj: Obj
+    par: NullParam
 
-    def __init__(self, components: Iterable[Mor], labels: Iterable[str]):
-        self.labels = tuple(labels)
-        self.components = tuple(components)
-        if len(self.labels) != len(self.components):
-            raise ValueError("Labels and components must have the same length.")
+    def obj(self):
+        return self._obj
 
-    def __len__(self):
-        return len(self.components)
+    def __init__(self, obj: Obj, par: NullParam):
+        self._obj = obj
+        self.par = par
 
-    def getitem(self, idx: int):
-        return self.components[idx]
+class Terminal(Obj, BaseNullSpan):
+    __slots__ = ('par',)
+    par: NullParam
 
-    def param(self):
-        return Param((
-            (l, c.target) if l else c.target
-            for l, c in zip(self.labels, self.components)
-        ))
+    def obj(self):
+        return self
+
+    def __new__(cls, par: NullParam):
+        res = par.terminal()
+        if res is None:
+            return super().__new__(cls)
+
+        return res
+
+    def __init__(self, par: NullParam):
+        if par.terminal() is not None:
+            return
+
+        super().__init__()
+        par.terminal = weakref.ref(self)
+        self.par = par
+
+    def accepts(self, x: object) -> bool:
+        return x is ()
+
+class TerminalMor(Mor):
+    __slots__ = ()
+
+    def __init__(self, span: BaseNullSpan):
+        # par gets recovered from target
+        super().__init__(span.obj(), Terminal(span.par))
+
+    def ev(self, x: object):
+        return ()
+
+    def reduce(self, mor: Mor):
+        t = self.target
+        assert isinstance(t, Terminal)
+        return TerminalMor(NullSpan(mor.source, t.par))
+
+    def __hash__(self):
+        return hash(self.source)
+
+    # @property
+    # def par(self):
+    #     t = self.target
+    #     assert isinstance(t, Terminal)
+    #     return t.par
+
+def _all_t[T](x: list[T | None]) -> TypeGuard[list[T]]:
+    return all(m is not None for m in x)
+
+class Param:
+    __slots__ = ('x', 'y', 'label', 'product')
+    x: Obj
+    y: Obj
+    label: str
+    product: WRef['Product']
+
+    def __init__(self, x: Obj, y: Obj, label: str):
+        if isinstance(x, Product):
+            if label in x.labels:
+                raise ValueError('Repeated label')
+
+        self.x = x
+        self.y = y
+        self.label = label
+        self.product = lambda: None
+
+class BaseSpan(metaclass=ABCMeta):
+    __slots__ = ()
+    par: Param
+
+    @abstractmethod
+    def p(self) -> Mor:
+        pass
+
+    @abstractmethod
+    def q(self) -> Mor:
+        pass
 
     def __eq__(self, x: object):
         return self is x or (
             isinstance(x, type(self))
-            and self.components == x.components
-            and self.labels == x.labels
+            and self.p() == x.p()
+            and self.q() == x.q()
+            and self.par == x.par
         )
 
-class Product(Obj, BaseSpan):
-    __slots__ = ('components', 'frozen', 'label_to_idx_map')
-    components: list[Obj]
-    frozen: bool
-    label_to_idx_map: dict[str, int]
+class Span(BaseSpan):
+    __slots__ = ('_p', '_q', 'par')
+    _p: Mor
+    _q: Mor
 
-    @classmethod
-    def is_terminal(cls, obj: Obj):
-        return isinstance(obj, cls) and not obj.components
+    def __init__(self, p: Mor, q: Mor, par: Param):
+        # This has to be checked in proven
+        self._p = p
+        self._q = q
+        self.par = par
+
+    def p(self):
+        return self._p
+
+    def q(self):
+        return self._q
+
+class Product(Obj, BaseSpan):
+    __slots__ = ('components', 'length', 'labels', 'par')
+    components: list[Obj]
+    length: int
+    labels: dict[str, int]
+    # TODO: Check where components is being used since length bound needs
+    # to be taken into account. Same applies to Pairing.components and
+    # Equalizer.requirements.
+
+    def pack(self):
+        # Specifically supports only the product of terminal with an object
+        # (but not the product of an object with terminal).
+        source = self.components[0]
+        t = self.par.x
+        if not(
+            isinstance(t, Terminal)
+            and self.par.y == source
+        ):
+            return None
+
+        return Pairing(Span(
+            TerminalMor(NullSpan(source, t.par)),
+            Composition(source),
+            self.par,
+        ))
+
+    def component(self, idx: int):
+        if idx >= self.length:
+            raise ValueError("Out of range")
+
+        return self.components[idx]
+
+    def proj_opt(self, target: Obj | int):
+        res = super().proj_opt(target)
+        if res:
+            return res
+
+        if isinstance(target, int):
+            return Projection(self, target)
+
+        assert isinstance(target, Product)
+        # Just as with inclusion, since the target is already given,
+        # we can manually create the needed pairing here.
+        # The components are projections in the order required by target.
+        # TODO: Since Pairing will be overloaded reconsider how it's being used in trusted.
+        idx_to_label = ['']*self.length
+        for l, i in self.labels.items():
+            idx_to_label[i] = l
+
+        idxs = target.pairing_components((
+            (idx_to_label[i], i)
+            for i in range(self.length)
+        ), _shrink=True)
+
+        projs: list[Mor] = [Projection(self, i) for i in idxs]
+        return Pairing((projs, target))
+
+    def _tail_proj(self, target: Obj) -> Mor:
+        if isinstance(target, Terminal):
+            return TerminalMor(NullSpan(self, target.par))
+
+        if not isinstance(target, Product):
+            return Projection(self, 0)
+
+        # target can be a product of length 1.
+        # In which case, the original single component product used in the Param
+        # gets returned.
+
+        return Pairing(Span(
+            self._tail_proj(target.par.x),
+            Projection(self, len(target.components) - 1), # This component doesn't get flattened
+            target.par,
+        ))
+
+    def p(self):
+        # Notice that Pairing(self) is the identity.
+        return self._tail_proj(self.par.x)
+
+    def q(self):
+        return Projection(self, self.length - 1)
 
     def label_to_idx(self, label: str):
-        return self.label_to_idx_map[label]
+        idx = self.labels[label]
+        if idx >= self.length:
+            raise ValueError("Not a label of this product")
 
-    def idx_to_label(self, idx: int):
-        # Check that idx is within range
-        if idx < 0 or idx >= len(self):
-            raise ValueError('Index out of range')
+        return idx
 
-        # Linear time!
-        for k, v in self.label_to_idx_map.items():
-            if v == idx:
-                break
-        else:
-            raise ValueError('No label for index')
+    # def idx_to_label(self, idx: int):
+    #     # Check that idx is within range
+    #     if idx < 0 or idx >= self.length:
+    #         raise ValueError('Index out of range')
 
-        return k
+    #     # Linear time!
+    #     for k, v in self.labels.items():
+    #         if v == idx:
+    #             break
+    #     else:
+    #         raise ValueError('No label for index')
+
+    #     return k
 
     def accepts(self, x: object):
         return (
             is_tuple(x)
-            and len(self.components) == len(x)
+            and self.length == len(x)
             and all(
                 c.accepts(xc)
-                for c, xc in zip(self.components, x)
+                for c, xc, _ in zip(self.components, x, range(self.length))
             )
         )
 
-    def __eq__(self, x: object):
-        # This is needed in `private.is_terminal_mor`
-        return self is x or (
-            isinstance(x, type(self))
-            and self.components == x.components
-            and self.label_to_idx_map == x.label_to_idx_map
-        )
-
-    def getitem(self, idx: int) -> Mor:
-        return Projection(self, idx)
-
-    def __len__(self):
-        return len(self.components)
-
     @classmethod
-    def _reuse_first(
-        cls, components: Iterator[Obj],
-    ) -> tuple[list[Obj], dict[str, int], bool]:
-        for component in components:
-            if isinstance(component, Product) and not component.frozen:
-                res = (component.components, component.label_to_idx_map, True)
-                del component.components
-                del component.label_to_idx_map
-                return res
+    def _first_components(cls, component: Obj) -> tuple[list[Obj], dict[str, int]]:
+        if isinstance(component, Product):
+            components = component.components
+            li_map = component.labels
+            if component.length == len(components):
+                return components, li_map
 
-            return [component], {}, False
+            return components[:], li_map.copy()
 
-        return [], {}, False
+        if isinstance(component, Terminal):
+            return [], {}
 
-    def __init__(self, param: Param):
+        return [component], {}
+
+    def __new__(cls, par: Param):
+        res = par.product()
+        if res is None:
+            return super().__new__(cls)
+
+        return res
+
+    def __init__(self, par: Param):
+        if par.product() is not None:
+            return
+
+        par.product = weakref.ref(self)
         super().__init__()
-        it = iter(param.components)
-        comps, li_map, is_reusing = self._reuse_first(it)
+        components, li_map = self._first_components(par.x)
+        li_map[par.label] = len(components)
+        components.append(par.y)
+        self.length = len(components)
+        self.components = components
+        self.labels = li_map
 
-        param_li = param.label_to_idx_map
-        if is_reusing:
-            idx_offset = len(comps) - 1
-        else:
-            idx_offset = 0
-
-        for l, i in param_li:
-            # Repeated labels are allowed because otherwise we wouldn't have a param -> product function.
-            if is_reusing and i == 0:
-                raise ValueError("Reused component can't be labeled")
-
-            li_map[l] = i + idx_offset
-
-        # Single product component is allowed. This is required by the variadic product.
-        comps.extend(it)
-        self.frozen = True
-        self.components = comps
-        self.label_to_idx_map = li_map
-
-    def pairing_components(self, components: Iterable[tuple[str, Mor] | Mor]):
-        res: list[tuple[str, Mor] | None] = [None]*len(self.components)
-
-        for i, lc in enumerate(components):
-            if isinstance(lc, tuple):
-                l, c = lc
+    def pairing_components[T](
+        self,
+        components: Iterable[tuple[str, T]],
+        _shrink: bool = False,
+    ):
+        length = self.length
+        # The label is not needed since `self` is the target.
+        res: list[T | None] = [None]*length
+        count = 0
+        for i, (l, c) in enumerate(components):
+            if l:
                 i = self.label_to_idx(l)
-            else:
-                c = lc
-                l = ''
+
+            if _shrink and i >= length:
+                if count >= length:
+                    break
+
+                continue
 
             if res[i] is not None:
                 raise ValueError("Conflicting label or index")
 
-            res[i] = (l, c)
+            res[i] = c
+            count += 1
 
-        if not _all_mor(res):
+        if not _all_t(res):
             raise ValueError("Not enough components for target")
 
+        assert count == length
         return res
 
 class Projection(Mor):
@@ -169,6 +332,9 @@ class Projection(Mor):
     idx: int
 
     def __init__(self, source: Product, idx: int):
+        if idx >= source.length:
+            raise ValueError("idx out of range")
+
         target = source.components[idx]
         super().__init__(source, target)
         self.idx = idx
@@ -191,55 +357,78 @@ class Projection(Mor):
             and self.idx == x.idx
         )
 
+    def __hash__(self):
+        return hash((self.source, self.idx))
+
 class Pairing(Mor):
-    __slots__ = ('components', 'frozen')
+    __slots__ = ('components', 'length')
     components: list[Mor]
-    frozen: bool
+    length: int
 
     def ev(self, x: object):
         return tuple(c.ev(x) for c in self.components)
 
     def __eq__(self, x: object):
-        if self is x:
-            return True
-
-        if not (
-            isinstance(x, type(self))
-            and self.components == x.components
-            and (True if self.components else self.source == x.source)
-        ):
-            return False
-
-        # This is what remains in order to ensure that targets are equal.
-        target = self.target
-        xtarget = x.target
-        assert isinstance(target, Product)
-        assert isinstance(xtarget, Product)
-        return target.label_to_idx == xtarget.label_to_idx
+        return self is x or (
+            isinstance(x, Pairing)
+            and self.target == x.target # Same labels
+            and self.length == x.length
+            and eq_with_length(
+                self.components, self.length,
+                x.components, x.length,
+            )
+        )
 
     @classmethod
-    def _reuse_first(cls, components: Iterator[Mor]) -> tuple[Obj, list[Mor]]:
-        for component in components:
-            source = component.source
-            if isinstance(component, Pairing) and not component.frozen:
-                res = component.components
-                del component.components
-                return source, res
+    def _first_components(cls, component: Mor) -> list[Mor]:
+        if isinstance(component, Pairing):
+            components = component.components
+            if component.length == len(components):
+                return components
 
-            return source, [component]
+            return components[:]
 
-        raise ValueError("Can't have empty component list")
+        if isinstance(component, TerminalMor):
+            return []
 
-    def __init__(self, components: Iterable[Mor] | Obj, target: Product):
-        # Span check is done in `proven`.
-        if isinstance(components, Obj):
-            source = components
-            comps: list[Mor] = []
+        return [component]
+
+    def __init__(self, span: BaseSpan | tuple[list[Mor], Product]):
+        if isinstance(span, tuple):
+            components, target = span
+            source = components[0].source
         else:
-            it = iter(components)
-            source, comps = self._reuse_first(it)
-            comps.extend(it)
+            # Span check is done in `proven`.
+            p = span.p()
+            q = span.q()
+            source = p.source
+            target = Product(span.par)
+            components = self._first_components(p)
+            components.append(q)
 
+        self.length = len(components)
+        self.components = components
         super().__init__(source, target)
-        self.components = comps
-        self.frozen = True
+
+    def reduce(self, mor: Mor):
+        t = self.target
+        assert isinstance(t, Product)
+
+        q = t.q().reduce(mor)
+        if q is None:
+            return None
+
+        p = t.p().reduce(mor)
+        if p is None:
+            return None
+
+        return Pairing(Span(p, q, t.par))
+
+    def __hash__(self):
+        return hash(tuple(zip(self.components, range(self.length))))
+
+    # @property
+    # def par(self):
+    #     t = self.target
+    #     assert isinstance(t, Product)
+    #     return t.par

@@ -2,7 +2,6 @@ from ..equality import Verifier, Eq
 from ..model.lex import Equalizer
 from ..trusted import lex
 from . import intensionally_validated as iv, validated as v, ValidationError
-from .cart import *
 
 class ProofError(ValidationError):
     __slots__ = ('eq',)
@@ -14,11 +13,7 @@ class ProofError(ValidationError):
 
 def is_parallel(par: lex.Parallel):
     # Unpacking would incur unnecessary steps.
-    # More checks?
     par.is_valid()
-
-    if len(par) == 1:
-        raise ValidationError("Invalid parallel")
 
 def is_fork(f: lex.Fork, proofs: Verifier[object]):
     # (?) Equalizer fork inherits equality from parallel.
@@ -29,12 +24,12 @@ def is_fork(f: lex.Fork, proofs: Verifier[object]):
     # its equality extensional. The object mapping of a functor can still be built as a limit.
 
     # Tacit equalities in the limit of the fork.
-    is_parallel(f.parallel())
+    is_parallel(f.par)
     # That the handle is already composable with the parallel is
     # given by the initialization.
 
     # That `e` is intensionally equal to a registered equality is the same as `e` being registered up to transitivity.
-    (e,) = f.eq()
+    e = f.eq()
     if e not in proofs:
         raise ProofError(e)
 
@@ -46,16 +41,10 @@ def is_lift(l: lex.Lift):
     # The conclusion is then that the init of Lift and Pairing can't fully be
     # trusted in a public interface. Trusted init would require Fork/Span as args.
     # Does this apply to any other class? This seems to mainly affect Mor subclasses.
-    t = l.target
-    if not (isinstance(t, Equalizer) and len(t) == 1):
-        raise ValidationError("Lift must have one requirement")
+    if isinstance(l.target, Equalizer):
+        return
 
-    # This check is superfluous, cf. is_pairing
-    # mor = l.mor
-    # par = l.parallel()
-    # eqr = equalizer(par)
-    # assert isinstance(eqr, lex.Obj)
-    # return target(mor) == eqr
+    raise ValidationError("Target must be equalizer")
 
 parallel_i = v(lex.parallel_i, is_parallel)
 parallel_j = v(lex.parallel_j, is_parallel)

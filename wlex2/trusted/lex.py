@@ -1,17 +1,16 @@
 """Private model of `lex` morphisms"""
 from ..model import lex
-from ..model.category import Mor, Parallel
+from ..model.category import Mor
 from .category import source, target, compose
 from ..equality import Eq
 
-Fork = lex.BaseFork #tuple[Mor, Parallel, Eq[Mor]]
-Lift = Mor # Every morphism is a lift along the identity.
+Parallel = lex.Parallel
 
 def parallel_i(par: Parallel) -> Mor:
-    return par[0][0]
+    return par.i()
 
 def parallel_j(par: Parallel) -> Mor:
-    return par[0][1]
+    return par.j()
 
 def eq_parallel_source(par: Parallel):
     i = source(parallel_i(par))
@@ -23,6 +22,7 @@ def eq_parallel_target(par: Parallel):
     assert i == target(parallel_j(par))
     return Eq(i, i)
 
+Fork = lex.BaseFork
 equalizer = lex.Equalizer
     # In variadic equalizer, composing with inclusion is what allows
     # preserving previous requirements.
@@ -66,53 +66,46 @@ equalizer = lex.Equalizer
     #return category.TrustedFork(inc, (par,), compose)
 
 def equalizer_hat(par: Parallel):
-    assert par == equalizer(par).parallel()
+    assert par == equalizer(par).par
     return Eq(par, par)
 
-def lift(f: Fork) -> Lift:
-    # TODO: Must always check that the length of the parallel is the correct one (i.e. 1).
-    #       Check this in `proven`. Same with other sized types.
-    # The fork has one parallel and so should the lift.
-    # Fork has a named parameter corresponding to an intensional equality.
-    # This equality can't be extensional, since then it would be too strong
-    # to get an object that's big enough. This equality has to be proven
-    # using intensional equalities (equalities that appear in the actual
-    # program and not in the theory of programs).
+Lift = Mor
+lift = lex.Lift.strict
 
-    # IMPORTANT If the parallel is tautological because of the equalizer source,
-    # the equalizer here will be the source (with a redundant requirement), and
-    # the result will be *equal* to f.handle(), which might of course just be a simple morphism.
-    # Notice the inefficient `==` in Lift.strict.
-    # Having f.handle() now pointing to a reused Equalizer is not a problem because
-    # this only affects instances of Lift, and it is their `sup` mor which end up becoming
-    # the `sup` of the returned Lift. However this will be a problem if we return f.handle()
-    # itself. In fact, the `==` comparison will fail due to the target of f.handle() having being
-    # reused.
-    eqr = equalizer(f.parallel())
-    return lex.Lift.strict(f.handle(), eqr)
+# def lift(f: Fork) -> Lift:
+#     # TODO: Must always check that the length of the parallel is the correct one (i.e. 1).
+#     #       Check this in `proven`. Same with other sized types.
+#     # The fork has one parallel and so should the lift.
+#     # Fork has a named parameter corresponding to an intensional equality.
+#     # This equality can't be extensional, since then it would be too strong
+#     # to get an object that's big enough. This equality has to be proven
+#     # using intensional equalities (equalities that appear in the actual
+#     # program and not in the theory of programs).
+
+#     # IMPORTANT If the parallel is tautological because of the equalizer source,
+#     # the equalizer here will be the source (with a redundant requirement), and
+#     # the result will be *equal* to f.handle(), which might of course just be a simple morphism.
+#     # Notice the inefficient `==` in Lift.strict.
+#     # Having f.handle() now pointing to a reused Equalizer is not a problem because
+#     # this only affects instances of Lift, and it is their `sup` mor which end up becoming
+#     # the `sup` of the returned Lift. However this will be a problem if we return f.handle()
+#     # itself. In fact, the `==` comparison will fail due to the target of f.handle() having being
+#     # reused.
+#     eqr = equalizer(f.parallel())
+#     return lex.Lift.strict(f.mor(), eqr)
 
 def _fork(l: Lift) -> Fork:
-    # def _is_len_2(x: Eq[tuple[Mor, ...]]) -> TypeGuard[Eq[tuple[Mor, Mor]]]:
-    #     return len(x.s) == len(x.t) == 2
-
-    # def _gen_eq(eq_it: Iterable[Eq[Mor]]):
-    #     for e in eq_it:
-    #         d = Eq[Mor].from_tuple(e, mor)
-    #         assert _is_len_2(d)
-    #         yield d.apply(compose)
-
     mor = l
-    par = l.target.parallel()
-    ef = equalizer(par)
-    # Having been able to construct the lift means that the equalities are already registered.
+    t = mor.target
+    assert isinstance(t, lex.Equalizer)
+    eqr = equalizer(t.par)
     return lex.Fork(
-        compose((ef.handle(), mor)),
-        par.pairs,
-    #    _gen_eq(ef.eq()),
+        compose((eqr.mor(), mor)),
+        t.par,
     )
 
 def lift_hat(f: Fork):
-    assert Fork.__eq__(f, _fork(lift(f)))
+    assert f == _fork(lift(f))
     return Eq(f, f)
 
 def lift_ihat(l: Lift):

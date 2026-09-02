@@ -37,6 +37,6 @@ def proj(label: str | int):
         else:
             l = label
 
-        return src[l]
+        return src.proj(l)
 
     return fn

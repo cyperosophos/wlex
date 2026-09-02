@@ -19,7 +19,7 @@ def is_composable(c: category.Composable):
 
     raise CompositionError("Invalid")
 
-def is_associativity_source(s: category.AssociativitySource):
+def is_associativity_source(s: category._AssociativitySource):
     f, g, h = s
     is_composable((f, g))
     is_composable((g, h))

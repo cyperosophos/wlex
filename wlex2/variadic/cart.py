@@ -1,22 +1,40 @@
 from typing import Iterable, Callable, Sequence
 from itertools import chain
 
-from ..model.category import Obj, Mor, Param
+from ..model.category import Obj, Mor
 from ..model.lex import Equalizer
 from ..proven import cart, ValidationError
+from ..proven import lex
 from ..trusted import cart as pcart
 from ..model.cart import Pairing, Product, Span as ConcreteSpan
 from . import it_with_first
 
 Span = pcart.Span
 
-def product(components: Iterable[tuple[str, Obj] | Obj]) -> Product:
-    res = pcart.terminal()
-    assert isinstance(res, Product)
-    for component in components:
-        res.frozen = False
-        res = pcart.product(Param((res, component)))
-        assert isinstance(res, Product)
+def product(
+    components: Iterable[tuple[str, Obj] | Obj],
+    terminal: Callable[[], Obj],
+    bproduct: Callable[[Obj, Obj, str], Product],
+) -> Obj:
+    res = terminal()
+    sub: list[tuple[int, Equalizer]] = []
+    for i, component in enumerate(components):
+        if isinstance(component, tuple):
+            label, component = component
+        else:
+            label = ''
+
+        if isinstance(component, Equalizer):
+            sub.append((i, component)) # use a method
+            component = component.sup
+
+        #res = pcart.product(Param(res, component, label))
+        # TODO: This should rely on a param subclass which doesn't
+        # allow equalizer components.
+        res = bproduct(res, component, label)
+
+    for i, component in sub:
+        res = lex.equalizer(component.par.projected(res, i))
 
     return res
 
