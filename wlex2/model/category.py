@@ -4,6 +4,16 @@ from typing import Iterator
 
 from ..equality import Eq
 
+class InclError(ValueError):
+    pass
+
+class ProjError(ValueError):
+    pass
+
+ProjNode = tuple[int, 'ProjTree']
+ProjTree = ProjNode | tuple[ProjNode, ...] # () is identity
+# -1 is for `pack`, distinguish pairing of single projection from projection.
+
 def _reduce_factors(prev: 'Mor', factors: Iterator['Mor']) -> Iterator['Mor']:
     for factor in factors:
         reduced = prev.reduce(factor)
@@ -51,6 +61,7 @@ class Obj(metaclass=ABCMeta):
         return False
 
     def incl_opt(self, target: 'Obj | None') -> 'Mor | None':
+        # TODO: Get rid of incl_opt. Leave just incl.
         if self == target:
             return Composition(self)
 
@@ -63,32 +74,26 @@ class Obj(metaclass=ABCMeta):
 
         raise ValueError("Can't incl")
 
-    def pack(self) -> 'Mor | None':
-        return None
+    def pack(self) -> 'Mor':
+        raise ProjError
 
-    def proj_opt(self, target: 'Obj | int') -> 'Mor | None':
-        if isinstance(target, int):
-            if target == -1:
-                return Composition(self)
+    def proj(self, target: 'Obj | tuple[int, ...]', _depth: int = 1) -> 'Mor | tuple[Mor, ProjTree]':
+        if isinstance(target, tuple):
+            if target:
+                raise ProjError
 
-            return None
+            return Composition(self)
 
         if self == target:
             return Composition(self)
 
         h = target.pack()
-        if h and h.source == self:
-            return h
+        p = self.proj(h.source)
+        if isinstance(p, tuple):
+            p, tree = p
 
-        return None
 
-    def proj(self, target: 'Obj | int') -> 'Mor':
-        # To be consistent with incl, this need not be an iso.
-        res = self.proj_opt(target)
-        if res:
-            return res
-
-        raise ValueError("Can't plug")
+        return Composition.strict(h, self.proj(h.source))
 
     def component(self, idx: int) -> 'Obj':
         if idx == -1:

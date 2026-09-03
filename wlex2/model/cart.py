@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 from typing import Iterable, Callable, TypeGuard, TypeVar
 import weakref
 
-from .category import Obj, Mor, eq_with_length, Composition
+from .category import Obj, Mor, eq_with_length, Composition, ProjError
 from .. import is_tuple
 
 T = TypeVar('T')
@@ -167,7 +167,7 @@ class Product(Obj, BaseSpan):
             isinstance(t, Terminal)
             and self.par.y == source
         ):
-            return None
+            raise ProjError
 
         return Pairing(Span(
             TerminalMor(NullSpan(source, t.par)),
@@ -181,13 +181,21 @@ class Product(Obj, BaseSpan):
 
         return self.components[idx]
 
-    def proj_opt(self, target: Obj | int):
-        res = super().proj_opt(target)
-        if res:
-            return res
+    def proj(self, target: Obj | tuple[int, ...], _depth: int = 1):
+        try:
+            return super().proj(target)
+        except ProjError:
+            pass
 
-        if isinstance(target, int):
-            return Projection(self, target)
+        if isinstance(target, tuple):
+            if _depth >= len(target):
+                return Projection(self, target[-1])
+
+            h = Projection(self, target[_depth-1])
+            return Composition.strict(
+                h.target.proj(target, _depth=_depth+1),
+                h,
+            )
 
         assert isinstance(target, Product)
         # Just as with inclusion, since the target is already given,
@@ -204,6 +212,19 @@ class Product(Obj, BaseSpan):
         ), _shrink=True)
 
         projs: list[Mor] = [Projection(self, i) for i in idxs]
+        # Projections have to be postcomposed with more projetions.
+        # TODO: !!! Ax(B + C) ~= AxB + AxC
+        # The full normalization ends up being something like Equalizer(Coproduct(Product()))
+        # (and one has to consider W-Types as infinite coproducts).
+        # One should then probably have a minimal version Parallel and Param,
+        # and then subclass them in context.
+        projs = [
+            Composition.strict(
+                p.target.proj(target.components[i]),
+                p,
+            )
+            for i, p in enumerate(projs)
+        ]
         return Pairing((projs, target))
 
     def _tail_proj(self, target: Obj) -> Mor:

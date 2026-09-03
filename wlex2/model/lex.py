@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 import weakref
 
-from .category import Obj, Mor, Composition
+from .category import Obj, Mor, Composition, ProjError
 from .cart import WRef
 from ..equality import Eq
 from ..proven import ValidationError
@@ -152,26 +152,40 @@ class Fork(BaseFork):
 class Equalizer(Obj, BaseFork):
     __slots__ = ('sup', 'requirements', 'length', 'par')
     sup: Obj
+    # TODO: !!! idx should be part of the key because we may have the
+    # same pair for different components? Or should we map to multiple idx?
     requirements: dict[tuple[Mor, Mor], tuple[int, int]] # This keeps the order. Requires Python >= 3.7.
     # Second int is the idx of the component.
     length: int
 
-    def component(self, idx: int):
+    def component(self, idx: tuple[int, ...]) -> Obj:
         sup = self.sup.component(idx)
+        # There may be no requirements.
 
 
-    def proj_opt(self, target: Obj | int):
+    def proj(self, target: Obj | tuple[int, ...], _depth: int = 1):
         # This works only with expanded products
-        res = super().proj_opt(target)
-        if res:
-            return res
+        try:
+            return super().proj(target)
+        except ProjError:
+            pass
 
-        # TODO: It seems more consistent to keep track of the how requirements map to
+        # TODO: It seems more consistent to keep track of how requirements map to
         # components of the superobject (when it is a product), so that the result
         # of projection is the expected one (equalizer components).
-        res = self.sup.proj_opt(target)
-        if res:
-            return Composition.strict(res, Inclusion(self))
+        # When idx is given we get the component corresponding to idx.
+        # When a target object is given we do nothing unless the object is an equalizer
+        # in which case we only need to check that the requirements of the target
+        # appear in self. With equalizer we first use its superobject as the target.
+        # The result of proj can be a composition of projections (not just a pairing or projection).
+        # We would need a special attribute in both Composition and Pairing
+        # to keep track of the actual idx tree that results from proj and then
+        # use this idx tree to find the requirements.
+        h = self.sup.proj(target)
+        return Lift((
+            Composition.strict(res, Inclusion(self)),
+            self.component(),
+        ))
 
         # For consistency we want this to return a morphism whose target is
         # `target`. The way we deal with equalizers of products is by extracting
@@ -284,6 +298,8 @@ class Equalizer(Obj, BaseFork):
         #     s.extend(),
         #     t.extend(),
         # ) in self.requirements
+
+        # Get the idx
 
 
     @classmethod
