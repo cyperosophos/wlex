@@ -88,7 +88,7 @@ def lift(
             res = lex.lift(f, proofs)
         except lex.ProofError as pe:
             eq = pe.eq
-            msource = res.source
+            msource = res.source # Supposed to be source of eq
             # eqr is actually equivalently pullback!
             # Pulling back along a mono gives a mono,
             # hence we take the equalizer as a kind of shortcut.

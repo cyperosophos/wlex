@@ -161,6 +161,8 @@ class Equalizer(Obj, BaseFork):
     def component(self, idx: tuple[int, ...]) -> Obj:
         sup = self.sup.component(idx)
         # There may be no requirements.
+        # ...
+        return sup
 
 
     def proj(self, target: Obj | tuple[int, ...], _depth: int = 1):
@@ -181,18 +183,44 @@ class Equalizer(Obj, BaseFork):
         # We would need a special attribute in both Composition and Pairing
         # to keep track of the actual idx tree that results from proj and then
         # use this idx tree to find the requirements.
-        h = self.sup.proj(target)
-        return Lift((
-            Composition.strict(res, Inclusion(self)),
-            self.component(),
-        ))
+        if isinstance(target, Equalizer):
+            p, tree = self.sup.proj(target.sup)
+            h = Composition.strict(p, Inclusion(self))
+            # TODO: Check that requirements of target appear in self!
+            # Probably tree isn't needed after all.
+            # Each req of target gets precomposed with `p` (the projection).
+            return Lift((h, target)), tree
+        # TODO: !!!!! The simplest approach is to handle lifting at a higher level,
+        # so that no projection here is an abstract lift, even if the original
+        # component was an equalizer.
+        # The requiremet should have a third morphism that precomposes with the
+        # other two after restricting them to a common source (i.e. the target
+        # of the third morphism). The approach of only supporting projections
+        # through an idx attr of the parallel seems the most apt. Since the composition
+        # with the projection may actually require a precomposition with an inclusion etc. (restrict-lift)
+        # almost as if one had to provide the common source requirements.
+        # The problem of precomposing with an inclusion is that then the order of
+        # requirements ends up mattering even if one does not depend on the other.
+        # However when precomposing with requirement with an inclusion no common source
+        # is needed, so the result ends up being a pair of requirements, for which a common
+        # source is determined in the successive construction of parallels that give
+        # rise to the variadic equalizer.
+        # TODO: CONCLUSION: Precompose requirements with inclusion, no idx attr of parallel.
 
+
+        p, tree = self.sup.proj(target)
+        h = Composition.strict(p, Inclusion(self))
+        if isinstance(target, tuple):
+            component = self.component(target)
+            return Lift.strict((h, component)), tree
+
+        return h, tree
         # For consistency we want this to return a morphism whose target is
         # `target`. The way we deal with equalizers of products is by extracting
         # their superobject and passing it as the `target` here. The goal of
         # `proj` is to make superobjects coincide so that restrict-lifting can
         # be applied, and then `incl`.
-        return None
+        #return None
 
     # @classmethod
     # def expand(cls, obj: Obj):
@@ -414,7 +442,6 @@ class Lift(Mor):
     def extend(self):
         # We could actually extend lifts when their supermorphism can be extended
         # while keeping the lift valid, but checking this would be too complicated.
-
         if isinstance(self.sup, Inclusion):
             return Composition(self.target)
 
@@ -446,8 +473,17 @@ class Lift(Mor):
             self.sup = mor
 
     @classmethod
-    def strict(cls, fork: BaseFork):
-        res = cls(fork)
+    def strict(cls, fork: BaseFork | tuple[Mor, Obj]):
+        # Just like initialization this assumes valid arguments.
+        if isinstance(fork, tuple):
+            mor, target = fork
+            if not isinstance(target, Equalizer) or target == mor.target:
+                return mor
+
+            res = cls((mor, target))
+        else:
+            res = cls(fork)
+
         # Max lift of inclusion is identity
         if isinstance(res.sup, Inclusion) and res.source == res.target:
             return Composition(res.target)

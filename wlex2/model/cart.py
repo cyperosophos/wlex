@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 from typing import Iterable, Callable, TypeGuard, TypeVar
 import weakref
 
-from .category import Obj, Mor, eq_with_length, Composition, ProjError
+from .category import Obj, Mor, eq_with_length, Composition, ProjError, ProjNode
 from .. import is_tuple
 
 T = TypeVar('T')
@@ -189,13 +189,13 @@ class Product(Obj, BaseSpan):
 
         if isinstance(target, tuple):
             if _depth >= len(target):
-                return Projection(self, target[-1])
+                idx = target[-1]
+                return Projection(self, idx), (idx, ())
 
-            h = Projection(self, target[_depth-1])
-            return Composition.strict(
-                h.target.proj(target, _depth=_depth+1),
-                h,
-            )
+            idx = target[_depth-1]
+            h = Projection(self, idx)
+            p, tree = h.target.proj(target, _depth=_depth+1)
+            return Composition.strict(p, h), (idx, tree)
 
         assert isinstance(target, Product)
         # Just as with inclusion, since the target is already given,
@@ -211,21 +211,24 @@ class Product(Obj, BaseSpan):
             for i in range(self.length)
         ), _shrink=True)
 
-        projs: list[Mor] = [Projection(self, i) for i in idxs]
+        #projs: list[Mor] = [Projection(self, i) for i in idxs]
         # Projections have to be postcomposed with more projetions.
         # TODO: !!! Ax(B + C) ~= AxB + AxC
         # The full normalization ends up being something like Equalizer(Coproduct(Product()))
         # (and one has to consider W-Types as infinite coproducts).
-        # One should then probably have a minimal version Parallel and Param,
+        # TODO: One should then probably have a minimal version Parallel and Param,
         # and then subclass them in context.
-        projs = [
-            Composition.strict(
-                p.target.proj(target.components[i]),
-                p,
-            )
-            for i, p in enumerate(projs)
-        ]
-        return Pairing((projs, target))
+        # Actually Ax(B + C) stays unexpanded, since expanding it would affect the complexity of Copairing.ev.
+        nodes: list[ProjNode] = []
+        projs: list[Mor] = []
+
+        for i, idx in enumerate(idxs):
+            p0 = Projection(self, idx)
+            p, tree = p0.target.proj(target.components[i])
+            projs.append(Composition.strict(p, p0))
+            nodes.append((idx, tree))
+
+        return Pairing((projs, target)), tuple(nodes)
 
     def _tail_proj(self, target: Obj) -> Mor:
         if isinstance(target, Terminal):

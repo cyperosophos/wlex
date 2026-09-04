@@ -77,23 +77,19 @@ class Obj(metaclass=ABCMeta):
     def pack(self) -> 'Mor':
         raise ProjError
 
-    def proj(self, target: 'Obj | tuple[int, ...]', _depth: int = 1) -> 'Mor | tuple[Mor, ProjTree]':
+    def proj(self, target: 'Obj | tuple[int, ...]', _depth: int = 1) -> tuple['Mor', ProjTree]:
         if isinstance(target, tuple):
             if target:
                 raise ProjError
 
-            return Composition(self)
+            return Composition(self), ()
 
         if self == target:
-            return Composition(self)
+            return Composition(self), ()
 
         h = target.pack()
-        p = self.proj(h.source)
-        if isinstance(p, tuple):
-            p, tree = p
-
-
-        return Composition.strict(h, self.proj(h.source))
+        p, tree = self.proj(h.source)
+        return Composition.strict(h, p), (-1, tree)
 
     def component(self, idx: int) -> 'Obj':
         if idx == -1:
@@ -138,7 +134,7 @@ class Mor(metaclass=ABCMeta):
 
     def proj(self, target: Obj):
         return Composition.strict(
-            self.target.proj(target),
+            self.target.proj(target)[0],
             self,
         )
 
