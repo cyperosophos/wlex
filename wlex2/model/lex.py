@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 import weakref
 
-from .category import Obj, Mor, Composition, ProjError
+from .category import Obj, Mor, Composition, ProjError, InclError
 from .cart import WRef
 from ..equality import Eq
 from ..proven import ValidationError
@@ -13,16 +13,14 @@ class Parallel:
     __slots__ = (
         'source',
         '_i', '_j',
-        'idx',
         'equalizer',
     )
     source: Obj
     _i: Mor
     _j: Mor
-    idx: tuple[int, ...]
     equalizer: WRef['Equalizer']
 
-    def __init__(self, source: Obj, i: Mor, j: Mor, idx: tuple[int, ...]):
+    def __init__(self, source: Obj, i: Mor, j: Mor):
         # Lifting an inclusion based on builtin subset operation
         # has the only disadvantage that it cannot rely on intensional equalities.
         # The `Parallel` class avoids having to compose with an inclusion, whose
@@ -32,24 +30,22 @@ class Parallel:
         self._i = i
         self._j = j
         self.source = source
-        self.idx = idx
         self.equalizer = lambda: None
 
         # Repeated requirements must not be allowed, because then the dict
         # of requirements in the Equalizer would be inconsistent.
         # Of course the equalizer still exist (meaning that the lifts can be constructed)
         # just not the parallel to produce it.
-        # TODO: Should this actually be in context?
+        # TODO: !!! Should this actually be in context?
         if isinstance(source, Equalizer):
             if (i.extend(), j.extend()) in source.requirements:
                 raise ValueError('Repeated requirement')
 
-    def _restrict(self, mor: Mor):
-        p = self.source.proj(self.idx)
-        return Composition.strict(p.target.restrict(mor), p)
+    def requirement(self):
+        return (self._i.extend(), self._j.extend())
 
     def is_valid(self):
-        source = self.source.component(self.idx)
+        source = self.source
         if not (
             source.is_subobject(self._i.source)
             and source.is_subobject(self._j.source)
@@ -62,12 +58,18 @@ class Parallel:
             raise ValidationError('Must have equal targets')
 
     def i(self):
-        return self._restrict(self._i)
+        return self.source.restrict(self._i)
 
     def j(self):
-        return self._restrict(self._j)
+        return self.source.restrict(self._j)
 
-    def projected(self, source: Obj, idx: int):
+    def pull(self, source: Obj, idx: int):
+        def _precompose_proj(mor: Mor, proj: Mor):
+            return Lift.strict((
+                mor.source.pull(proj.source, idx).restrict(mor),
+                mor.source,
+            ))
+
         # TODO: !!! idx should actually be tuple[int, ...].
         # This could be a deep component.
         # TODO: Should there be a mapping of components to indices?
@@ -91,19 +93,34 @@ class Parallel:
         # TODO: Actually instead of subclassing param and parallel it is better to just
         # provide functions with checks in context that create that needed diagrams.
 
-        if isinstance(self.source, Equalizer):
-            source = Equalizer(self.source.par.projected(source, idx))
+        #p = source.proj(idx)
+        source = self.source.pull(source, idx)
+        # if isinstance(self.source, Equalizer):
+        #     source = self.source.projected(source, idx)
+        # elif self.source != p.target:
+        #     # Cf. projected on non equalizer!
+        #     # This is valid when `self.source` (not an equalizer) is the component at
+        #     # `idx` of (equalizer of) product `source` (no equalizer components).
+        #     # When `self.source` is an equalizer the check is recursive.
+        #     raise ValueError("Wrong source")
 
-        # This is valid when `self.source` (not an equalizer) is the component at
-        # `idx` of (equalizer of) product `source` (no equalizer components).
-        if self.source != source.component(idx):
-            raise ValueError("Wrong source")
+        # Costs of recovering previous projection restrict outweighs the benefits,
+        # so we tolerate some repetition here.
+        # isource = self._i.source
+        # if isinstance(isource, Equalizer):
+        #     pi = Lift((
+        #         # TODO: Use incl()
+        #         # TODO: projected on non Equalizer?
+        #         #       Just return the (Product) source and check `self` coincides with component.
+        #         Composition((p, Inclusion(isource.projected(source, idx)))),
+        #         isource,
+        #     ))
 
+        p = source.proj(idx)
         return Parallel(
             source,
-            self._i,
-            self._j,
-            idx,
+            _precompose_proj(self._i, p),
+            _precompose_proj(self._j, p),
         )
 
     # def projected(self, proj: Projection):
@@ -154,23 +171,28 @@ class Equalizer(Obj, BaseFork):
     sup: Obj
     # TODO: !!! idx should be part of the key because we may have the
     # same pair for different components? Or should we map to multiple idx?
-    requirements: dict[tuple[Mor, Mor], tuple[int, int]] # This keeps the order. Requires Python >= 3.7.
+    requirements: dict[tuple[Mor, Mor], int] # This keeps the order. Requires Python >= 3.7.
     # Second int is the idx of the component.
     length: int
 
-    def component(self, idx: tuple[int, ...]) -> Obj:
-        sup = self.sup.component(idx)
-        # There may be no requirements.
-        # ...
-        return sup
+    def pull(self, source: Obj, idx: int):
+        # This is actually a pullback of the projection along the inclusion.
+        return Equalizer(self.par.pull(source, idx))
 
+    # def component(self, idx: int) -> Obj:
+    #     return self.sup.component(idx)
 
-    def proj(self, target: Obj | tuple[int, ...], _depth: int = 1):
+    def proj(self, target: Obj | int):
         # This works only with expanded products
         try:
             return super().proj(target)
         except ProjError:
             pass
+
+        return Composition.strict(
+            self.sup.proj(target),
+            Inclusion(self), # Restrict
+        )
 
         # TODO: It seems more consistent to keep track of how requirements map to
         # components of the superobject (when it is a product), so that the result
@@ -183,13 +205,13 @@ class Equalizer(Obj, BaseFork):
         # We would need a special attribute in both Composition and Pairing
         # to keep track of the actual idx tree that results from proj and then
         # use this idx tree to find the requirements.
-        if isinstance(target, Equalizer):
-            p, tree = self.sup.proj(target.sup)
-            h = Composition.strict(p, Inclusion(self))
-            # TODO: Check that requirements of target appear in self!
-            # Probably tree isn't needed after all.
-            # Each req of target gets precomposed with `p` (the projection).
-            return Lift((h, target)), tree
+        # if isinstance(target, Equalizer):
+        #     p, tree = self.sup.proj(target.sup)
+        #     h = Composition.strict(p, Inclusion(self))
+        #     # TODO: Check that requirements of target appear in self!
+        #     # Probably tree isn't needed after all.
+        #     # Each req of target gets precomposed with `p` (the projection) doing lift-restrict as needed.
+        #     return Lift((h, target)), tree
         # TODO: !!!!! The simplest approach is to handle lifting at a higher level,
         # so that no projection here is an abstract lift, even if the original
         # component was an equalizer.
@@ -206,15 +228,8 @@ class Equalizer(Obj, BaseFork):
         # source is determined in the successive construction of parallels that give
         # rise to the variadic equalizer.
         # TODO: CONCLUSION: Precompose requirements with inclusion, no idx attr of parallel.
+        # Notice that reduce will work with projection (and pairing of projections).
 
-
-        p, tree = self.sup.proj(target)
-        h = Composition.strict(p, Inclusion(self))
-        if isinstance(target, tuple):
-            component = self.component(target)
-            return Lift.strict((h, component)), tree
-
-        return h, tree
         # For consistency we want this to return a morphism whose target is
         # `target`. The way we deal with equalizers of products is by extracting
         # their superobject and passing it as the `target` here. The goal of
@@ -248,20 +263,20 @@ class Equalizer(Obj, BaseFork):
         # params where one of the objects is an equalizer.
         # pass
 
-    def incl_opt(self, target: Obj | None):
-        res = super().incl_opt(target)
-        if res:
-            return res
+    def incl(self, target: Obj | None):
+        try:
+            return super().incl(target)
+        except InclError:
+            pass
 
         h = Inclusion(self)
-        if target is None or self.sup == target:
-            return h
+        if target:
+            if self.is_subobject(target):
+                return Lift.strict((h, target))
 
-        assert isinstance(target, Equalizer)
-        if self.is_subobject(target):
-            return Lift((h, target))
+            raise InclError
 
-        return None
+        return h
 
     def _incl(self, target: Obj) -> Mor:
         # TODO: Check that this gives the same result as `incl`.
@@ -309,9 +324,10 @@ class Equalizer(Obj, BaseFork):
         # equalities are yielded. This appears to have no use, since one
         # cannot use for registering equalizer equalities given the overly
         # restrictive source.
+        i, j = self.par.requirement()
         return Eq[Mor](
-            self.restrict(self.par.i()),
-            self.restrict(self.par.j()),
+            self.restrict(i),
+            self.restrict(j),
         )
 
     def verify(self, e: Eq[Mor]):
@@ -322,13 +338,10 @@ class Equalizer(Obj, BaseFork):
 
         # TODO: Equality has to be valid. Perhaps guaranty this during instantiation.
         # We need to make sure that the source is a subobject of self.
-        # return s.source.is_subobject(self) and (
-        #     s.extend(),
-        #     t.extend(),
-        # ) in self.requirements
-
-        # Get the idx
-
+        return s.source.is_subobject(self) and (
+            s.extend(),
+            t.extend(),
+        ) in self.requirements
 
     @classmethod
     def _first_requirements(cls, src: Obj) -> tuple[Obj, dict[tuple[Mor, Mor], int]]:
@@ -357,7 +370,7 @@ class Equalizer(Obj, BaseFork):
         par.equalizer = weakref.ref(self)
         super().__init__()
         self.sup, requirements = self._first_requirements(par.source)
-        requirements[(par.ext_i, par.ext_j)] = len(requirements)
+        requirements[par.requirement()] = len(requirements)
         self.length = len(requirements)
         self.requirements = requirements
         # It is entirely possible for the `Parallel` instance

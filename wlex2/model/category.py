@@ -51,6 +51,12 @@ class Obj(metaclass=ABCMeta):
     # def param(self):
     #     return Param((self,))
 
+    def pull(self, source: 'Obj', idx: int):
+        if self == source.component(idx):
+            return source
+
+        raise ValueError("Wrong source")
+
     def is_subobject(self, obj: 'Obj'):
         return self == obj
 
@@ -60,42 +66,26 @@ class Obj(metaclass=ABCMeta):
     def verify(self, e: Eq['Mor']) -> bool:
         return False
 
-    def incl_opt(self, target: 'Obj | None') -> 'Mor | None':
-        # TODO: Get rid of incl_opt. Leave just incl.
+    def incl(self, target: 'Obj | None') -> 'Mor':
         if self == target:
             return Composition(self)
 
-        return None
-
-    def incl(self, target: 'Obj | None' = None) -> 'Mor':
-        res = self.incl_opt(target)
-        if res:
-            return res
-
-        raise ValueError("Can't incl")
-
-    def pack(self) -> 'Mor':
-        raise ProjError
-
-    def proj(self, target: 'Obj | tuple[int, ...]', _depth: int = 1) -> tuple['Mor', ProjTree]:
-        if isinstance(target, tuple):
-            if target:
-                raise ProjError
-
-            return Composition(self), ()
-
-        if self == target:
-            return Composition(self), ()
-
-        h = target.pack()
-        p, tree = self.proj(h.source)
-        return Composition.strict(h, p), (-1, tree)
+        raise InclError
 
     def component(self, idx: int) -> 'Obj':
-        if idx == -1:
-            return self
+        raise ProjError
 
-        raise ValueError("No component with idx")
+    def pack(self, source: 'Obj') -> 'Mor':
+        raise ProjError
+
+    def proj(self, target: 'Obj | int') -> 'Mor':
+        if isinstance(target, int):
+            raise ProjError
+
+        if self == target:
+            return Composition(self)
+
+        return target.pack(self)
 
     # def intersection(self, obj: 'Obj') -> tuple['Obj', Iterable[tuple['Mor', 'Mor']]]:
     #     if obj.is_subobject(self):
@@ -134,7 +124,7 @@ class Mor(metaclass=ABCMeta):
 
     def proj(self, target: Obj):
         return Composition.strict(
-            self.target.proj(target)[0],
+            self.target.proj(target),
             self,
         )
 

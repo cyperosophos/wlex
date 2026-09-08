@@ -3,6 +3,7 @@ from itertools import chain
 
 from . import Transform
 from ..model.category import Obj, Mor
+from ..model.cart import Product
 from ..proven import category
 from ..trusted import category as pcategory
 from . import it_with_first, resolve
@@ -61,15 +62,18 @@ def compose(
 
 #     return mor
 
+# TODO: Just include this in a TComposer class?
 def tcompose(
     c: Iterable[CartTransform | Obj],
     fit: Callable[[Obj, CartMor], Mor],
     terminal_mor: Callable[[Obj], Mor],
+    terminal: Callable[[], Obj],
+    bproduct: Callable[[Obj, Obj, str], Product],
 ) -> Transform:
     adapter = _TComposer((
         pcategory.identity(x) if isinstance(x, Obj) else x
         for x in c
-    ), terminal_mor)
+    ), terminal_mor, terminal, bproduct)
     f0, factors = it_with_first(adapter.composable())
 
     if f0 is None:
@@ -103,15 +107,23 @@ def tcompose(
     return comp
 
 class _TComposer:
-    __slots__ = ('pending', 'factors', 'terminal_mor')
+    __slots__ = ('pending', 'factors', 'terminal_mor', 'terminal', 'bproduct')
     pending: list[Transform | tuple[LabeledTransform, ...]]
     factors: Iterable[CartTransform]
     terminal_mor: Callable[[Obj], Mor]
+    terminal: Callable[[], Obj]
+    bproduct: Callable[[Obj, Obj, str], Product]
 
-    def __init__(self, factors: Iterable[CartTransform], terminal_mor: Callable[[Obj], Mor]):
+    def __init__(
+        self, factors: Iterable[CartTransform],
+        terminal_mor: Callable[[Obj], Mor],
+        terminal: Callable[[], Obj],
+        bproduct: Callable[[Obj, Obj, str], Product]):
         self.pending = []
         self.factors = iter(factors)
         self.terminal_mor = terminal_mor
+        self.terminal = terminal
+        self.bproduct = bproduct
 
     def flush(self, source: Obj):
         res: list[CartMor] = []
@@ -127,7 +139,9 @@ class _TComposer:
                     _resolve_labeled(f, source)
                     for f in factor
                 )
-                source = _tuple_target(mor)
+                source = _tuple_target(
+                    mor, self.terminal, self.bproduct,
+                )
 
             res.append(mor)
 
@@ -166,13 +180,18 @@ def _is_cart_mor(
         ) for x in f
     )
 
-def _tuple_target(factor: tuple[LabeledMor, ...]):
-    res = product(
+def _tuple_target(
+        factor: tuple[LabeledMor, ...],
+        terminal: Callable[[], Obj],
+        bproduct: Callable[[Obj, Obj, str], Product]
+    ):
+    # This is used when there is no target for passing to `variadic.pairing`.
+    res = product((
         m.target
         if isinstance(m, Mor)
         else (m[0], m[1].target)
         for m in factor
-    )
+    ), terminal, bproduct)
     return res
 
 def _resolve_labeled(t: LabeledTransform, source: Obj):

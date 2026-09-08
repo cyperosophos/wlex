@@ -34,7 +34,8 @@ def product(
         res = bproduct(res, component, label)
 
     for i, component in sub:
-        res = lex.equalizer(component.par.projected(res, i))
+        # This is a consequence of the Parallel class provided by context.
+        res = component.pull(res, i)
 
     return res
 

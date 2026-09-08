@@ -8,7 +8,7 @@ from .variadic.cart import pairing
 from .variadic.lex import lift, equalizer
 from .variadic import resolve
 from .equality import Eq as GeneralEq, Verifier
-from .proven.cart import terminal_mor
+from .proven.cart import terminal_mor, terminal, product
 
 Eq = GeneralEq[Mor]
 
@@ -36,6 +36,32 @@ def _fix_eq_signature(left: Transform | Obj, right: Transform | Obj):
 
     return left, right
 
+class Logic:
+    __slots__ = ('null_param',)
+    null_param: cart.NullParam
+
+    def __init__(self):
+        self.null_param = cart.NullParam()
+        #self.null_coparam = NullCoparam() # Place this in a subclass
+
+    def terminal_mor(self, source: Obj) -> Mor:
+        return terminal_mor(cart.NullSpan(source, self.null_param))
+
+    def terminal(self):
+        return terminal(self.null_param)
+
+    def product(self, x: Obj, y: Obj, label: str):
+        if isinstance(x, cart.Product):
+            if label in x.labels:
+                raise ValueError('Repeated label')
+
+        if isinstance(x, lex.Equalizer) or isinstance(y, lex.Equalizer):
+            raise ValueError("Equalizer objects are not allowed as param")
+
+        return product(cart.Param(x, y, label))
+
+
+
 class Context:
     __slots__ = ('refs', 'proofs', 'null_param')
     refs: dict[str, Obj | Mor]
@@ -53,7 +79,6 @@ class Context:
         self.refs = {}
         self.proofs = Verifier(set())
         self.null_param = cart.NullParam()
-        #self.null_coparam = NullCoparam() # Place this in a subclass
 
     def compose(self, *factors: CartTransform | Obj):
         # Straightening has to work with extensivity in the same way,
@@ -85,6 +110,18 @@ class Context:
         return pairing(factor, target, self.fit_mor_factor, equalizer)
 
     def fit_mor_factor(self, target: Obj, factor: Mor) -> Mor:
+        # This gets called when `target` != `factor.target`
+        # TODO: Support coproj for Coproduct
+        # Make superobjects coincide
+        if not isinstance(target, lex.Equalizer):
+            return factor.proj(target)
+
+        # Restrict and lift
+        return lift(
+            factor.proj(target.sup),
+            target, self.proofs,
+        ).incl(target)
+
         # Cases (Obj, Equalizer, Product, EP)
         # Obj -> Equalizer: restrict, lift; same superobject.
         # Equalizer -> Obj: incl; same superobject.
@@ -96,18 +133,18 @@ class Context:
         # Obj -> Terminal.
 
         # TODO: !!! This should be called only after not being able to match the target!
-        if isinstance(target, lex.Equalizer):
-            # This is needed even for fitting "obvious" isomorphic equalizers.
-            # TODO: What if product conversion is needed?
-            factor = lift(factor, target, self.proofs)
-        elif isinstance(target, cart.Product):
-            # Postcompose with a pairing.
-            # TODO: Check that all of this works when one target is an
-            # equalizer of a product and the other a product of equalizers.
-            # It seems a product of equalizers should be converted to the equalizer
-            # of a product. This is analogous to expanding using the distributive law.
-            # Then the product in `factor.target` gets converted to the product in `target`.
-            pass
+        # if isinstance(target, lex.Equalizer):
+        #     # This is needed even for fitting "obvious" isomorphic equalizers.
+        #     # TODO: What if product conversion is needed?
+        #     factor = lift(factor, target, self.proofs)
+        # elif isinstance(target, cart.Product):
+        #     # Postcompose with a pairing.
+        #     # TODO: Check that all of this works when one target is an
+        #     # equalizer of a product and the other a product of equalizers.
+        #     # It seems a product of equalizers should be converted to the equalizer
+        #     # of a product. This is analogous to expanding using the distributive law.
+        #     # Then the product in `factor.target` gets converted to the product in `target`.
+        #     pass
 
         # In the case that there are no requirements for lifting
         # (target is not an Equalizer), we don't know that factor.target
@@ -122,7 +159,7 @@ class Context:
         # to the composition.
         # Notice that factor.target can only be isomorphic to target,
         # so a lift of the inclusion is always needed.
-        return factor.incl(target)
+        #return factor.incl(target)
 
     def fit_factor(self, target: Obj, factor: CartMor) -> Mor:
         if isinstance(factor, Mor):

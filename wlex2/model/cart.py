@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 from typing import Iterable, Callable, TypeGuard, TypeVar
 import weakref
 
-from .category import Obj, Mor, eq_with_length, Composition, ProjError, ProjNode
+from .category import Obj, Mor, eq_with_length, Composition, ProjError
 from .. import is_tuple
 
 T = TypeVar('T')
@@ -50,6 +50,9 @@ class Terminal(Obj, BaseNullSpan):
     def obj(self):
         return self
 
+    def pack(self, source: Obj):
+        return TerminalMor(NullSpan(source, self.par))
+
     def __new__(cls, par: NullParam):
         res = par.terminal()
         if res is None:
@@ -79,9 +82,7 @@ class TerminalMor(Mor):
         return ()
 
     def reduce(self, mor: Mor):
-        t = self.target
-        assert isinstance(t, Terminal)
-        return TerminalMor(NullSpan(mor.source, t.par))
+        return self.target.pack(mor.source)
 
     def __hash__(self):
         return hash(self.source)
@@ -103,10 +104,6 @@ class Param:
     product: WRef['Product']
 
     def __init__(self, x: Obj, y: Obj, label: str):
-        if isinstance(x, Product):
-            if label in x.labels:
-                raise ValueError('Repeated label')
-
         self.x = x
         self.y = y
         self.label = label
@@ -158,22 +155,22 @@ class Product(Obj, BaseSpan):
     # to be taken into account. Same applies to Pairing.components and
     # Equalizer.requirements.
 
-    def pack(self):
+    def pack(self, source: Obj):
         # Specifically supports only the product of terminal with an object
         # (but not the product of an object with terminal).
-        source = self.components[0]
+        src = self.components[0]
         t = self.par.x
         if not(
             isinstance(t, Terminal)
-            and self.par.y == source
+            and self.par.y == src
         ):
             raise ProjError
 
-        return Pairing(Span(
-            TerminalMor(NullSpan(source, t.par)),
-            Composition(source),
+        return Composition.strict(Pairing(Span(
+            TerminalMor(NullSpan(src, t.par)),
+            Composition(src),
             self.par,
-        ))
+        )), source.proj(src))
 
     def component(self, idx: int):
         if idx >= self.length:
@@ -181,21 +178,14 @@ class Product(Obj, BaseSpan):
 
         return self.components[idx]
 
-    def proj(self, target: Obj | tuple[int, ...], _depth: int = 1):
+    def proj(self, target: Obj | int):
         try:
             return super().proj(target)
         except ProjError:
             pass
 
-        if isinstance(target, tuple):
-            if _depth >= len(target):
-                idx = target[-1]
-                return Projection(self, idx), (idx, ())
-
-            idx = target[_depth-1]
-            h = Projection(self, idx)
-            p, tree = h.target.proj(target, _depth=_depth+1)
-            return Composition.strict(p, h), (idx, tree)
+        if isinstance(target, int):
+            return Projection(self, target)
 
         assert isinstance(target, Product)
         # Just as with inclusion, since the target is already given,
@@ -219,16 +209,13 @@ class Product(Obj, BaseSpan):
         # TODO: One should then probably have a minimal version Parallel and Param,
         # and then subclass them in context.
         # Actually Ax(B + C) stays unexpanded, since expanding it would affect the complexity of Copairing.ev.
-        nodes: list[ProjNode] = []
-        projs: list[Mor] = []
-
-        for i, idx in enumerate(idxs):
-            p0 = Projection(self, idx)
-            p, tree = p0.target.proj(target.components[i])
-            projs.append(Composition.strict(p, p0))
-            nodes.append((idx, tree))
-
-        return Pairing((projs, target)), tuple(nodes)
+        return Pairing(([
+            p.target.proj(target.components[i])
+            for i, p in enumerate(
+                Projection(self, idx)
+                for idx in idxs
+            )
+        ], target))
 
     def _tail_proj(self, target: Obj) -> Mor:
         if isinstance(target, Terminal):
@@ -314,7 +301,9 @@ class Product(Obj, BaseSpan):
         par.product = weakref.ref(self)
         super().__init__()
         components, li_map = self._first_components(par.x)
-        li_map[par.label] = len(components)
+        if par.label:
+            li_map[par.label] = len(components)
+
         components.append(par.y)
         self.length = len(components)
         self.components = components
