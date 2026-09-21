@@ -1,17 +1,16 @@
-from typing import Iterator, Callable
-from itertools import chain
+from typing import Callable
 
 from ..model.category import Obj, Mor
 from ..model.cart import Product
 from ..proven.category import identity
 
-def it_with_first[T](it: Iterator[T]):
-    for first in it:
-        break
-    else:
-        return None, it
+# def it_with_first[T](it: Iterator[T]):
+#     for first in it:
+#         break
+#     else:
+#         return None, it
 
-    return first, chain((first,), it)
+#     return first, chain((first,), it)
 
 Transform = Mor | Callable[[Obj], Mor] | str | int
 

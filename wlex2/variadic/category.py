@@ -3,11 +3,12 @@ from itertools import chain
 
 from . import Transform
 from ..model.category import Obj, Mor
-from ..model.cart import Product
+from ..model.cart import Product, Pairing
+from ..model.lex import Equalizer, Lift
 from ..proven import category
 from ..trusted import category as pcategory
-from . import it_with_first, resolve
-from .cart import product
+from . import resolve
+from ..logos import Logos
 
 LabeledMor = tuple[str, Mor] | Mor
 CartMor = Mor | tuple[LabeledMor, ...]
@@ -22,26 +23,157 @@ Composable = Iterable[CartMor]
 # and in this case it may be a product inferred from a CartMor.
 # Tuple within tuple is not allowed.
 
-def compose(
-    target: Obj,
-    c: Composable,
-    #proofs: Verifier[object] | None = None,
-    fit: Callable[[Obj, CartMor], Mor],
-) -> Mor:
-    # Variadic normalized composition
-    # There has to be a "straighten" method which makes mors match.
-    # TODO: Remove target arg and call to identity?
-    res = pcategory.identity(target)
-    for factor in c:
-        # We compose left-associatively since it is the `factors` on the left
-        # that gets reused.
-        category.compose((res, fit(res.source, factor)))
-        # if proofs is None:
-        #     res = category.compose((res, factor))
-        # else:
-        #     res = restricting_compose((res, factor), proofs)
+class Composer:
+    #__slots__ = ('proofs',)
+    __slots__ = ('pending', 'factors', 'logos')
+    pending: list[Transform | tuple[LabeledTransform, ...]]
+    factors: Iterable[CartTransform]
+    logos: Logos
 
-    return res
+    def __init__(self, logos: Logos, factors: Iterable[CartTransform | Obj]):
+        self.pending = []
+        self.factors = (
+            pcategory.identity(x) if isinstance(x, Obj) else x
+            for x in factors
+        )
+        self.logos = logos
+
+    def flush(self, source: Obj):
+        res: list[CartMor] = []
+        for factor in reversed(self.pending):
+            if isinstance(factor, (Mor, Callable, str, int)):
+                mor = resolve(factor, source)
+                source = mor.target
+            elif factor == ():
+                mor = self.logos.terminal_mor(source)
+                source = mor.target
+            else:
+                mor = tuple(
+                    _resolve_labeled(f, source)
+                    for f in factor
+                )
+                source = self._tuple_target(mor)
+
+            res.append(mor)
+
+        del self.pending[:]
+        return reversed(res)
+
+    def composable(self) -> Iterator[CartMor]:
+        pending = self.pending
+        for factor in self.factors:
+            if factor == ():
+                pending.append(factor)
+            elif _is_cart_mor(factor):
+                if isinstance(factor, tuple):
+                    src = self._tuple_target(factor)
+                else:
+                    src = factor.target
+
+                yield from self.flush(src)
+                yield factor
+            else:
+                pending.append(factor)
+
+    def _fit_factor(self, target: Obj, factor: Mor) -> Mor:
+        # This gets called when `target` != `factor.target`
+        # TODO: Support coproj for Coproduct
+        # Make superobjects coincide
+        if not isinstance(target, Equalizer):
+            return factor.proj(target)
+
+        # Restrict and lift
+        return self.lift(
+            factor.proj(target.sup),
+            target,
+        ).incl(target)
+
+    def fit_factor(self, target: Obj, factor: CartMor) -> Mor:
+        if isinstance(factor, Mor):
+            return self._fit_factor(target, factor)
+
+        if not isinstance(target, Product):
+            raise ValueError('Target must be product')
+
+        return self.pairing(factor, target)
+
+    def _compose(self, c: Composable):
+        for factor in c:
+            res = factor
+            break
+        else:
+            assert False
+
+        if isinstance(res, tuple):
+            res = self.pairing(res)
+
+        for factor in c:
+            res = category.compose((
+                res,
+                self.fit_factor(res.source, factor)
+            ))
+
+        return res
+
+
+    def _tuple_target(self, factor: tuple[LabeledMor, ...]):
+        # This is used when there is no target for passing to `variadic.pairing`.
+        res = self.product(
+            m.target
+            if isinstance(m, Mor)
+            else (m[0], m[1].target)
+            for m in factor
+        )
+        return res
+
+    def pairing(
+        self, components: Iterable[LabeledMor],
+        target: Product | None = None,
+    ) -> Pairing:
+        raise TypeError("Pairing not supported")
+
+    def product(self, components: Iterable[tuple[str, Obj] | Obj]) -> Product:
+        # See limit. This can be called outside the ctx of composition.
+        raise TypeError("Product not supported")
+
+    def lift(
+        self, mor: Mor,
+        target: Equalizer,
+    ) -> Lift:
+        raise TypeError("Lift not supported")
+
+    def compose(self) -> Transform:
+        factors = self.composable()
+        if self.pending:
+            def comp(src: Obj):
+                return self._compose(chain(
+                    factors,
+                    self.flush(src),
+                ))
+
+            return comp
+
+        return self._compose(factors)
+
+# def compose(
+#     logic: Logic,
+#     target: Obj,
+#     c: Composable,
+# ) -> Mor:
+#     # Variadic normalized composition
+#     # There has to be a "straighten" method which makes mors match.
+#     # TODO: Remove target arg and call to identity?
+#     res = pcategory.identity(target)
+#     for factor in c:
+#         # We compose left-associatively since it is the `factors` on the left
+#         # that gets reused.
+#         res = category.compose((res, logic.fit_factor(res.source, factor)))
+#         # if proofs is None:
+#         #     res = category.compose((res, factor))
+#         # else:
+#         #     res = restricting_compose((res, factor), proofs)
+
+#     return res
 
 # def restricting_compose(factors: tuple[Mor, Mor], proofs: Verifier[object]) -> Mor:
 #     try:
@@ -63,106 +195,93 @@ def compose(
 #     return mor
 
 # TODO: Just include this in a TComposer class?
-def tcompose(
-    c: Iterable[CartTransform | Obj],
-    fit: Callable[[Obj, CartMor], Mor],
-    terminal_mor: Callable[[Obj], Mor],
-    terminal: Callable[[], Obj],
-    bproduct: Callable[[Obj, Obj, str], Product],
-) -> Transform:
-    adapter = _TComposer((
-        pcategory.identity(x) if isinstance(x, Obj) else x
-        for x in c
-    ), terminal_mor, terminal, bproduct)
-    f0, factors = it_with_first(adapter.composable())
+# def full_compose(
+#     logic: Logic,
+#     c: Iterable[CartTransform | Obj],
+# ) -> Transform:
+#     adapter = _TComposer(logic, (
+#         pcategory.identity(x) if isinstance(x, Obj) else x
+#         for x in c
+#     ))
+#     f0, factors = it_with_first(adapter.composable())
 
-    if f0 is None:
-        def comp_only_pending(src: Obj):
-            x0, f = it_with_first(adapter.flush(src))
-            if x0 is None:
-                raise ValueError("Empty factors")
+#     if f0 is None:
+#         def comp_only_pending(src: Obj):
+#             x0, f = it_with_first(adapter.flush(src))
+#             if x0 is None:
+#                 raise ValueError("Empty factors")
 
-            if isinstance(x0, tuple):
-                t = _tuple_target(x0)
-            else:
-                t = x0.target
+#             if isinstance(x0, tuple):
+#                 t = _tuple_target(logic, x0)
+#             else:
+#                 t = x0.target
 
-            return compose(t, f, fit)
+#             return compose(logic, t, f)
 
-        return comp_only_pending
+#         return comp_only_pending
 
-    if isinstance(f0, tuple):
-        tgt = _tuple_target(f0)
-    else:
-        tgt = f0.target
+#     if isinstance(f0, tuple):
+#         tgt = _tuple_target(logic, f0)
+#     else:
+#         tgt = f0.target
 
-    comp = compose(tgt, factors, fit) # This consumes the factors iterator.
-    if adapter.pending:
-        def comp_with_pending(src: Obj):
-            f = adapter.flush(src)
-            return compose(comp.target, chain((comp,), f), fit)
+#     comp = compose(logic, tgt, factors) # This consumes the factors iterator.
+#     if adapter.pending:
+#         def comp_with_pending(src: Obj):
+#             f = adapter.flush(src)
+#             return compose(logic, comp.target, chain((comp,), f))
 
-        return comp_with_pending
+#         return comp_with_pending
 
-    return comp
+#     return comp
 
-class _TComposer:
-    __slots__ = ('pending', 'factors', 'terminal_mor', 'terminal', 'bproduct')
-    pending: list[Transform | tuple[LabeledTransform, ...]]
-    factors: Iterable[CartTransform]
-    terminal_mor: Callable[[Obj], Mor]
-    terminal: Callable[[], Obj]
-    bproduct: Callable[[Obj, Obj, str], Product]
+# class _TComposer:
+#     __slots__ = ('pending', 'factors', 'logic')
+#     pending: list[Transform | tuple[LabeledTransform, ...]]
+#     factors: Iterable[CartTransform]
+#     logic: Logic
 
-    def __init__(
-        self, factors: Iterable[CartTransform],
-        terminal_mor: Callable[[Obj], Mor],
-        terminal: Callable[[], Obj],
-        bproduct: Callable[[Obj, Obj, str], Product]):
-        self.pending = []
-        self.factors = iter(factors)
-        self.terminal_mor = terminal_mor
-        self.terminal = terminal
-        self.bproduct = bproduct
+#     def __init__(self, logic: Logic, factors: Iterable[CartTransform]):
+#         self.logic = logic
+#         self.pending = []
+#         self.factors = iter(factors)
 
-    def flush(self, source: Obj):
-        res: list[CartMor] = []
-        for factor in reversed(self.pending):
-            if isinstance(factor, (Mor, Callable, str, int)):
-                mor = resolve(factor, source)
-                source = mor.target
-            elif factor == ():
-                mor = self.terminal_mor(source)
-                source = mor.target
-            else:
-                mor = tuple(
-                    _resolve_labeled(f, source)
-                    for f in factor
-                )
-                source = _tuple_target(
-                    mor, self.terminal, self.bproduct,
-                )
+#     def flush(self, source: Obj):
+#         res: list[CartMor] = []
+#         for factor in reversed(self.pending):
+#             if isinstance(factor, (Mor, Callable, str, int)):
+#                 mor = resolve(factor, source)
+#                 source = mor.target
+#             elif factor == ():
+#                 mor = self.logic.terminal_mor(source)
+#                 source = mor.target
+#             else:
+#                 mor = tuple(
+#                     _resolve_labeled(f, source)
+#                     for f in factor
+#                 )
+#                 source = _tuple_target(self.logic, mor)
 
-            res.append(mor)
+#             res.append(mor)
 
-        del self.pending[:]
-        return reversed(res)
+#         del self.pending[:]
+#         return reversed(res)
 
-    def composable(self) -> Iterator[CartMor]:
-        pending = self.pending
-        for factor in self.factors:
-            if factor == ():
-                pending.append(factor)
-            elif _is_cart_mor(factor):
-                if isinstance(factor, tuple):
-                    src = _tuple_target(factor)
-                else:
-                    src = factor.target
+#     def composable(self) -> Iterator[CartMor]:
+#         pending = self.pending
+#         for factor in self.factors:
+#             if factor == ():
+#                 pending.append(factor)
+#             elif _is_cart_mor(factor):
+#                 if isinstance(factor, tuple):
+#                     src = _tuple_target(self.logic, factor)
+#                 else:
+#                     src = factor.target
 
-                yield from self.flush(src)
-                yield factor
-            else:
-                pending.append(factor)
+#                 yield from self.flush(src)
+#                 yield factor
+#             else:
+#                 pending.append(factor)
 
 def _is_cart_mor(
     f: CartTransform,
@@ -179,20 +298,6 @@ def _is_cart_mor(
             and isinstance(x[1], Mor)
         ) for x in f
     )
-
-def _tuple_target(
-        factor: tuple[LabeledMor, ...],
-        terminal: Callable[[], Obj],
-        bproduct: Callable[[Obj, Obj, str], Product]
-    ):
-    # This is used when there is no target for passing to `variadic.pairing`.
-    res = product((
-        m.target
-        if isinstance(m, Mor)
-        else (m[0], m[1].target)
-        for m in factor
-    ), terminal, bproduct)
-    return res
 
 def _resolve_labeled(t: LabeledTransform, source: Obj):
     if isinstance(t, (Mor, Callable, str, int)):

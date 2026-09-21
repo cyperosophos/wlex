@@ -36,49 +36,16 @@ def _fix_eq_signature(left: Transform | Obj, right: Transform | Obj):
 
     return left, right
 
-class Logic:
-    __slots__ = ('null_param',)
-    null_param: cart.NullParam
-
-    def __init__(self):
-        self.null_param = cart.NullParam()
-        #self.null_coparam = NullCoparam() # Place this in a subclass
-
-    def terminal_mor(self, source: Obj) -> Mor:
-        return terminal_mor(cart.NullSpan(source, self.null_param))
-
-    def terminal(self):
-        return terminal(self.null_param)
-
-    def product(self, x: Obj, y: Obj, label: str):
-        if isinstance(x, cart.Product):
-            if label in x.labels:
-                raise ValueError('Repeated label')
-
-        if isinstance(x, lex.Equalizer) or isinstance(y, lex.Equalizer):
-            raise ValueError("Equalizer objects are not allowed as param")
-
-        return product(cart.Param(x, y, label))
-
-
-
 class Context:
-    __slots__ = ('refs', 'proofs', 'null_param')
+    __slots__ = ('refs', '_proofs', 'proofs', logic)
     refs: dict[str, Obj | Mor]
-    proofs: Verifier[object]
-    null_param: cart.NullParam
-
-    class Param(cart.Param):
-        def __init__(self, x: Obj, y: Obj, label: str):
-            if isinstance(x, lex.Equalizer) or isinstance(y, lex.Equalizer):
-                raise ValueError("Equalizer objects are not allowed as param")
-
-            super().__init__(x, y, label)
+    _proofs: set[Eq]
+    proofs: Verifier[Mor]
 
     def __init__(self):
         self.refs = {}
-        self.proofs = Verifier(set())
-        self.null_param = cart.NullParam()
+        self._proofs = set()
+        self.proofs = Verifier(self._proofs)
 
     def compose(self, *factors: CartTransform | Obj):
         # Straightening has to work with extensivity in the same way,
@@ -103,69 +70,69 @@ class Context:
     #     j = self.fit_mor_factor(mor.source, i)
     #     return compose((mor, j))
 
-    def fit_tuple_factor(self, target: Obj, factor: tuple[LabeledMor, ...]) -> Mor:
-        if not isinstance(target, cart.Product):
-            raise ValueError('Target must be product')
+    # def fit_tuple_factor(self, target: Obj, factor: tuple[LabeledMor, ...]) -> Mor:
+    #     if not isinstance(target, cart.Product):
+    #         raise ValueError('Target must be product')
 
-        return pairing(factor, target, self.fit_mor_factor, equalizer)
+    #     return pairing(factor, target, self.fit_mor_factor, equalizer)
 
-    def fit_mor_factor(self, target: Obj, factor: Mor) -> Mor:
-        # This gets called when `target` != `factor.target`
-        # TODO: Support coproj for Coproduct
-        # Make superobjects coincide
-        if not isinstance(target, lex.Equalizer):
-            return factor.proj(target)
+    # def fit_mor_factor(self, target: Obj, factor: Mor) -> Mor:
+    #     # This gets called when `target` != `factor.target`
+    #     # TODO: Support coproj for Coproduct
+    #     # Make superobjects coincide
+    #     if not isinstance(target, lex.Equalizer):
+    #         return factor.proj(target)
 
-        # Restrict and lift
-        return lift(
-            factor.proj(target.sup),
-            target, self.proofs,
-        ).incl(target)
+    #     # Restrict and lift
+    #     return lift(
+    #         factor.proj(target.sup),
+    #         target, self.proofs,
+    #     ).incl(target)
 
-        # Cases (Obj, Equalizer, Product, EP)
-        # Obj -> Equalizer: restrict, lift; same superobject.
-        # Equalizer -> Obj: incl; same superobject.
-        # Equalizer -> Equalizer: restrict, lift, incl; same superobject.
-        # Obj -> Product: isoproj; object is single component.
-        # Product -> Obj: proj (explicit unless object appears only once); object is component.
-        # Product -> Product: proj; shrinking components.
-        # EP -> EP: same superobject, shrinking components (which first??).
-        # Obj -> Terminal.
+    #     # Cases (Obj, Equalizer, Product, EP)
+    #     # Obj -> Equalizer: restrict, lift; same superobject.
+    #     # Equalizer -> Obj: incl; same superobject.
+    #     # Equalizer -> Equalizer: restrict, lift, incl; same superobject.
+    #     # Obj -> Product: isoproj; object is single component.
+    #     # Product -> Obj: proj (explicit unless object appears only once); object is component.
+    #     # Product -> Product: proj; shrinking components.
+    #     # EP -> EP: same superobject, shrinking components (which first??).
+    #     # Obj -> Terminal.
 
-        # TODO: !!! This should be called only after not being able to match the target!
-        # if isinstance(target, lex.Equalizer):
-        #     # This is needed even for fitting "obvious" isomorphic equalizers.
-        #     # TODO: What if product conversion is needed?
-        #     factor = lift(factor, target, self.proofs)
-        # elif isinstance(target, cart.Product):
-        #     # Postcompose with a pairing.
-        #     # TODO: Check that all of this works when one target is an
-        #     # equalizer of a product and the other a product of equalizers.
-        #     # It seems a product of equalizers should be converted to the equalizer
-        #     # of a product. This is analogous to expanding using the distributive law.
-        #     # Then the product in `factor.target` gets converted to the product in `target`.
-        #     pass
+    #     # TODO: !!! This should be called only after not being able to match the target!
+    #     # if isinstance(target, lex.Equalizer):
+    #     #     # This is needed even for fitting "obvious" isomorphic equalizers.
+    #     #     # TODO: What if product conversion is needed?
+    #     #     factor = lift(factor, target, self.proofs)
+    #     # elif isinstance(target, cart.Product):
+    #     #     # Postcompose with a pairing.
+    #     #     # TODO: Check that all of this works when one target is an
+    #     #     # equalizer of a product and the other a product of equalizers.
+    #     #     # It seems a product of equalizers should be converted to the equalizer
+    #     #     # of a product. This is analogous to expanding using the distributive law.
+    #     #     # Then the product in `factor.target` gets converted to the product in `target`.
+    #     #     pass
 
-        # In the case that there are no requirements for lifting
-        # (target is not an Equalizer), we don't know that factor.target
-        # is target. If `factor.target` already satisfies all requirements,
-        # then `factor.target` is included in `target` (in particular superobjects
-        # coincide.) If there are requirements, then when checking the
-        # parallels of the fork we indirectly make sure that factor.target
-        # is a subobject of target (or rather can be turned into a subobject
-        # by restricting factor.source).
-        # This actually a morphism with target `target`.
-        # It is more simplified to only lift the inclusion as opposed
-        # to the composition.
-        # Notice that factor.target can only be isomorphic to target,
-        # so a lift of the inclusion is always needed.
-        #return factor.incl(target)
+    #     # In the case that there are no requirements for lifting
+    #     # (target is not an Equalizer), we don't know that factor.target
+    #     # is target. If `factor.target` already satisfies all requirements,
+    #     # then `factor.target` is included in `target` (in particular superobjects
+    #     # coincide.) If there are requirements, then when checking the
+    #     # parallels of the fork we indirectly make sure that factor.target
+    #     # is a subobject of target (or rather can be turned into a subobject
+    #     # by restricting factor.source).
+    #     # This actually a morphism with target `target`.
+    #     # It is more simplified to only lift the inclusion as opposed
+    #     # to the composition.
+    #     # Notice that factor.target can only be isomorphic to target,
+    #     # so a lift of the inclusion is always needed.
+    #     #return factor.incl(target)
 
-    def fit_factor(self, target: Obj, factor: CartMor) -> Mor:
-        if isinstance(factor, Mor):
-            return self.fit_mor_factor(target, factor)
+    # def fit_factor(self, target: Obj, factor: CartMor) -> Mor:
+    #     if isinstance(factor, Mor):
+    #         return self.fit_mor_factor(target, factor)
 
-        return self.fit_tuple_factor(target, factor)
+    #     return self.fit_tuple_factor(target, factor)
 
     def obj(self, name: str, cell: Obj | None = None):
         # Builtin cells (including equalities) come from the theory.
@@ -242,10 +209,11 @@ class Context:
         t = cell.t
 
         # Transitivity and symmetry
-        if Eq(s, left) in proofs and Eq(t, right) in proofs:
-            return
-
-        if Eq(t, left) in proofs and Eq(s, right) in proofs:
+        if (
+            (Eq(s, left) in proofs and Eq(t, right) in proofs)
+            or (Eq(t, left) in proofs and Eq(s, right) in proofs)
+        ):
+            self._proofs.add(cell)
             return
 
         # TODO: Check old context code to see how for example an equality of pairings

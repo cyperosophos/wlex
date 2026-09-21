@@ -93,7 +93,7 @@ class TerminalMor(Mor):
     #     assert isinstance(t, Terminal)
     #     return t.par
 
-def _all_t[T](x: list[T | None]) -> TypeGuard[list[T]]:
+def _all_t[S](x: list[S | None]) -> TypeGuard[list[S]]:
     return all(m is not None for m in x)
 
 class Param:

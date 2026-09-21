@@ -31,6 +31,10 @@ class Obj(metaclass=ABCMeta):
     __slots__ = ('name',)
     name: str
 
+    @property
+    def univ(self):
+        return self
+
     @abstractmethod
     def accepts(self, x: object) -> bool:
         """`self` accepts `x` as element."""
@@ -50,12 +54,6 @@ class Obj(metaclass=ABCMeta):
 
     # def param(self):
     #     return Param((self,))
-
-    def pull(self, source: 'Obj', idx: int):
-        if self == source.component(idx):
-            return source
-
-        raise ValueError("Wrong source")
 
     def is_subobject(self, obj: 'Obj'):
         return self == obj
@@ -116,13 +114,13 @@ class Mor(metaclass=ABCMeta):
 
     #     raise ValueError("Can't lift")
 
-    def incl(self, target: Obj):
+    def incl(self, target: Obj | None = None):
         return Composition.strict(
             self.target.incl(target),
             self,
         )
 
-    def proj(self, target: Obj):
+    def proj(self, target: Obj | int):
         return Composition.strict(
             self.target.proj(target),
             self,
@@ -159,33 +157,20 @@ class Mor(metaclass=ABCMeta):
 
 class Composition(Mor):
     """Models the result of `category.compose`"""
-    __slots__ = 'factors', 'length'
+    __slots__ = 'factors', 'length', 'f', 'g'
     factors: list[Mor]
     length: int
+    f: Mor
+    g: Mor
 
-    # def extend(self):
-    #     factors = self.factors
-    #     if not factors:
-    #         return self
+    def extend(self):
+        f = self.f
+        g = self.g
+        ext_g = g.extend()
+        if ext_g is g:
+            return self
 
-    #     last = factors[-1]
-    #     ext = last.extend()
-    #     if ext is last:
-    #         return self
-
-    #     res = Composition(
-    #         chain(
-    #             islice(factors, len(factors) - 1),
-    #             (ext,),
-    #         ),
-    #         _allow_single_factor=True,
-    #     )
-    #     res.name = self.name
-
-    #     if len(res.factors) == 1:
-    #         return res.factors[0]
-
-    #     return res
+        return Composition.strict(f, ext_g)
 
     @classmethod
     def _first_factors(cls, factor: Mor) -> list[Mor]:
@@ -223,6 +208,8 @@ class Composition(Mor):
         target = ff[0].target
         source = ff[-1].source
         self.factors = ff
+        self.f = f
+        self.g = g
         super().__init__(source, target)
 
     @classmethod
@@ -251,6 +238,7 @@ class Composition(Mor):
         )
 
     def __hash__(self):
+        # TODO: Check that the length pattern is being used everywhere where it's needed.
         return hash((self.source, *zip(self.factors, range(self.length))))
 
 def eq_with_length[T](l1: list[T], len1: int, l2: list[T], len2: int):

@@ -45,6 +45,7 @@ def equalizer(obj: Obj, requirements: Iterable[tuple[Mor, Mor]]) -> Equalizer:
     # a source of a requirement in the list must precede the requirement in the list.
     res = obj
     for req in _complete(obj, requirements):
+        # TODO: Skip tautological requirements using Verifier[Mor]
         par = Parallel(res, (req,))
         res = lex.equalizer(par)
         res.frozen = False

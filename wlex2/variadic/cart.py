@@ -4,19 +4,20 @@ from itertools import chain
 from ..model.category import Obj, Mor
 from ..model.lex import Equalizer
 from ..proven import cart, ValidationError
-from ..proven import lex
+#from ..proven import lex
 from ..trusted import cart as pcart
 from ..model.cart import Pairing, Product, Span as ConcreteSpan
 from . import it_with_first
+from ..logos import Logic
 
 Span = pcart.Span
 
+# TODO: Remove this! since it's now in Composer
 def product(
+    logic: Logic,
     components: Iterable[tuple[str, Obj] | Obj],
-    terminal: Callable[[], Obj],
-    bproduct: Callable[[Obj, Obj, str], Product],
 ) -> Obj:
-    res = terminal()
+    res = logic.terminal()
     sub: list[tuple[int, Equalizer]] = []
     for i, component in enumerate(components):
         if isinstance(component, tuple):
@@ -31,7 +32,7 @@ def product(
         #res = pcart.product(Param(res, component, label))
         # TODO: This should rely on a param subclass which doesn't
         # allow equalizer components.
-        res = bproduct(res, component, label)
+        res = logic.product(res, component, label)
 
     for i, component in sub:
         # This is a consequence of the Parallel class provided by context.

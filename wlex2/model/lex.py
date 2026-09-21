@@ -32,15 +32,6 @@ class Parallel:
         self.source = source
         self.equalizer = lambda: None
 
-        # Repeated requirements must not be allowed, because then the dict
-        # of requirements in the Equalizer would be inconsistent.
-        # Of course the equalizer still exist (meaning that the lifts can be constructed)
-        # just not the parallel to produce it.
-        # TODO: !!! Should this actually be in context?
-        if isinstance(source, Equalizer):
-            if (i.extend(), j.extend()) in source.requirements:
-                raise ValueError('Repeated requirement')
-
     def requirement(self):
         return (self._i.extend(), self._j.extend())
 
@@ -62,13 +53,6 @@ class Parallel:
 
     def j(self):
         return self.source.restrict(self._j)
-
-    def pull(self, source: Obj, idx: int):
-        def _precompose_proj(mor: Mor, proj: Mor):
-            return Lift.strict((
-                mor.source.pull(proj.source, idx).restrict(mor),
-                mor.source,
-            ))
 
         # TODO: !!! idx should actually be tuple[int, ...].
         # This could be a deep component.
@@ -94,7 +78,7 @@ class Parallel:
         # provide functions with checks in context that create that needed diagrams.
 
         #p = source.proj(idx)
-        source = self.source.pull(source, idx)
+        #source = self.source.pull(source, idx)
         # if isinstance(self.source, Equalizer):
         #     source = self.source.projected(source, idx)
         # elif self.source != p.target:
@@ -115,13 +99,6 @@ class Parallel:
         #         Composition((p, Inclusion(isource.projected(source, idx)))),
         #         isource,
         #     ))
-
-        p = source.proj(idx)
-        return Parallel(
-            source,
-            _precompose_proj(self._i, p),
-            _precompose_proj(self._j, p),
-        )
 
     # def projected(self, proj: Projection):
         # The parallel precomposed with restrict-lifted projection.
@@ -175,12 +152,16 @@ class Equalizer(Obj, BaseFork):
     # Second int is the idx of the component.
     length: int
 
-    def pull(self, source: Obj, idx: int):
-        # This is actually a pullback of the projection along the inclusion.
-        return Equalizer(self.par.pull(source, idx))
+    # def pull(self, source: Obj, idx: int):
+    #     # This is actually a pullback of the projection along the inclusion.
+    #     return Equalizer(self.par.pull(source, idx))
 
     # def component(self, idx: int) -> Obj:
     #     return self.sup.component(idx)
+
+    @property
+    def univ(self):
+        return self.sup
 
     def proj(self, target: Obj | int):
         # This works only with expanded products
@@ -370,7 +351,7 @@ class Equalizer(Obj, BaseFork):
         par.equalizer = weakref.ref(self)
         super().__init__()
         self.sup, requirements = self._first_requirements(par.source)
-        requirements[par.requirement()] = len(requirements)
+        requirements.setdefault(par.requirement(), len(requirements))
         self.length = len(requirements)
         self.requirements = requirements
         # It is entirely possible for the `Parallel` instance
