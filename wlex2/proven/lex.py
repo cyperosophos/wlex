@@ -1,21 +1,23 @@
 from ..equality import Verifier, Eq
+from ..model.category import Mor
 from ..model.lex import Equalizer
 from ..trusted import lex
+from .category import compose
 from . import intensionally_validated as iv, validated as v, ValidationError
 
-class ProofError(ValidationError):
-    __slots__ = ('eq',)
-    eq: Eq[lex.Mor]
+# class ProofError(ValidationError):
+#     __slots__ = ('eq',)
+#     eq: Eq[lex.Mor]
 
-    def __init__(self, eq: Eq[lex.Mor]):
-        super().__init__("Missing proof")
-        self.eq = eq
+#     def __init__(self, eq: Eq[lex.Mor]):
+#         super().__init__("Missing proof")
+#         self.eq = eq
 
 def is_parallel(par: lex.Parallel):
     # Unpacking would incur unnecessary steps.
     par.is_valid()
 
-def is_fork(f: lex.Fork, proofs: Verifier[object]):
+def is_fork(f: lex.Fork, proofs: Verifier[Mor]):
     # (?) Equalizer fork inherits equality from parallel.
     # Under the limit definition this is an arrow inheriting equality from
     # a functor. Equality of functors can only be extensional.
@@ -29,9 +31,13 @@ def is_fork(f: lex.Fork, proofs: Verifier[object]):
     # given by the initialization.
 
     # That `e` is intensionally equal to a registered equality is the same as `e` being registered up to transitivity.
-    e = f.eq()
-    if e not in proofs:
-        raise ProofError(e)
+    h = f.mor()
+    i, j = f.par.eq()
+    if (
+        compose((i, h)),
+        compose((j, h)),
+    ) not in proofs:
+        raise ValidationError("Missing proof")
 
 def is_lift(l: lex.Lift):
     # TODO: Checking that the lift here actually corresponds to a fork seems

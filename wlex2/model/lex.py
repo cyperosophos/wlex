@@ -11,16 +11,16 @@ from ..proven import ValidationError
 
 class Parallel:
     __slots__ = (
-        'source',
+        'handle',
         '_i', '_j',
         'equalizer',
     )
-    source: Obj
+    handle: Mor
     _i: Mor
     _j: Mor
     equalizer: WRef['Equalizer']
 
-    def __init__(self, source: Obj, i: Mor, j: Mor):
+    def __init__(self, handle: Mor, i: Mor, j: Mor):
         # Lifting an inclusion based on builtin subset operation
         # has the only disadvantage that it cannot rely on intensional equalities.
         # The `Parallel` class avoids having to compose with an inclusion, whose
@@ -29,14 +29,29 @@ class Parallel:
         # Extending here is correct since the common source is already determined.
         self._i = i
         self._j = j
-        self.source = source
+        self.handle = handle
         self.equalizer = lambda: None
 
-    def requirement(self):
-        return (self._i.extend(), self._j.extend())
+    @property
+    def source(self):
+        return self.handle.source
+
+    def req(self):
+        i, j = self.eq()
+        return i.extend(), j.extend()
+
+    def eq(self):
+        # Previously i(), j()
+        src = self.handle.target
+        i = src.restrict(self._i)
+        j = src.restrict(self._j)
+        return (
+            Composition.strict(i, self.handle),
+            Composition.strict(j, self.handle),
+        )
 
     def is_valid(self):
-        source = self.source
+        source = self.handle.target
         if not (
             source.is_subobject(self._i.source)
             and source.is_subobject(self._j.source)
@@ -48,11 +63,11 @@ class Parallel:
         if self._i.target != self._j.target:
             raise ValidationError('Must have equal targets')
 
-    def i(self):
-        return self.source.restrict(self._i)
+    # def i(self):
+    #     return self.source.restrict(self._i)
 
-    def j(self):
-        return self.source.restrict(self._j)
+    # def j(self):
+    #     return self.source.restrict(self._j)
 
         # TODO: !!! idx should actually be tuple[int, ...].
         # This could be a deep component.
@@ -118,12 +133,13 @@ class BaseFork(metaclass=ABCMeta):
     def mor(self) -> Mor:
         pass
 
-    def eq(self) -> Eq[Mor]:
-        h = self.mor()
-        return Eq[Mor](
-            Composition.strict(self.par.i(), h),
-            Composition.strict(self.par.j(), h),
-        )
+    # def eq(self) -> Eq[Mor]:
+    #     h = self.mor()
+    #     i, j = self.par.eq()
+    #     return Eq[Mor](
+    #         Composition.strict(i, h),
+    #         Composition.strict(j, h),
+    #     )
 
     def __eq__(self, x: object):
         return self is x or (
@@ -293,6 +309,7 @@ class Equalizer(Obj, BaseFork):
                 self.sup == obj.sup
                 and all(
                     reqs.get(req, length) < length
+                    # TODO: Define own_requirements and similar methods
                     for req, _ in zip(obj.requirements, range(obj.length))
                 )
             )
@@ -305,7 +322,7 @@ class Equalizer(Obj, BaseFork):
         # equalities are yielded. This appears to have no use, since one
         # cannot use for registering equalizer equalities given the overly
         # restrictive source.
-        i, j = self.par.requirement()
+        i, j = self.par.req()
         return Eq[Mor](
             self.restrict(i),
             self.restrict(j),
@@ -351,7 +368,7 @@ class Equalizer(Obj, BaseFork):
         par.equalizer = weakref.ref(self)
         super().__init__()
         self.sup, requirements = self._first_requirements(par.source)
-        requirements.setdefault(par.requirement(), len(requirements))
+        requirements.setdefault(par.req(), len(requirements))
         self.length = len(requirements)
         self.requirements = requirements
         # It is entirely possible for the `Parallel` instance
@@ -488,16 +505,13 @@ class Lift(Mor):
         return self.sup.ev(x)
 
     def reduce(self, mor: Mor):
-        t = self.target
-        assert isinstance(t, Equalizer)
-
-        m = t.mor().reduce(mor)
+        m = self.sup.reduce(mor)
         if m is None:
             return None
 
         # m could be an inclusion. e.g. sup is a projection and mor
         # is a pairing with an inclusion component.
-        return Lift.strict(Fork(m, t.par))
+        return Lift.strict((m, self.target))
 
     def __eq__(self, x: object):
         # Equality as morphism

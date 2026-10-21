@@ -423,19 +423,20 @@ class Pairing(Mor):
         self.components = components
         super().__init__(source, target)
 
-    def reduce(self, mor: Mor):
-        t = self.target
-        assert isinstance(t, Product)
+    # def reduce(self, mor: Mor):
+    #     # TODO: This seems wrong!
+    #     t = self.target
+    #     assert isinstance(t, Product)
 
-        q = t.q().reduce(mor)
-        if q is None:
-            return None
+    #     q = t.q().reduce(mor)
+    #     if q is None:
+    #         return None
 
-        p = t.p().reduce(mor)
-        if p is None:
-            return None
+    #     p = t.p().reduce(mor)
+    #     if p is None:
+    #         return None
 
-        return Pairing(Span(p, q, t.par))
+    #     return Pairing(Span(p, q, t.par))
 
     def __hash__(self):
         return hash(tuple(zip(self.components, range(self.length))))

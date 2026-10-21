@@ -3,14 +3,15 @@ from typing import Callable
 from functools import wraps
 
 from ..equality import Verifier
+from ..model.category import Mor
 
 def intensionally_validated[S, T](
     func: Callable[[S], T],
-    valid: Callable[[S, Verifier[object]], None],
+    valid: Callable[[S, Verifier[Mor]], None],
 ):
     """Wraps function to (intensionally) validate argument"""
     @wraps(func)
-    def wrapper(x: S, v: Verifier[object]) -> T:
+    def wrapper(x: S, v: Verifier[Mor]) -> T:
         valid(x, v)
         return func(x)
 

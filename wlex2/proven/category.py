@@ -1,4 +1,5 @@
 """Public model of `category` morphisms"""
+from ..model.category import Mor
 from ..trusted import category
 from . import validated as v, ValidationError
 
@@ -19,7 +20,7 @@ def is_composable(c: category.Composable):
 
     raise CompositionError("Invalid")
 
-def is_associativity_source(s: category._AssociativitySource):
+def is_associativity_source(s: tuple[Mor, Mor, Mor]):
     f, g, h = s
     is_composable((f, g))
     is_composable((g, h))

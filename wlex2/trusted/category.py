@@ -48,9 +48,7 @@ def eq_right_identity_law(mor: Mor):
     assert compose((mor, identity(source(mor)))) == mor
     return Eq(mor, mor)
 
-_AssociativitySource = tuple[Mor, Mor, Mor]
-
-def eq_associativity(c: _AssociativitySource):
+def eq_associativity(c: tuple[Mor, Mor, Mor]):
     f, g, h = c
     mor = compose((compose((f, g)), h))
     assert compose((f, compose((g, h)))) == mor

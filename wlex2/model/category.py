@@ -59,7 +59,10 @@ class Obj(metaclass=ABCMeta):
         return self == obj
 
     def restrict(self, mor: 'Mor'):
-        return mor
+        if mor.source == self:
+            return mor
+
+        raise InclError
 
     def verify(self, e: Eq['Mor']) -> bool:
         return False
@@ -160,6 +163,8 @@ class Composition(Mor):
     __slots__ = 'factors', 'length', 'f', 'g'
     factors: list[Mor]
     length: int
+    # This is used for (non-associative) check of equality in Verifier
+    # and for shrinking fork handles.
     f: Mor
     g: Mor
 
